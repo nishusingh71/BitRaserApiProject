@@ -1,0 +1,6 @@
+@BitRaserApiProject_HostAddress = http://localhost:5124
+
+GET {{BitRaserApiProject_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
