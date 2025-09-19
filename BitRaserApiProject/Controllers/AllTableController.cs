@@ -931,8 +931,45 @@ namespace BitRaserApiProject.Controllers
             });
         }
     }
+    [Authorize]
+    [ApiController]
+    [Route("api/[controller]")]
+    public class PdfReportController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+        public PdfReportController(ApplicationDbContext context)
+        {
+            _context = context;
+        }
 
-   
+        // GET: api/PdfReport/GenerateByEmail/{email}
+        [HttpGet("GenerateByEmail/{email}")]
+        public async Task<IActionResult> GenerateByEmail(string email)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            if (user == null)
+                return NotFound("User not found.");
+
+            var reportData = new Dictionary<string, object>
+        {
+            { "User Name", user.user_name },
+            { "User Email", user.user_email },
+            { "Phone Number", user.phone_number ?? "" }
+        };
+
+            string outputPath = Path.Combine(Path.GetTempPath(), $"UserReport_{Guid.NewGuid()}.pdf");
+            var pdfService = new PdfReportService();
+            bool success = pdfService.GeneratePdf(reportData, outputPath);
+
+            if (!success || !System.IO.File.Exists(outputPath))
+                return StatusCode(500, "PDF generation failed.");
+
+            var fileBytes = await System.IO.File.ReadAllBytesAsync(outputPath);
+            System.IO.File.Delete(outputPath);
+            return File(fileBytes, "application/pdf", "UserReport.pdf");
+        }
+    }
+
 }
 
 

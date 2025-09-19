@@ -80,17 +80,19 @@
 //app.Run();
 
 
+using System.Text;
 using BitRaserApiProject;
+//using DotNetEnv;
 //using BitRaserApiProject.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
-using System.Text;
 using DotNetEnv;
-
-var builder = WebApplication.CreateBuilder(args);
 DotNetEnv.Env.Load();
+var builder = WebApplication.CreateBuilder(args);
+
 
 //builder.Services.AddDbContext<AppDbContext>(options =>
 //    options.UseMySql(builder.Configuration.GetConnectionString("AppDbContextConnection"),
@@ -102,9 +104,15 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
 //builder.Services.AddSingleton(new DatabaseInitializer(connectionString));
 
-var jwtKey = builder.Configuration["Jwt:Key"];
-var jwtIssuer = builder.Configuration["Jwt:Issuer"];
-var jwtAudience = builder.Configuration["Jwt:Audience"];
+var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__ApplicationDbContextConnection")
+    ?? builder.Configuration.GetConnectionString("ApplicationDbContextConnection");
+
+var jwtKey = Environment.GetEnvironmentVariable("Jwt__Key")
+    ?? builder.Configuration["Jwt:Key"];
+var jwtIssuer = Environment.GetEnvironmentVariable("Jwt__Issuer")
+    ?? builder.Configuration["Jwt:Issuer"];
+var jwtAudience = Environment.GetEnvironmentVariable("Jwt__Audience")
+    ?? builder.Configuration["Jwt:Audience"];
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -183,6 +191,16 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
         options.RoutePrefix = "swagger";
     });
 }
+app.UseExceptionHandler("/error");
+
+app.Map("/error", (HttpContext http) =>
+{
+    var feature = http.Features.Get<IExceptionHandlerPathFeature>();
+    return Results.Problem(detail: feature?.Error.Message, statusCode: 500);
+});
+var port = Environment.GetEnvironmentVariable("PORT") ?? "4000";
+builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+
 
 app.UseHttpsRedirection();
 
