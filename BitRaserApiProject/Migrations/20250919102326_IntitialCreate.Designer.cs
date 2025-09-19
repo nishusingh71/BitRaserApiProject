@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BitRaserApiProject.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20250919093359_IntitialCreate")]
+    [Migration("20250919102326_IntitialCreate")]
     partial class IntitialCreate
     {
         /// <inheritdoc />
