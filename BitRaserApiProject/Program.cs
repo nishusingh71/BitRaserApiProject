@@ -89,9 +89,13 @@ using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using QuestPDF.Infrastructure;
+
 using DotNetEnv;
 DotNetEnv.Env.Load();
 var builder = WebApplication.CreateBuilder(args);
+QuestPDF.Settings.License = LicenseType.Community;
+
 
 
 //builder.Services.AddDbContext<AppDbContext>(options =>
@@ -130,6 +134,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddScoped<PdfService>();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

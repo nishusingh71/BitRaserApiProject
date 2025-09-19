@@ -2,6 +2,7 @@ using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 
+
 public class PdfService
 {
     public byte[] GenerateReport(string title, string content, string footerNote)
