@@ -11,7 +11,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BitRaserApiProject.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20250919111149_IntitialCreate")]
+    [Migration("20250919112621_IntitialCreate")]
     partial class IntitialCreate
     {
         /// <inheritdoc />
@@ -313,11 +313,6 @@ namespace BitRaserApiProject.Migrations
                     b.Property<int>("user_id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int");
-
-                    b.Property<string>("hash_password")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)");
 
                     b.Property<bool>("is_private_cloud")
                         .HasColumnType("tinyint(1)");

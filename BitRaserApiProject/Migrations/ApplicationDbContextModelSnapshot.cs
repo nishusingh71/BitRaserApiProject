@@ -311,11 +311,6 @@ namespace BitRaserApiProject.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int");
 
-                    b.Property<string>("hash_password")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("varchar(255)");
-
                     b.Property<bool>("is_private_cloud")
                         .HasColumnType("tinyint(1)");
 
