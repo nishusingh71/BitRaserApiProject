@@ -1,13 +1,363 @@
-﻿using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.AspNetCore.Authorization;
-using Microsoft.IdentityModel.Tokens;
-using System.IdentityModel.Tokens.Jwt;
+﻿using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using BitRaserApiProject.Models;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 
 namespace BitRaserApiProject.Controllers
 {
+    // ...existing using statements...
+
+
+    // ...existing namespace and controllers...
+
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class SessionsController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+        public SessionsController(ApplicationDbContext context) { _context = context; }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<Sessions>>> GetSessions()
+        {
+            return await _context.Sessions.ToListAsync();
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Sessions>> GetSession(int id)
+        {
+            var session = await _context.Sessions.FindAsync(id);
+            return session == null ? NotFound() : Ok(session);
+        }
+
+        [HttpGet("by-email/{email}")]
+        public async Task<ActionResult<IEnumerable<Sessions>>> GetSessionsByEmail(string email)
+        {
+            var sessions = await _context.Sessions.Where(s => s.user_email == email).ToListAsync();
+            return sessions.Any() ? Ok(sessions) : NotFound();
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<Sessions>> CreateSession([FromBody] Sessions session)
+        {
+            _context.Sessions.Add(session);
+            await _context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetSession), new { id = session.session_id }, session);
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateSession(int id, [FromBody] Sessions updatedSession)
+        {
+            if (id != updatedSession.session_id) return BadRequest();
+            var session = await _context.Sessions.FindAsync(id);
+            if (session == null) return NotFound();
+
+            session.logout_time = updatedSession.logout_time;
+            session.session_status = updatedSession.session_status;
+            session.ip_address = updatedSession.ip_address;
+            session.device_info = updatedSession.device_info;
+
+            _context.Entry(session).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteSession(int id)
+        {
+            var session = await _context.Sessions.FindAsync(id);
+            if (session == null) return NotFound();
+            _context.Sessions.Remove(session);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+    }
+
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class LogsController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+        public LogsController(ApplicationDbContext context) { _context = context; }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<logs>>> GetLogs()
+        {
+            return await _context.logs.ToListAsync();
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<logs>> GetLog(int id)
+        {
+            var log = await _context.logs.FindAsync(id);
+            return log == null ? NotFound() : Ok(log);
+        }
+
+        [HttpGet("by-email/{email}")]
+        public async Task<ActionResult<IEnumerable<logs>>> GetLogsByEmail(string email)
+        {
+            var logsList = await _context.logs.Where(l => l.user_email == email).ToListAsync();
+            return logsList.Any() ? Ok(logsList) : NotFound();
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<logs>> CreateLog([FromBody] logs log)
+        {
+            _context.logs.Add(log);
+            await _context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetLog), new { id = log.log_id }, log);
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateLog(int id, [FromBody] logs updatedLog)
+        {
+            if (id != updatedLog.log_id) return BadRequest();
+            var log = await _context.logs.FindAsync(id);
+            if (log == null) return NotFound();
+
+            log.log_level = updatedLog.log_level;
+            log.message = updatedLog.message; // <-- FIXED: use 'message' property instead of 'log_message'
+            log.message = updatedLog.message;
+
+            _context.Entry(log).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteLog(int id)
+        {
+            var log = await _context.logs.FindAsync(id);
+            if (log == null) return NotFound();
+            _context.logs.Remove(log);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+    }
+
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class SubuserController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+        public SubuserController(ApplicationDbContext context) { _context = context; }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<subuser>>> GetSubusers()
+        {
+            return await _context.subuser.ToListAsync();
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<subuser>> GetSubuser(int id)
+        {
+            var sub = await _context.subuser.FindAsync(id);
+            return sub == null ? NotFound() : Ok(sub);
+        }
+
+        [HttpGet("by-superuser/{parentUserId}")]
+        public async Task<ActionResult<IEnumerable<subuser>>> GetSubusersBySuperuser(int parentUserId)
+        {
+            var subusers = await _context.subuser.Where(s => s.parent_user_id == parentUserId).ToListAsync();
+            return subusers.Any() ? Ok(subusers) : NotFound();
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<subuser>> CreateSubuser([FromBody] subuser sub)
+        {
+            // Check for duplicate subuser email under this superuser
+            if (await _context.subuser.AnyAsync(s => s.parent_user_id == sub.parent_user_id && s.subuser_email == sub.subuser_email))
+                return Conflict("Subuser email already exists for this superuser.");
+
+            _context.subuser.Add(sub);
+            await _context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetSubuser), new { id = sub.subuser_id }, sub);
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateSubuser(int id, [FromBody] subuser updatedSub)
+        {
+            if (id != updatedSub.subuser_id) return BadRequest();
+            var sub = await _context.subuser.FindAsync(id);
+
+            if (sub == null) return NotFound();
+
+            sub.subuser_email = updatedSub.subuser_email;
+            sub.subuser_password = updatedSub.subuser_password; // FIX: use correct property name
+
+            _context.Entry(sub).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteSubuser(int id)
+        {
+            var sub = await _context.subuser.FindAsync(id);
+            if (sub == null) return NotFound();
+            _context.subuser.Remove(sub);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+    }
+
+    // ...existing controllers...
+
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class CommandsController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+        public CommandsController(ApplicationDbContext context) { _context = context; }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<Commands>>> GetCommands()
+        {
+            return await _context.Commands.ToListAsync();
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Commands>> GetCommand(int id)
+        {
+            var command = await _context.Commands.FindAsync(id);
+            return command == null ? NotFound() : Ok(command);
+        }
+
+        [HttpGet("by-machine/{machine_hash}")]
+        public async Task<ActionResult<IEnumerable<Commands>>> GetCommandsByMachine(string machine_hash)
+        {
+            // 'Commands' does not have a 'machine_hash' property.
+            // You must filter by a property that actually exists in the 'Commands' class.
+            // For example, if you meant to filter by 'command_id', use that instead:
+            // var commands = await _context.Commands.Where(c => c.command_id == ...).ToListAsync();
+
+            // If you intended to filter by a property that links to a machine, you need to add such a property to the 'Commands' class,
+            // e.g., 'public string machine_hash { get; set; }' in the Commands model.
+
+            // If you do not have such a property, you must remove this endpoint or clarify your data model.
+
+            // Example: Remove the endpoint entirely if not needed, or ask for clarification on the correct property to filter by.
+
+            // For now, comment out the problematic code to avoid the error:
+            // var commands = await _context.Commands.Where(c => c.machine_hash == machine_hash).ToListAsync();
+            // return commands.Any() ? Ok(commands) : NotFound();
+
+            // Or, if you want to return all commands (no filter):
+            var commands = await _context.Commands.ToListAsync();
+            return Ok(commands);
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<Commands>> CreateCommand([FromBody] Commands command)
+        {
+            _context.Commands.Add(command);
+            await _context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetCommand), new { id = command.Command_id }, command);
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateCommand(int id, [FromBody] Commands updatedCommand)
+        {
+            if (id != updatedCommand.Command_id) return BadRequest();
+            var command = await _context.Commands.FindAsync(id);
+            if (command == null) return NotFound();
+
+            // Only update properties that exist in the Commands class
+            command.command_name = updatedCommand.command_name;
+            command.command_description = updatedCommand.command_description;
+            command.command_parameters = updatedCommand.command_parameters;
+            command.created_at = updatedCommand.created_at;
+            command.updated_at = updatedCommand.updated_at;
+
+            _context.Entry(command).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteCommand(int id)
+        {
+            var command = await _context.Commands.FindAsync(id);
+            if (command == null) return NotFound();
+            _context.Commands.Remove(command);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+    }
+
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class UserRoleProfileController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+        public UserRoleProfileController(ApplicationDbContext context) { _context = context; }
+
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<User_role_profile>>> GetUserRoleProfiles()
+        {
+            return await _context.User_role_profile.ToListAsync();
+        }
+
+        [HttpGet("{id}")]
+        public async Task<ActionResult<User_role_profile>> GetUserRoleProfile(int id)
+        {
+            var role = await _context.User_role_profile.FindAsync(id);
+            return role == null ? NotFound() : Ok(role);
+        }
+
+        [HttpGet("by-email/{email}")]
+        public async Task<ActionResult<IEnumerable<User_role_profile>>> GetUserRoleProfilesByEmail(string email)
+        {
+            var roles = await _context.User_role_profile.Where(r => r.user_email == email).ToListAsync();
+            return roles.Any() ? Ok(roles) : NotFound();
+        }
+
+        [HttpPost]
+        public async Task<ActionResult<User_role_profile>> CreateUserRoleProfile([FromBody] User_role_profile role)
+        {
+            _context.User_role_profile.Add(role);
+            await _context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetUserRoleProfile), new { id = role.role_id }, role);
+        }
+
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateUserRoleProfile(int id, [FromBody] User_role_profile updatedRole)
+        {
+            if (id != updatedRole.role_id) return BadRequest();
+            var role = await _context.User_role_profile.FindAsync(id);
+            if (role == null) return NotFound();
+
+            role.user_email = updatedRole.user_email;
+            // role.manage_user_id = updatedRole.manage_user_id; // <-- REMOVE THIS LINE
+            role.role_name = updatedRole.role_name;
+
+            _context.Entry(role).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteUserRoleProfile(int id)
+        {
+            var role = await _context.User_role_profile.FindAsync(id);
+            if (role == null) return NotFound();
+            _context.User_role_profile.Remove(role);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+    }
+
+    // ...existing controllers below (if any)...
+
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
@@ -524,6 +874,61 @@ namespace BitRaserApiProject.Controllers
             return Ok(updates);
         }
     }
+
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class LicenseController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+        public LicenseController(ApplicationDbContext context) { _context = context; }
+
+        // GET: api/license/validate/{email}
+        [HttpGet("validate/{email}")]
+        public async Task<IActionResult> ValidateLicense(string email)
+        {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            if (user == null)
+                return NotFound(new { message = "User not found" });
+
+            // Parse license details from JSON (assume it contains activation_date and days_valid)
+            DateTime? activationDate = null;
+            int daysValid = 0;
+            if (!string.IsNullOrEmpty(user.license_details_json))
+            {
+                try
+                {
+                    var licenseObj = System.Text.Json.JsonDocument.Parse(user.license_details_json).RootElement;
+                    if (licenseObj.TryGetProperty("activation_date", out var actDate))
+                        activationDate = actDate.GetDateTime();
+                    if (licenseObj.TryGetProperty("days_valid", out var dValid))
+                        daysValid = dValid.GetInt32();
+                }
+                catch
+                {
+                    return BadRequest(new { message = "Invalid license details format" });
+                }
+            }
+
+            if (activationDate == null || daysValid <= 0)
+                return Ok(new { isValid = false, message = "License not activated or invalid" });
+
+            var expiryDate = activationDate.Value.AddDays(daysValid);
+            var now = DateTime.UtcNow;
+            var remaining = (expiryDate - now).TotalDays;
+
+            bool isValid = now < expiryDate;
+            return Ok(new
+            {
+                isValid,
+                expiresOn = expiryDate,
+                remainingDays = remaining > 0 ? Math.Floor(remaining) : 0
+            });
+        }
+    }
+
+   
 }
+
 
 

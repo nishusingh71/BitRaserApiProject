@@ -81,18 +81,20 @@
 
 
 using BitRaserApiProject;
-using BitRaserApiProject.Data;
+//using BitRaserApiProject.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using System.Text;
+using DotNetEnv;
 
 var builder = WebApplication.CreateBuilder(args);
+DotNetEnv.Env.Load();
 
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseMySql(builder.Configuration.GetConnectionString("AppDbContextConnection"),
-        new MySqlServerVersion(new Version(8, 0, 21))));
+//builder.Services.AddDbContext<AppDbContext>(options =>
+//    options.UseMySql(builder.Configuration.GetConnectionString("AppDbContextConnection"),
+//        new MySqlServerVersion(new Version(8, 0, 21))));
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseMySql(builder.Configuration.GetConnectionString("ApplicationDbContextConnection"),
@@ -161,6 +163,8 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 });
+
+builder.WebHost.UseUrls("http://0.0.0.0:8080");
 
 var app = builder.Build();
 

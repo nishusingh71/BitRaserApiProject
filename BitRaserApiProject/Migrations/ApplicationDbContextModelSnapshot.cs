@@ -3,24 +3,91 @@ using System;
 using BitRaserApiProject;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
 
-namespace BitRaserApiProject.Migrations.ApplicationDb
+namespace BitRaserApiProject.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20250917082923_InitialCreate")]
-    partial class InitialCreate
+    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
     {
-        /// <inheritdoc />
-        protected override void BuildTargetModel(ModelBuilder modelBuilder)
+        protected override void BuildModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
                 .HasAnnotation("ProductVersion", "8.0.11")
                 .HasAnnotation("Relational:MaxIdentifierLength", 64);
+
+            modelBuilder.Entity("BitRaserApiProject.Commands", b =>
+                {
+                    b.Property<int>("Command_id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<string>("command_description")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("varchar(1000)");
+
+                    b.Property<string>("command_name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<string>("command_parameters")
+                        .IsRequired()
+                        .HasColumnType("json");
+
+                    b.Property<DateTime>("created_at")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<DateTime?>("updated_at")
+                        .HasColumnType("datetime(6)");
+
+                    b.HasKey("Command_id");
+
+                    b.ToTable("Commands");
+                });
+
+            modelBuilder.Entity("BitRaserApiProject.Sessions", b =>
+                {
+                    b.Property<int>("session_id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<string>("device_info")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("varchar(1000)");
+
+                    b.Property<string>("ip_address")
+                        .IsRequired()
+                        .HasMaxLength(45)
+                        .HasColumnType("varchar(45)");
+
+                    b.Property<DateTime>("login_time")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime(6)")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<DateTime?>("logout_time")
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("session_status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<string>("user_email")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.HasKey("session_id");
+
+                    b.ToTable("Sessions");
+                });
 
             modelBuilder.Entity("BitRaserApiProject.Update", b =>
                 {
@@ -51,6 +118,44 @@ namespace BitRaserApiProject.Migrations.ApplicationDb
                     b.HasKey("version_id");
 
                     b.ToTable("Updates");
+                });
+
+            modelBuilder.Entity("BitRaserApiProject.User_role_profile", b =>
+                {
+                    b.Property<int>("role_id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("created_at")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime(6)")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("permissions")
+                        .IsRequired()
+                        .HasColumnType("json");
+
+                    b.Property<string>("role_description")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("varchar(1000)");
+
+                    b.Property<string>("role_name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<DateTime?>("updated_at")
+                        .ValueGeneratedOnUpdate()
+                        .HasColumnType("datetime(6)");
+
+                    b.Property<string>("user_email")
+                        .IsRequired()
+                        .HasColumnType("longtext");
+
+                    b.HasKey("role_id");
+
+                    b.ToTable("User_role_profile");
                 });
 
             modelBuilder.Entity("BitRaserApiProject.audit_reports", b =>
@@ -87,6 +192,37 @@ namespace BitRaserApiProject.Migrations.ApplicationDb
                     b.HasKey("report_id");
 
                     b.ToTable("AuditReports");
+                });
+
+            modelBuilder.Entity("BitRaserApiProject.logs", b =>
+                {
+                    b.Property<int>("log_id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<string>("log_level")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("varchar(50)");
+
+                    b.Property<DateTime>("log_timestamp")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("datetime(6)")
+                        .HasDefaultValueSql("CURRENT_TIMESTAMP");
+
+                    b.Property<string>("message")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("varchar(2000)");
+
+                    b.Property<string>("user_email")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.HasKey("log_id");
+
+                    b.ToTable("logs");
                 });
 
             modelBuilder.Entity("BitRaserApiProject.machines", b =>
@@ -138,6 +274,35 @@ namespace BitRaserApiProject.Migrations.ApplicationDb
                     b.HasKey("fingerprint_hash");
 
                     b.ToTable("Machines");
+                });
+
+            modelBuilder.Entity("BitRaserApiProject.subuser", b =>
+                {
+                    b.Property<int>("subuser_id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    b.Property<int>("parent_user_id")
+                        .HasColumnType("int");
+
+                    b.Property<string>("subuser_email")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<string>("subuser_name")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<string>("subuser_password")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.HasKey("subuser_id");
+
+                    b.ToTable("subuser");
                 });
 
             modelBuilder.Entity("BitRaserApiProject.users", b =>
