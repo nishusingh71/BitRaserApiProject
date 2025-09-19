@@ -109,39 +109,7 @@ namespace BitRaserApiProject.Migrations
                 .Annotation("MySql:CharSet", "utf8mb4");
 
             migrationBuilder.CreateTable(
-                name: "PdfGenerateRequests",
-                columns: table => new
-                {
-                    Id = table.Column<int>(nullable: false)
-                        .Annotation("SqlServer:Identity", "1, 1"),
-                    UserEmail = table.Column<string>(maxLength: 255, nullable: false),
-                    Title = table.Column<string>(maxLength: 255, nullable: true),
-                    Description = table.Column<string>(maxLength: 1000, nullable: true)
-                    // Add more columns as needed
-                },
-                constraints: table =>
-                {
-                    table.PrimaryKey("PK_PdfGenerateRequests", x => x.Id);
-                });
-
-            //migrationBuilder.CreateTable(
-            //    name: "PdfGenerateRequests",
-            //    columns: table => new
-            //    {
-            //        Id = table.Column<int>(nullable: false)
-            //            .Annotation("SqlServer:Identity", "1, 1"),
-            //        UserEmail = table.Column<string>(maxLength: 255, nullable: false),
-            //        Title = table.Column<string>(maxLength: 255, nullable: true),
-            //        Description = table.Column<string>(maxLength: 1000, nullable: true)
-            //        // Add more columns as needed
-            //    },
-            //    constraints: table =>
-            //    {
-            //        table.PrimaryKey("PK_PdfGenerateRequests", x => x.Id);
-            //    });
-
-            migrationBuilder.CreateTable(
-                        name: "Sessions",
+                name: "Sessions",
                 columns: table => new
                 {
                     session_id = table.Column<int>(type: "int", nullable: false)
@@ -238,8 +206,6 @@ namespace BitRaserApiProject.Migrations
                     user_email = table.Column<string>(type: "varchar(255)", maxLength: 255, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     user_password = table.Column<string>(type: "varchar(255)", maxLength: 255, nullable: false)
-                        .Annotation("MySql:CharSet", "utf8mb4"),
-                    hash_password = table.Column<string>(type: "varchar(255)", maxLength: 255, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     phone_number = table.Column<string>(type: "varchar(20)", maxLength: 20, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
