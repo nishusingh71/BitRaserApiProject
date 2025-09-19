@@ -675,7 +675,8 @@ namespace BitRaserApiProject.Controllers
         public async Task<ActionResult<users>> CreateUser([FromBody] users user)
         {
             // Hash the plain password before saving
-            user.hash_password = SecurityHelpers.HashPassword(user.user_password, out var salt);
+            var hashedPassword = SecurityHelpers.HashPassword(user.user_password, out var salt);
+            user.user_password = hashedPassword;
             // Optionally, store the salt if you want to verify later (add a column if needed)
 
             _context.Users.Add(user);
