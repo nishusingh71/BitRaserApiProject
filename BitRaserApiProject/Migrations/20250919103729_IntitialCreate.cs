@@ -207,6 +207,10 @@ namespace BitRaserApiProject.Migrations
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     user_password = table.Column<string>(type: "varchar(255)", maxLength: 255, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
+                    hash_password = table.Column<string>(type: "varchar(255)", maxLength: 255, nullable: false)
+                        .Annotation("MySql:CharSet", "utf8mb4"),
+                    is_private_cloud = table.Column<bool>(type: "tinyint(1)", nullable: false),
+                    private_api = table.Column<bool>(type: "tinyint(1)", nullable: false),
                     phone_number = table.Column<string>(type: "varchar(20)", maxLength: 20, nullable: false)
                         .Annotation("MySql:CharSet", "utf8mb4"),
                     payment_details_json = table.Column<string>(type: "json", nullable: false)

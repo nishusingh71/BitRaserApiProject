@@ -278,8 +278,13 @@ namespace BitRaserApiProject
         [Required, MaxLength(255)]
         public string user_password { get; set; } // Plain password
 
-        //[Required, MaxLength(255)]
-        //public string hash_password { get; set; } // Hashed password
+        [Required, MaxLength(255)]
+        public string hash_password { get; set; } // Hashed password
+
+        public bool is_private_cloud { get; set; } = false; // Private cloud flag
+        public bool private_api { get; set; } = false; // Private API access flag
+
+
 
         [MaxLength(20)]
         public string phone_number { get; set; } // User's phone number

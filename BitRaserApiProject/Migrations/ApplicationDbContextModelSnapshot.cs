@@ -311,6 +311,14 @@ namespace BitRaserApiProject.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("int");
 
+                    b.Property<string>("hash_password")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("varchar(255)");
+
+                    b.Property<bool>("is_private_cloud")
+                        .HasColumnType("tinyint(1)");
+
                     b.Property<string>("license_details_json")
                         .IsRequired()
                         .HasColumnType("json");
@@ -323,6 +331,9 @@ namespace BitRaserApiProject.Migrations
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("varchar(20)");
+
+                    b.Property<bool>("private_api")
+                        .HasColumnType("tinyint(1)");
 
                     b.Property<string>("user_email")
                         .IsRequired()
