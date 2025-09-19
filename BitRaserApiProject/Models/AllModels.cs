@@ -39,7 +39,7 @@ namespace BitRaserApiProject.Models
         public string user_name { get; set; }
         public string user_email { get; set; }
         public string user_password { get; set; } // Hashed password
-        public string user_password_encrypted { get; set; } // Encrypted password
+        //public string user_password_encrypted { get; set; } // Encrypted password
 
         // Subuser relationship: parent user id (nullable, if not a subuser)
         public int? parent_user_id { get; set; }
@@ -114,13 +114,11 @@ namespace BitRaserApiProject.Models
 
     }
 
-    public class PdfGenerateRequest
+    public class ReportRequest
     {
-        [Key]
-        public string UserEmail { get; set; }
         public string Title { get; set; }
-        public string Description { get; set; }
-        // Add more fields as needed for your PDF
+        public string Content { get; set; }
+        public string FooterNote { get; set; }
     }
 
 }

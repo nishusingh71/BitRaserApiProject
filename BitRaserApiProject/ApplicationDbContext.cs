@@ -25,6 +25,7 @@ namespace BitRaserApiProject
         public DbSet<logs> logs { get; set; }
         public DbSet<subuser> subuser { get; set; }
         //public DbSet<PdfGenerateRequest> PdfGenerateRequests { get; set; }
+        
         public static string HashLicenseKey(string licenseKey)
         {
             using var sha256 = SHA256.Create();
@@ -409,5 +410,8 @@ namespace BitRaserApiProject
                 Convert.FromBase64String(computedHash)
             );
         }
-    }
+   
+}
+
+
     

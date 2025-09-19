@@ -926,44 +926,32 @@ namespace BitRaserApiProject.Controllers
         }
     }
     [Authorize]
-    [ApiController]
     [Route("api/[controller]")]
-    public class PdfReportController : ControllerBase
+    [ApiController]
+    public class PdfController : ControllerBase
     {
-        private readonly ApplicationDbContext _context;
-        public PdfReportController(ApplicationDbContext context)
+        private readonly PdfService _pdfService;
+
+        public PdfController(PdfService pdfService)
         {
-            _context = context;
+            _pdfService = pdfService;
         }
 
-        [HttpPost("Generate")]
-        public async Task<IActionResult> Generate([FromBody] PdfGenerateRequest request)
+        [HttpPost("generate-report")]
+        public IActionResult GeneratePdf([FromBody] ReportRequest request)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.UserEmail);
-            if (user == null)
-                return NotFound("User not found.");
+            var pdfBytes = _pdfService.GenerateReport(
+                request.Title,
+                request.Content,
+                request.FooterNote
+            );
 
-            var reportData = new Dictionary<string, object>
-            {
-                { "User Name", user.user_name },
-                { "User Email", user.user_email },
-                { "Title", request.Title },
-                { "Description", request.Description }
-                // Add more fields as needed
-            };
-
-            string outputPath = Path.Combine(Path.GetTempPath(), $"UserReport_{Guid.NewGuid()}.pdf");
-            var pdfService = new PdfReportService();
-            bool success = pdfService.GeneratePdf(reportData, outputPath);
-
-            if (!success || !System.IO.File.Exists(outputPath))
-                return StatusCode(500, "PDF generation failed.");
-
-            var fileBytes = await System.IO.File.ReadAllBytesAsync(outputPath);
-            System.IO.File.Delete(outputPath);
-            return File(fileBytes, "application/pdf", "UserReport.pdf");
+            return File(pdfBytes, "application/pdf", "report.pdf");
         }
     }
+
+    
+
 
 }
 
