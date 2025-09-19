@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using BCrypt.Net;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -675,10 +676,7 @@ namespace BitRaserApiProject.Controllers
         public async Task<ActionResult<users>> CreateUser([FromBody] users user)
         {
             // Hash the plain password before saving
-            var hashedPassword = SecurityHelpers.HashPassword(user.user_password, out var salt);
-            user.user_password = hashedPassword;
-            // Optionally, store the salt if you want to verify later (add a column if needed)
-
+            user.user_password = BCrypt.Net.BCrypt.HashPassword(user.user_password);
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
             return CreatedAtAction(nameof(GetUserByEmail), new { email = user.user_email }, user);
@@ -798,16 +796,12 @@ namespace BitRaserApiProject.Controllers
 
         private async Task<bool> IsValidUserAsync(string email, string password)
         {
-            // Query the user by email
-            var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.user_email == email);
-
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
             if (user == null)
                 return false;
 
-            // WARNING: In production, you MUST store hashed passwords and verify hash here.
-            // For now, assuming passwords are stored as plain text (not recommended).
-            return user.user_password == password;
+            // Verify hashed password using BCrypt
+            return BCrypt.Net.BCrypt.Verify(password, user.user_password);
         }
 
         private string GenerateJwtToken(string username)
@@ -972,6 +966,7 @@ namespace BitRaserApiProject.Controllers
     }
 
 }
+
 
 
 
