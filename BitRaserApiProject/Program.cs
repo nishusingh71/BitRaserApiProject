@@ -164,7 +164,7 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-builder.WebHost.UseUrls("http://0.0.0.0:8080");
+builder.WebHost.UseUrls("http://0.0.0.0:4000");
 
 var app = builder.Build();
 
