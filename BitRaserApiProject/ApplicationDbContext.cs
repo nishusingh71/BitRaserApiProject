@@ -277,8 +277,8 @@ namespace BitRaserApiProject
         [Required, MaxLength(255)]
         public string user_password { get; set; } // Plain password
 
-        [Required, MaxLength(255)]
-        public string hash_password { get; set; } // Hashed password
+        //[Required, MaxLength(255)]
+        //public string hash_password { get; set; } // Hashed password
 
         [MaxLength(20)]
         public string phone_number { get; set; } // User's phone number
