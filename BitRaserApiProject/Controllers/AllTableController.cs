@@ -938,19 +938,15 @@ namespace BitRaserApiProject.Controllers
         }
 
         [HttpPost("generate-report")]
-        public IActionResult GeneratePdf([FromBody] ReportRequest request)
+        public IActionResult GenerateReport([FromBody] ReportRequest request)
         {
-            var pdfBytes = _pdfService.GenerateReport(
-                request.Title,
-                request.Content,
-                request.FooterNote
-            );
-
-            return File(pdfBytes, "application/pdf", "report.pdf");
+            var pdfBytes = _pdfService.GenerateReport(request);
+            return File(pdfBytes, "application/pdf", $"{request.ReportId}.pdf");
         }
+
     }
 
-    
+
 
 
 }

@@ -116,9 +116,26 @@ namespace BitRaserApiProject.Models
 
     public class ReportRequest
     {
-        public string Title { get; set; }
-        public string Content { get; set; }
-        public string FooterNote { get; set; }
+        // General Report Info
+        public string ReportId { get; set; }
+        public string ProcessStatus { get; set; }   // e.g. Completed, Failed, In Progress
+        public string ProcessMode { get; set; }     // e.g. Secure Erase, Quick Erase
+        public string Software { get; set; }        // e.g. D-SecureErase v1.2.3
+        public string DigitalIdentifier { get; set; } // e.g. Machine unique ID
+        public DateTime ReportDate { get; set; } = DateTime.UtcNow;
+
+        // Annexure: Erasure Log (table data)
+        public List<ErasureLog> Logs { get; set; } = new List<ErasureLog>();
     }
+
+    public class ErasureLog
+    {
+        public string Volume { get; set; }          // e.g. Disk C:
+        public string Capacity { get; set; }        // e.g. 512GB
+        public long TotalSectors { get; set; }
+        public long ErasedSectors { get; set; }
+        public string Status { get; set; }          // e.g. Success, Partial, Failed
+    }
+
 
 }
