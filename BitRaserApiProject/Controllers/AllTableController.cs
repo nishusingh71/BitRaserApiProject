@@ -674,6 +674,10 @@ namespace BitRaserApiProject.Controllers
         [HttpPost]
         public async Task<ActionResult<users>> CreateUser([FromBody] users user)
         {
+            // Hash the plain password before saving
+            user.hash_password = SecurityHelpers.HashPassword(user.user_password, out var salt);
+            // Optionally, store the salt if you want to verify later (add a column if needed)
+
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
             return CreatedAtAction(nameof(GetUserByEmail), new { email = user.user_email }, user);
@@ -929,6 +933,7 @@ namespace BitRaserApiProject.Controllers
 
    
 }
+
 
 
 
