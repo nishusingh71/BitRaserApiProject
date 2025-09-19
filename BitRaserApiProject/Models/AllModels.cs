@@ -114,5 +114,12 @@ namespace BitRaserApiProject.Models
 
     }
 
+    public class PdfGenerateRequest
+    {
+        public string UserEmail { get; set; }
+        public string Title { get; set; }
+        public string Description { get; set; }
+        // Add more fields as needed for your PDF
+    }
 
 }

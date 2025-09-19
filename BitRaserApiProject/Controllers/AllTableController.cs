@@ -942,20 +942,21 @@ namespace BitRaserApiProject.Controllers
             _context = context;
         }
 
-        // GET: api/PdfReport/GenerateByEmail/{email}
-        [HttpGet("GenerateByEmail/{email}")]
-        public async Task<IActionResult> GenerateByEmail(string email)
+        [HttpPost("Generate")]
+        public async Task<IActionResult> Generate([FromBody] PdfGenerateRequest request)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.UserEmail);
             if (user == null)
                 return NotFound("User not found.");
 
             var reportData = new Dictionary<string, object>
-        {
-            { "User Name", user.user_name },
-            { "User Email", user.user_email },
-            { "Phone Number", user.phone_number ?? "" }
-        };
+            {
+                { "User Name", user.user_name },
+                { "User Email", user.user_email },
+                { "Title", request.Title },
+                { "Description", request.Description }
+                // Add more fields as needed
+            };
 
             string outputPath = Path.Combine(Path.GetTempPath(), $"UserReport_{Guid.NewGuid()}.pdf");
             var pdfService = new PdfReportService();
