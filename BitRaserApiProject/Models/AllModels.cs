@@ -26,7 +26,7 @@ namespace BitRaserApiProject.Models
     {
         public int report_id { get; set; } // Primary Key
         public string client_email { get; set; } // Client email
-        public string user_email { get; set; }
+        //public string user_email { get; set; }
         public string report_name { get; set; } // Name of the report
         public string erasure_method { get; set; } // Erasure method used
         public DateTime report_datetime { get; set; } // Timestamp of report creation
@@ -39,7 +39,7 @@ namespace BitRaserApiProject.Models
         public string user_name { get; set; }
         public string user_email { get; set; }
         public string user_password { get; set; } // Hashed password
-        //public string user_password_encrypted { get; set; } // Encrypted password
+        public string? user_password_encrypted { get; set; } // Encrypted password
 
         // Subuser relationship: parent user id (nullable, if not a subuser)
         public int? parent_user_id { get; set; }
@@ -118,24 +118,24 @@ namespace BitRaserApiProject.Models
     {
         // General Report Info
         public string ReportId { get; set; }
-        public string ProcessStatus { get; set; }   // e.g. Completed, Failed, In Progress
-        public string ProcessMode { get; set; }     // e.g. Secure Erase, Quick Erase
-        public string Software { get; set; }        // e.g. D-SecureErase v1.2.3
-        public string DigitalIdentifier { get; set; } // e.g. Machine unique ID
-        public DateTime ReportDate { get; set; } = DateTime.UtcNow;
+        public string defualt_image { get; set; }   // e.g. Completed, Failed, In Progress
+        public string client_email { get; set; }     // e.g. Secure Erase, Quick Erase
+        public string jsonreport_details_json { get; set; }        // e.g. D-SecureErase v1.2.3
+        //public string DigitalIdentifier { get; set; } // e.g. Machine unique ID
+        //public DateTime ReportDate { get; set; } = DateTime.UtcNow;
 
-        // Annexure: Erasure Log (table data)
-        public List<ErasureLog> Logs { get; set; } = new List<ErasureLog>();
+        //// Annexure: Erasure Log (table data)
+        //public List<ErasureLog> Logs { get; set; } = new List<ErasureLog>();
     }
 
-    public class ErasureLog
-    {
-        public string Volume { get; set; }          // e.g. Disk C:
-        public string Capacity { get; set; }        // e.g. 512GB
-        public long TotalSectors { get; set; }
-        public long ErasedSectors { get; set; }
-        public string Status { get; set; }          // e.g. Success, Partial, Failed
-    }
+    //public class ErasureLog
+    //{
+    //    public string Volume { get; set; }          // e.g. Disk C:
+    //    public string Capacity { get; set; }        // e.g. 512GB
+    //    public long TotalSectors { get; set; }
+    //    public long ErasedSectors { get; set; }
+    //    public string Status { get; set; }          // e.g. Success, Partial, Failed
+    //}
 
 
 }

@@ -23,17 +23,17 @@ public class PdfService
                 {
                     // Process Status Section
                     col.Item().Text("Process Status").FontSize(16).SemiBold();
-                    col.Item().Text($"Process Status: {request.ProcessStatus}");
-                    col.Item().Text($"Process Mode: {request.ProcessMode}");
+                    //col.Item().Text($"Process Status: {request.ProcessStatus}");
+                    //col.Item().Text($"Process Mode: {request.ProcessMode}");
                     col.Item().PaddingVertical(10).LineHorizontal(1).LineColor(Colors.Grey.Lighten2);
                     col.Item().PaddingVertical(10);
 
                     // Report Info Section
                     col.Item().Text("Report Info").FontSize(16).SemiBold();
                     col.Item().Text($"Report ID: {request.ReportId}");
-                    col.Item().Text($"Report Date: {request.ReportDate:yyyy-MM-dd HH:mm:ss}");
-                    col.Item().Text($"Software: {request.Software}");
-                    col.Item().Text($"Digital Identifier: {request.DigitalIdentifier}");
+                    //col.Item().Text($"Report Date: {request.ReportDate:yyyy-MM-dd HH:mm:ss}");
+                    //col.Item().Text($"Software: {request.Software}");
+                    //col.Item().Text($"Digital Identifier: {request.DigitalIdentifier}");
                     col.Item().LineHorizontal(1).LineColor(Colors.Grey.Lighten2);
                     col.Item().PaddingVertical(10);
 
@@ -62,14 +62,14 @@ public class PdfService
                         });
 
                         // Rows
-                        foreach (var log in request.Logs)
-                        {
-                            table.Cell().Text(log.Volume);
-                            table.Cell().Text(log.Capacity);
-                            table.Cell().Text(log.TotalSectors.ToString());
-                            table.Cell().Text(log.ErasedSectors.ToString());
-                            table.Cell().Text(log.Status);
-                        }
+                        //foreach (var log in request.Logs)
+                        //{
+                        //    table.Cell().Text(log.Volume);
+                        //    table.Cell().Text(log.Capacity);
+                        //    table.Cell().Text(log.TotalSectors.ToString());
+                        //    table.Cell().Text(log.ErasedSectors.ToString());
+                        //    table.Cell().Text(log.Status);
+                        //}
                     });
                 });
 

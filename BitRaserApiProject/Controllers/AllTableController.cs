@@ -676,7 +676,13 @@ namespace BitRaserApiProject.Controllers
         public async Task<ActionResult<users>> CreateUser([FromBody] users user)
         {
             // Hash the plain password before saving
-            user.user_password = BCrypt.Net.BCrypt.HashPassword(user.user_password);
+
+            if(user==null||string.IsNullOrEmpty(user.user_password)||string.IsNullOrEmpty(user.user_email))
+                return BadRequest("User, email, and password are required.");
+            var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == user.user_email);
+            if (existingUser != null)
+                return Conflict("Email already in use.");
+            user.hash_password = BCrypt.Net.BCrypt.HashPassword(user.user_password);
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
             return CreatedAtAction(nameof(GetUserByEmail), new { email = user.user_email }, user);
@@ -801,7 +807,7 @@ namespace BitRaserApiProject.Controllers
                 return false;
 
             // Verify hashed password using BCrypt
-            return BCrypt.Net.BCrypt.Verify(password, user.user_password);
+            return BCrypt.Net.BCrypt.Verify(password, user.hash_password);
         }
 
         private string GenerateJwtToken(string username)
