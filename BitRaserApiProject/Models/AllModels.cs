@@ -102,6 +102,7 @@ namespace BitRaserApiProject.Models
         public string user_email { get; set; } // User's email
         public int manage_user_id { get; set; } // User ID who manages this role
         public string role_name { get; set; } // Role name
+        public string role_email { get; set; } // Role email
     }
     public class User_role
     {

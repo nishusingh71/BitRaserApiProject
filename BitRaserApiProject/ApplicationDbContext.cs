@@ -374,7 +374,7 @@ namespace BitRaserApiProject
         public string permissions { get; set; } // JSON or delimited string of permissions
         public DateTime created_at { get; set; } = DateTime.UtcNow; // Timestamp when role was created
         public DateTime? updated_at { get; set; } // Timestamp when role was last updated
-        public string user_email { get; internal set; }
+        public string user_email { get; internal  set; }
     }
     public class User_role
     {
