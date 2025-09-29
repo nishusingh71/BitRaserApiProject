@@ -3,6 +3,7 @@ using System;
 using BitRaserApiProject;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -10,9 +11,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace BitRaserApiProject.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250926083526_EnhancedPermissionsAndRoles")]
+    partial class EnhancedPermissionsAndRoles
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -77,49 +80,49 @@ namespace BitRaserApiProject.Migrations
                         new
                         {
                             PermissionId = 1,
-                            CreatedAt = new DateTime(2025, 9, 26, 8, 48, 37, 14, DateTimeKind.Utc).AddTicks(1979),
+                            CreatedAt = new DateTime(2025, 9, 26, 8, 35, 25, 860, DateTimeKind.Utc).AddTicks(2290),
                             Description = "Complete system access",
                             PermissionName = "FullAccess"
                         },
                         new
                         {
                             PermissionId = 2,
-                            CreatedAt = new DateTime(2025, 9, 26, 8, 48, 37, 14, DateTimeKind.Utc).AddTicks(1981),
+                            CreatedAt = new DateTime(2025, 9, 26, 8, 35, 25, 860, DateTimeKind.Utc).AddTicks(2293),
                             Description = "Manage users and subusers",
                             PermissionName = "UserManagement"
                         },
                         new
                         {
                             PermissionId = 3,
-                            CreatedAt = new DateTime(2025, 9, 26, 8, 48, 37, 14, DateTimeKind.Utc).AddTicks(1983),
+                            CreatedAt = new DateTime(2025, 9, 26, 8, 35, 25, 860, DateTimeKind.Utc).AddTicks(2295),
                             Description = "Access and manage reports",
                             PermissionName = "ReportAccess"
                         },
                         new
                         {
                             PermissionId = 4,
-                            CreatedAt = new DateTime(2025, 9, 26, 8, 48, 37, 14, DateTimeKind.Utc).AddTicks(1984),
+                            CreatedAt = new DateTime(2025, 9, 26, 8, 35, 25, 860, DateTimeKind.Utc).AddTicks(2297),
                             Description = "Manage machines",
                             PermissionName = "MachineManagement"
                         },
                         new
                         {
                             PermissionId = 5,
-                            CreatedAt = new DateTime(2025, 9, 26, 8, 48, 37, 14, DateTimeKind.Utc).AddTicks(1986),
+                            CreatedAt = new DateTime(2025, 9, 26, 8, 35, 25, 860, DateTimeKind.Utc).AddTicks(2298),
                             Description = "Read-only access",
                             PermissionName = "ViewOnly"
                         },
                         new
                         {
                             PermissionId = 6,
-                            CreatedAt = new DateTime(2025, 9, 26, 8, 48, 37, 14, DateTimeKind.Utc).AddTicks(1987),
+                            CreatedAt = new DateTime(2025, 9, 26, 8, 35, 25, 860, DateTimeKind.Utc).AddTicks(2300),
                             Description = "Manage licenses",
                             PermissionName = "LicenseManagement"
                         },
                         new
                         {
                             PermissionId = 7,
-                            CreatedAt = new DateTime(2025, 9, 26, 8, 48, 37, 14, DateTimeKind.Utc).AddTicks(1988),
+                            CreatedAt = new DateTime(2025, 9, 26, 8, 35, 25, 860, DateTimeKind.Utc).AddTicks(2302),
                             Description = "Access system logs",
                             PermissionName = "SystemLogs"
                         });
@@ -173,7 +176,7 @@ namespace BitRaserApiProject.Migrations
                         new
                         {
                             RoleId = 1,
-                            CreatedAt = new DateTime(2025, 9, 26, 8, 48, 37, 14, DateTimeKind.Utc).AddTicks(1777),
+                            CreatedAt = new DateTime(2025, 9, 26, 8, 35, 25, 860, DateTimeKind.Utc).AddTicks(1519),
                             Description = "Full system access",
                             HierarchyLevel = 1,
                             RoleName = "SuperAdmin"
@@ -181,7 +184,7 @@ namespace BitRaserApiProject.Migrations
                         new
                         {
                             RoleId = 2,
-                            CreatedAt = new DateTime(2025, 9, 26, 8, 48, 37, 14, DateTimeKind.Utc).AddTicks(1780),
+                            CreatedAt = new DateTime(2025, 9, 26, 8, 35, 25, 860, DateTimeKind.Utc).AddTicks(1524),
                             Description = "Administrative access",
                             HierarchyLevel = 2,
                             RoleName = "Admin"
@@ -189,7 +192,7 @@ namespace BitRaserApiProject.Migrations
                         new
                         {
                             RoleId = 3,
-                            CreatedAt = new DateTime(2025, 9, 26, 8, 48, 37, 14, DateTimeKind.Utc).AddTicks(1782),
+                            CreatedAt = new DateTime(2025, 9, 26, 8, 35, 25, 860, DateTimeKind.Utc).AddTicks(1527),
                             Description = "Management access",
                             HierarchyLevel = 3,
                             RoleName = "Manager"
@@ -197,7 +200,7 @@ namespace BitRaserApiProject.Migrations
                         new
                         {
                             RoleId = 4,
-                            CreatedAt = new DateTime(2025, 9, 26, 8, 48, 37, 14, DateTimeKind.Utc).AddTicks(1783),
+                            CreatedAt = new DateTime(2025, 9, 26, 8, 35, 25, 860, DateTimeKind.Utc).AddTicks(1529),
                             Description = "Support access",
                             HierarchyLevel = 4,
                             RoleName = "Support"
@@ -205,7 +208,7 @@ namespace BitRaserApiProject.Migrations
                         new
                         {
                             RoleId = 5,
-                            CreatedAt = new DateTime(2025, 9, 26, 8, 48, 37, 14, DateTimeKind.Utc).AddTicks(1785),
+                            CreatedAt = new DateTime(2025, 9, 26, 8, 35, 25, 860, DateTimeKind.Utc).AddTicks(1531),
                             Description = "Basic user access",
                             HierarchyLevel = 5,
                             RoleName = "User"

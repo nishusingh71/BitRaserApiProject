@@ -1,123 +1,99 @@
-﻿//using Microsoft.EntityFrameworkCore;
-//using BitRaserApiProject;
-//using Microsoft.OpenApi.Models;  // Import your DbContext namespace
-
-//var builder = WebApplication.CreateBuilder(args);
-
-//// Set up the MySQL connection string from appsettings.json
-//string connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-
-//// Set the MySQL version (update this if you are using a different version)
-//var serverVersion = new MySqlServerVersion(new Version(8, 0, 34)); // Use the correct MySQL version (8.0.34 in your case)
-
-//// Add MySQL DbContext with version configuration
-//builder.Services.AddDbContext<ApplicationDbContext>(options =>
-//    options.UseMySql(connectionString, serverVersion));
-
-//// Register the DatabaseInitializer service for database creation
-//builder.Services.AddSingleton(new DatabaseInitializer(connectionString));
-
-//// Add services to the container
-//builder.Services.AddControllers();
-
-//// Configure Swagger/OpenAPI
-//builder.Services.AddEndpointsApiExplorer();
-//builder.Services.AddSwaggerGen(c =>
-//{
-//    // Customize the OpenAPI metadata
-//    c.SwaggerDoc("v1", new OpenApiInfo
-//    {
-//        Title = "DhruvAPI Project",    // Set your desired title here
-//        Version = "1.0",  // Ensure this is explicitly set
-//        Description = "API for managing devices, users, licenses, and  operations", // Add a description if needed
-//        Contact = new OpenApiContact
-//        {
-//            Name = "Dhruv Rai",  // Add your name or company name
-//            Email = "Dhruv.rai@stellarinfo.com", // Add your contact email
-//            //Url = new Uri("https://your-website.com") // Add your website URL if needed
-//        },
-//        //License = new OpenApiLicense
-//        //{
-//        //    Name = "MIT",  // Specify the license name if needed
-//        //    Url = new Uri("https://opensource.org/licenses/MIT") // URL to license
-//        //}
-//    });
-
-//    // Additional Swagger settings if needed
-//});
-
-
-//var app = builder.Build();
-
-//// Ensure database initialization on startup
-//using (var scope = app.Services.CreateScope())
-//{
-//    var dbInitializer = scope.ServiceProvider.GetRequiredService<DatabaseInitializer>();
-//    dbInitializer.InitializeDatabase();
-//}
-
-//// Configure the HTTP request pipeline
-//if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
-//{
-//    app.UseSwagger();
-//    app.UseSwaggerUI(options =>
-//    {
-//        options.SwaggerEndpoint("/swagger/v1/swagger.json", "Dhruv API Project v1");
-//        options.RoutePrefix = "swagger";  // Keep it accessible under '/swagger'
-//    });
-//}
-
-//// Enable HTTPS redirection if required (Uncomment if needed)
-// app.UseHttpsRedirection();
-
-//// Configure authorization middleware (if using authentication)
-//app.UseAuthorization();
-
-//// Map controller routes
-//app.MapControllers();
-
-//// Run the application
-//app.Run();
-
-
-using System.Text;
+﻿using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using BitRaserApiProject;
-//using DotNetEnv;
-//using BitRaserApiProject.Data;
+using BitRaserApiProject.Services;
+using BitRaserApiProject.Swagger;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using QuestPDF.Infrastructure;
-
 using DotNetEnv;
-DotNetEnv.Env.Load();
+
+// Enhanced startup with structured logging
 var builder = WebApplication.CreateBuilder(args);
-QuestPDF.Settings.License = LicenseType.Community;
 
+// Configure enhanced logging
+builder.Logging.ClearProviders();
+builder.Logging.AddConsole();
+builder.Logging.AddDebug();
 
+if (builder.Environment.IsDevelopment())
+{
+    builder.Logging.SetMinimumLevel(LogLevel.Debug);
+}
+else
+{
+    builder.Logging.SetMinimumLevel(LogLevel.Information);
+}
 
-//builder.Services.AddDbContext<AppDbContext>(options =>
-//    options.UseMySql(builder.Configuration.GetConnectionString("AppDbContextConnection"),
-//        new MySqlServerVersion(new Version(8, 0, 21))));
+// Load environment variables with error handling
+try
+{
+    DotNetEnv.Env.Load();
+    Console.WriteLine("✅ Environment variables loaded successfully");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"⚠️ Could not load .env file: {ex.Message}");
+}
 
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseMySql(builder.Configuration.GetConnectionString("ApplicationDbContextConnection"),
-        new MySqlServerVersion(new Version(8, 0, 21))));
+// Configure QuestPDF license
+try
+{
+    QuestPDF.Settings.License = LicenseType.Community;
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"⚠️ QuestPDF license configuration failed: {ex.Message}");
+}
 
-//builder.Services.AddSingleton(new DatabaseInitializer(connectionString));
-
+// Get configuration values with enhanced fallbacks
 var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__ApplicationDbContextConnection")
-    ?? builder.Configuration.GetConnectionString("ApplicationDbContextConnection");
+    ?? builder.Configuration.GetConnectionString("ApplicationDbContextConnection")
+    ?? throw new InvalidOperationException("Database connection string is required");
 
 var jwtKey = Environment.GetEnvironmentVariable("Jwt__Key")
-    ?? builder.Configuration["Jwt:Key"];
-var jwtIssuer = Environment.GetEnvironmentVariable("Jwt__Issuer")
-    ?? builder.Configuration["Jwt:Issuer"];
-var jwtAudience = Environment.GetEnvironmentVariable("Jwt__Audience")
-    ?? builder.Configuration["Jwt:Audience"];
+    ?? builder.Configuration["Jwt:Key"]
+    ?? (builder.Environment.IsDevelopment() ? "YourSuperSecretKeyThatIsAtLeast32CharactersLong123456789!" : null)
+    ?? throw new InvalidOperationException("JWT Key is required");
 
+var jwtIssuer = Environment.GetEnvironmentVariable("Jwt__Issuer")
+    ?? builder.Configuration["Jwt:Issuer"]
+    ?? "BitRaserAPI";
+
+var jwtAudience = Environment.GetEnvironmentVariable("Jwt__Audience")
+    ?? builder.Configuration["Jwt:Audience"]
+    ?? "BitRaserAPIUsers";
+
+// Configure database with enhanced options
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+{
+    options.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 21)), 
+        mysqlOptions =>
+        {
+            mysqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 3,
+                maxRetryDelay: TimeSpan.FromSeconds(10),
+                errorNumbersToAdd: null);
+            
+            mysqlOptions.CommandTimeout(30);
+        });
+    
+    // Enhanced logging and performance options
+    if (builder.Environment.IsDevelopment())
+    {
+        options.EnableSensitiveDataLogging();
+        options.EnableDetailedErrors();
+        options.LogTo(Console.WriteLine, LogLevel.Information);
+    }
+    
+    // Performance optimizations
+    options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
+});
+
+// Configure JWT Authentication with enhanced security
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -129,36 +105,151 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateIssuerSigningKey = true,
             ValidIssuer = jwtIssuer,
             ValidAudience = jwtAudience,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ClockSkew = TimeSpan.Zero,
+            RequireExpirationTime = true,
+            RequireSignedTokens = true
+        };
+
+        options.Events = new JwtBearerEvents
+        {
+            OnAuthenticationFailed = context =>
+            {
+                if (builder.Environment.IsDevelopment())
+                {
+                    Console.WriteLine($"🔒 JWT Authentication failed: {context.Exception.Message}");
+                }
+                return Task.CompletedTask;
+            },
+            OnTokenValidated = context =>
+            {
+                if (builder.Environment.IsDevelopment())
+                {
+                    Console.WriteLine($"🔒 JWT Token validated for: {context.Principal?.Identity?.Name}");
+                }
+                return Task.CompletedTask;
+            },
+            OnChallenge = context =>
+            {
+                if (builder.Environment.IsDevelopment())
+                {
+                    Console.WriteLine($"🔒 JWT Challenge: {context.Error} - {context.ErrorDescription}");
+                }
+                return Task.CompletedTask;
+            }
         };
     });
 
-builder.Services.AddAuthorization();
+// Enhanced Authorization with policies
+builder.Services.AddAuthorization(options =>
+{
+    // Define custom policies for different permission levels
+    options.AddPolicy("SuperAdminOnly", policy =>
+        policy.RequireRole("SuperAdmin"));
+    
+    options.AddPolicy("AdminOrAbove", policy =>
+        policy.RequireRole("SuperAdmin", "Admin"));
+    
+    options.AddPolicy("ManagerOrAbove", policy =>
+        policy.RequireRole("SuperAdmin", "Admin", "Manager"));
+    
+    options.AddPolicy("SupportOrAbove", policy =>
+        policy.RequireRole("SuperAdmin", "Admin", "Manager", "Support"));
+
+    // Add permission-based policies
+    options.AddPolicy("CanManageUsers", policy =>
+        policy.RequireClaim("permission", "UserManagement", "FullAccess"));
+    
+    options.AddPolicy("CanViewReports", policy =>
+        policy.RequireClaim("permission", "ReportAccess", "FullAccess"));
+});
+
+// Register core services
+builder.Services.AddScoped<IDynamicPermissionService, DynamicPermissionService>();
+builder.Services.AddScoped<IRoleBasedAuthService, RoleBasedAuthService>();
+builder.Services.AddScoped<IUserDataService, UserDataService>();
+builder.Services.AddScoped<DynamicRouteService>();
+builder.Services.AddScoped<MigrationUtilityService>();
 builder.Services.AddScoped<PdfService>();
 
-builder.Services.AddControllers();
+// Add memory cache
+builder.Services.AddMemoryCache();
+
+// Configure Controllers with enhanced JSON options
+builder.Services.AddControllers()
+.AddJsonOptions(options =>
+{
+    // Enhanced JSON serialization options
+    options.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+    options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
+    options.JsonSerializerOptions.AllowTrailingCommas = true;
+    options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+    options.JsonSerializerOptions.WriteIndented = builder.Environment.IsDevelopment();
+    options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
+    
+    // Add custom converters for better serialization
+    options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
+
 builder.Services.AddEndpointsApiExplorer();
+
+// Configure enhanced Swagger with comprehensive documentation
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo
     {
-        Title = "DhruvAPI Project",
-        Version = "1.0",
-        Description = "API for managing devices, users, licenses, and operations",
+        Title = "BitRaser API Project - Enhanced",
+        Version = "2.0",
+        Description = "Enhanced API for managing devices, users, licenses, and PDF reports with advanced Role-Based Access Control",
         Contact = new OpenApiContact
         {
             Name = "Dhruv Rai",
             Email = "Dhruv.rai@stellarinfo.com",
+        },
+        License = new OpenApiLicense
+        {
+            Name = "MIT License",
+            Url = new Uri("https://opensource.org/licenses/MIT")
         }
     });
 
+    // Enhanced XML documentation
+    try
+    {
+        var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
+        var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+        if (File.Exists(xmlPath))
+        {
+            c.IncludeXmlComments(xmlPath);
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"⚠️ Could not load XML documentation: {ex.Message}");
+    }
+
+    // Enhanced schema configuration
+    c.CustomSchemaIds(type =>
+    {
+        if (type.FullName != null)
+        {
+            return type.FullName.Replace("+", ".");
+        }
+        return type.Name;
+    });
+
+    c.SupportNonNullableReferenceTypes();
+    c.OperationFilter<SwaggerDefaultValues>();
+
+    // Enhanced security definitions
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
-        Description = "Enter JWT Bearer token **_only_**. Example: `Bearer abcdef12345`",
+        Description = "JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\"",
         Name = "Authorization",
         In = ParameterLocation.Header,
         Type = SecuritySchemeType.ApiKey,
-        Scheme = "Bearer"
+        Scheme = "Bearer",
+        BearerFormat = "JWT"
     });
 
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
@@ -172,46 +263,90 @@ builder.Services.AddSwaggerGen(c =>
                     Id = "Bearer"
                 }
             },
-            new List<string>()
+            Array.Empty<string>()
         }
     });
+
+    // Add examples for better API documentation
+    c.EnableAnnotations();
 });
 
-builder.WebHost.UseUrls("http://0.0.0.0:4000");
+// Configure server URLs
+var port = Environment.GetEnvironmentVariable("PORT") ?? "4000";
+builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+Console.WriteLine($"🚀 Server configured to start on port: {port}");
 
 var app = builder.Build();
 
-using (var scope = app.Services.CreateScope())
-{
-   // var dbInitializer = scope.ServiceProvider.GetRequiredService<DatabaseInitializer>();
-    //dbInitializer.InitializeDatabase();
-}
-
+// Configure Swagger for all environments
 if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 {
     app.UseSwagger();
     app.UseSwaggerUI(options =>
     {
-        options.SwaggerEndpoint("/swagger/v1/swagger.json", "Dhruv API Project v1");
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "BitRaser API Project v2.0");
         options.RoutePrefix = "swagger";
+        options.DocumentTitle = "BitRaser API - Enhanced Documentation";
+        options.DefaultModelsExpandDepth(-1);
+        options.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
+        options.EnableTryItOutByDefault();
     });
 }
-app.UseExceptionHandler("/error");
 
-app.Map("/error", (HttpContext http) =>
+// Security headers middleware
+app.Use(async (context, next) =>
 {
-    var feature = http.Features.Get<IExceptionHandlerPathFeature>();
-    return Results.Problem(detail: feature?.Error.Message, statusCode: 500);
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["X-XSS-Protection"] = "1; mode=block";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    
+    if (!app.Environment.IsDevelopment())
+    {
+        context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+    }
+    
+    await next();
 });
-var port = Environment.GetEnvironmentVariable("PORT") ?? "4000";
-builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
-
 
 app.UseHttpsRedirection();
-
 app.UseAuthentication();
 app.UseAuthorization();
 
+// Enhanced request logging in development
+if (app.Environment.IsDevelopment())
+{
+    app.Use(async (context, next) =>
+    {
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogDebug("📡 {Method} {Path} - {Time}", 
+            context.Request.Method, 
+            context.Request.Path, 
+            DateTime.Now.ToString("HH:mm:ss"));
+        
+        await next();
+        
+        logger.LogDebug("📡 Response: {StatusCode} - {Time}", 
+            context.Response.StatusCode, 
+            DateTime.Now.ToString("HH:mm:ss"));
+    });
+}
+
 app.MapControllers();
 
-app.Run();
+// Startup completion message with enhanced information
+var appLogger = app.Services.GetRequiredService<ILogger<Program>>();
+appLogger.LogInformation("🎉 BitRaser API Project (Enhanced) started successfully!");
+appLogger.LogInformation("📖 Swagger UI available at: http://localhost:{Port}/swagger", port);
+appLogger.LogInformation("🔗 Base URL: http://localhost:{Port}", port);
+appLogger.LogInformation("🌍 Environment: {Environment}", app.Environment.EnvironmentName);
+
+try
+{
+    app.Run();
+}
+catch (Exception ex)
+{
+    appLogger.LogCritical(ex, "❌ Application terminated unexpectedly: {Message}", ex.Message);
+    throw;
+}

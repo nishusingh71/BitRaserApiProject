@@ -1,4 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using BitRaserApiProject.Models;
@@ -7,28 +7,37 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using BCrypt.Net;
+using BitRaserApiProject.Services;
 
 namespace BitRaserApiProject.Controllers
 {
-    // ...existing using statements...
-
-
-    // ...existing namespace and controllers...
-
+    /// <summary>
+    /// Sessions management controller
+    /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class SessionsController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        public SessionsController(ApplicationDbContext context) { _context = context; }
+        
+        public SessionsController(ApplicationDbContext context) 
+        { 
+            _context = context; 
+        }
 
+        /// <summary>
+        /// Get all sessions
+        /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Sessions>>> GetSessions()
         {
             return await _context.Sessions.ToListAsync();
         }
 
+        /// <summary>
+        /// Get session by ID
+        /// </summary>
         [HttpGet("{id}")]
         public async Task<ActionResult<Sessions>> GetSession(int id)
         {
@@ -36,6 +45,9 @@ namespace BitRaserApiProject.Controllers
             return session == null ? NotFound() : Ok(session);
         }
 
+        /// <summary>
+        /// Get sessions by user email
+        /// </summary>
         [HttpGet("by-email/{email}")]
         public async Task<ActionResult<IEnumerable<Sessions>>> GetSessionsByEmail(string email)
         {
@@ -43,6 +55,9 @@ namespace BitRaserApiProject.Controllers
             return sessions.Any() ? Ok(sessions) : NotFound();
         }
 
+        /// <summary>
+        /// Create a new session
+        /// </summary>
         [HttpPost]
         public async Task<ActionResult<Sessions>> CreateSession([FromBody] Sessions session)
         {
@@ -51,6 +66,9 @@ namespace BitRaserApiProject.Controllers
             return CreatedAtAction(nameof(GetSession), new { id = session.session_id }, session);
         }
 
+        /// <summary>
+        /// Update session by ID
+        /// </summary>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateSession(int id, [FromBody] Sessions updatedSession)
         {
@@ -68,6 +86,9 @@ namespace BitRaserApiProject.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Delete session by ID
+        /// </summary>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteSession(int id)
         {
@@ -79,20 +100,33 @@ namespace BitRaserApiProject.Controllers
         }
     }
 
+    /// <summary>
+    /// System logs management controller
+    /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class LogsController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        public LogsController(ApplicationDbContext context) { _context = context; }
+        
+        public LogsController(ApplicationDbContext context) 
+        { 
+            _context = context; 
+        }
 
+        /// <summary>
+        /// Get all logs
+        /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<logs>>> GetLogs()
         {
             return await _context.logs.ToListAsync();
         }
 
+        /// <summary>
+        /// Get log by ID
+        /// </summary>
         [HttpGet("{id}")]
         public async Task<ActionResult<logs>> GetLog(int id)
         {
@@ -100,6 +134,9 @@ namespace BitRaserApiProject.Controllers
             return log == null ? NotFound() : Ok(log);
         }
 
+        /// <summary>
+        /// Get logs by user email
+        /// </summary>
         [HttpGet("by-email/{email}")]
         public async Task<ActionResult<IEnumerable<logs>>> GetLogsByEmail(string email)
         {
@@ -107,6 +144,9 @@ namespace BitRaserApiProject.Controllers
             return logsList.Any() ? Ok(logsList) : NotFound();
         }
 
+        /// <summary>
+        /// Create a new log entry
+        /// </summary>
         [HttpPost]
         public async Task<ActionResult<logs>> CreateLog([FromBody] logs log)
         {
@@ -115,6 +155,9 @@ namespace BitRaserApiProject.Controllers
             return CreatedAtAction(nameof(GetLog), new { id = log.log_id }, log);
         }
 
+        /// <summary>
+        /// Update log by ID
+        /// </summary>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateLog(int id, [FromBody] logs updatedLog)
         {
@@ -123,14 +166,17 @@ namespace BitRaserApiProject.Controllers
             if (log == null) return NotFound();
 
             log.log_level = updatedLog.log_level;
-            log.message = updatedLog.message; // <-- FIXED: use 'message' property instead of 'log_message'
-            log.message = updatedLog.message;
+            log.log_message = updatedLog.log_message;
+            log.log_details_json = updatedLog.log_details_json;
 
             _context.Entry(log).State = EntityState.Modified;
             await _context.SaveChangesAsync();
             return NoContent();
         }
 
+        /// <summary>
+        /// Delete log by ID
+        /// </summary>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteLog(int id)
         {
@@ -142,20 +188,33 @@ namespace BitRaserApiProject.Controllers
         }
     }
 
+    /// <summary>
+    /// Subuser management controller
+    /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class SubuserController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        public SubuserController(ApplicationDbContext context) { _context = context; }
+        
+        public SubuserController(ApplicationDbContext context) 
+        { 
+            _context = context; 
+        }
 
+        /// <summary>
+        /// Get all subusers
+        /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<subuser>>> GetSubusers()
         {
             return await _context.subuser.ToListAsync();
         }
 
+        /// <summary>
+        /// Get subuser by ID
+        /// </summary>
         [HttpGet("{id}")]
         public async Task<ActionResult<subuser>> GetSubuser(int id)
         {
@@ -163,18 +222,24 @@ namespace BitRaserApiProject.Controllers
             return sub == null ? NotFound() : Ok(sub);
         }
 
-        [HttpGet("by-superuser/{parentUserId}")]
-        public async Task<ActionResult<IEnumerable<subuser>>> GetSubusersBySuperuser(int parentUserId)
+        /// <summary>
+        /// Get subusers by parent user email
+        /// </summary>
+        [HttpGet("by-superuser/{parentUserEmail}")]
+        public async Task<ActionResult<IEnumerable<subuser>>> GetSubusersBySuperuser(string parentUserEmail)
         {
-            var subusers = await _context.subuser.Where(s => s.parent_user_id == parentUserId).ToListAsync();
+            var subusers = await _context.subuser.Where(s => s.user_email == parentUserEmail).ToListAsync();
             return subusers.Any() ? Ok(subusers) : NotFound();
         }
 
+        /// <summary>
+        /// Create a new subuser
+        /// </summary>
         [HttpPost]
         public async Task<ActionResult<subuser>> CreateSubuser([FromBody] subuser sub)
         {
             // Check for duplicate subuser email under this superuser
-            if (await _context.subuser.AnyAsync(s => s.parent_user_id == sub.parent_user_id && s.subuser_email == sub.subuser_email))
+            if (await _context.subuser.AnyAsync(s => s.user_email == sub.user_email && s.subuser_email == sub.subuser_email))
                 return Conflict("Subuser email already exists for this superuser.");
 
             _context.subuser.Add(sub);
@@ -182,6 +247,9 @@ namespace BitRaserApiProject.Controllers
             return CreatedAtAction(nameof(GetSubuser), new { id = sub.subuser_id }, sub);
         }
 
+        /// <summary>
+        /// Update subuser by ID
+        /// </summary>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateSubuser(int id, [FromBody] subuser updatedSub)
         {
@@ -191,13 +259,16 @@ namespace BitRaserApiProject.Controllers
             if (sub == null) return NotFound();
 
             sub.subuser_email = updatedSub.subuser_email;
-            sub.subuser_password = updatedSub.subuser_password; // FIX: use correct property name
+            sub.subuser_password = updatedSub.subuser_password;
 
             _context.Entry(sub).State = EntityState.Modified;
             await _context.SaveChangesAsync();
             return NoContent();
         }
 
+        /// <summary>
+        /// Delete subuser by ID
+        /// </summary>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteSubuser(int id)
         {
@@ -209,22 +280,33 @@ namespace BitRaserApiProject.Controllers
         }
     }
 
-    // ...existing controllers...
-
+    /// <summary>
+    /// Commands management controller
+    /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class CommandsController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        public CommandsController(ApplicationDbContext context) { _context = context; }
+        
+        public CommandsController(ApplicationDbContext context) 
+        { 
+            _context = context; 
+        }
 
+        /// <summary>
+        /// Get all commands
+        /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Commands>>> GetCommands()
         {
             return await _context.Commands.ToListAsync();
         }
 
+        /// <summary>
+        /// Get command by ID
+        /// </summary>
         [HttpGet("{id}")]
         public async Task<ActionResult<Commands>> GetCommand(int id)
         {
@@ -232,30 +314,20 @@ namespace BitRaserApiProject.Controllers
             return command == null ? NotFound() : Ok(command);
         }
 
+        /// <summary>
+        /// Get commands by machine hash (if machine_hash property exists)
+        /// </summary>
         [HttpGet("by-machine/{machine_hash}")]
         public async Task<ActionResult<IEnumerable<Commands>>> GetCommandsByMachine(string machine_hash)
         {
-            // 'Commands' does not have a 'machine_hash' property.
-            // You must filter by a property that actually exists in the 'Commands' class.
-            // For example, if you meant to filter by 'command_id', use that instead:
-            // var commands = await _context.Commands.Where(c => c.command_id == ...).ToListAsync();
-
-            // If you intended to filter by a property that links to a machine, you need to add such a property to the 'Commands' class,
-            // e.g., 'public string machine_hash { get; set; }' in the Commands model.
-
-            // If you do not have such a property, you must remove this endpoint or clarify your data model.
-
-            // Example: Remove the endpoint entirely if not needed, or ask for clarification on the correct property to filter by.
-
-            // For now, comment out the problematic code to avoid the error:
-            // var commands = await _context.Commands.Where(c => c.machine_hash == machine_hash).ToListAsync();
-            // return commands.Any() ? Ok(commands) : NotFound();
-
-            // Or, if you want to return all commands (no filter):
+            // Return all commands for now - modify this when machine_hash property is added to Commands model
             var commands = await _context.Commands.ToListAsync();
             return Ok(commands);
         }
 
+        /// <summary>
+        /// Create a new command
+        /// </summary>
         [HttpPost]
         public async Task<ActionResult<Commands>> CreateCommand([FromBody] Commands command)
         {
@@ -264,6 +336,9 @@ namespace BitRaserApiProject.Controllers
             return CreatedAtAction(nameof(GetCommand), new { id = command.Command_id }, command);
         }
 
+        /// <summary>
+        /// Update command by ID
+        /// </summary>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateCommand(int id, [FromBody] Commands updatedCommand)
         {
@@ -271,18 +346,19 @@ namespace BitRaserApiProject.Controllers
             var command = await _context.Commands.FindAsync(id);
             if (command == null) return NotFound();
 
-            // Only update properties that exist in the Commands class
-            command.command_name = updatedCommand.command_name;
-            command.command_description = updatedCommand.command_description;
-            command.command_parameters = updatedCommand.command_parameters;
-            command.created_at = updatedCommand.created_at;
-            command.updated_at = updatedCommand.updated_at;
+            command.command_text = updatedCommand.command_text;
+            command.command_json = updatedCommand.command_json;
+            command.command_status = updatedCommand.command_status;
+            command.issued_at = updatedCommand.issued_at;
 
             _context.Entry(command).State = EntityState.Modified;
             await _context.SaveChangesAsync();
             return NoContent();
         }
 
+        /// <summary>
+        /// Delete command by ID
+        /// </summary>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteCommand(int id)
         {
@@ -294,20 +370,33 @@ namespace BitRaserApiProject.Controllers
         }
     }
 
+    /// <summary>
+    /// User role profile management controller
+    /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class UserRoleProfileController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        public UserRoleProfileController(ApplicationDbContext context) { _context = context; }
+        
+        public UserRoleProfileController(ApplicationDbContext context) 
+        { 
+            _context = context; 
+        }
 
+        /// <summary>
+        /// Get all user role profiles
+        /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<User_role_profile>>> GetUserRoleProfiles()
         {
             return await _context.User_role_profile.ToListAsync();
         }
 
+        /// <summary>
+        /// Get user role profile by ID
+        /// </summary>
         [HttpGet("{id}")]
         public async Task<ActionResult<User_role_profile>> GetUserRoleProfile(int id)
         {
@@ -315,6 +404,9 @@ namespace BitRaserApiProject.Controllers
             return role == null ? NotFound() : Ok(role);
         }
 
+        /// <summary>
+        /// Get user role profiles by email
+        /// </summary>
         [HttpGet("by-email/{email}")]
         public async Task<ActionResult<IEnumerable<User_role_profile>>> GetUserRoleProfilesByEmail(string email)
         {
@@ -322,6 +414,9 @@ namespace BitRaserApiProject.Controllers
             return roles.Any() ? Ok(roles) : NotFound();
         }
 
+        /// <summary>
+        /// Create a new user role profile
+        /// </summary>
         [HttpPost]
         public async Task<ActionResult<User_role_profile>> CreateUserRoleProfile([FromBody] User_role_profile role)
         {
@@ -330,6 +425,9 @@ namespace BitRaserApiProject.Controllers
             return CreatedAtAction(nameof(GetUserRoleProfile), new { id = role.role_id }, role);
         }
 
+        /// <summary>
+        /// Update user role profile by ID
+        /// </summary>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateUserRoleProfile(int id, [FromBody] User_role_profile updatedRole)
         {
@@ -338,14 +436,18 @@ namespace BitRaserApiProject.Controllers
             if (role == null) return NotFound();
 
             role.user_email = updatedRole.user_email;
-            // role.manage_user_id = updatedRole.manage_user_id; // <-- REMOVE THIS LINE
+            role.manage_user_id = updatedRole.manage_user_id;
             role.role_name = updatedRole.role_name;
+            role.role_email = updatedRole.role_email;
 
             _context.Entry(role).State = EntityState.Modified;
             await _context.SaveChangesAsync();
             return NoContent();
         }
 
+        /// <summary>
+        /// Delete user role profile by ID
+        /// </summary>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteUserRoleProfile(int id)
         {
@@ -357,8 +459,9 @@ namespace BitRaserApiProject.Controllers
         }
     }
 
-    // ...existing controllers below (if any)...
-
+    /// <summary>
+    /// Machines management controller
+    /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
@@ -371,14 +474,18 @@ namespace BitRaserApiProject.Controllers
             _context = context;
         }
 
-        // ✅ Get all machines
+        /// <summary>
+        /// Get all machines
+        /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<machines>>> GetMachines()
         {
             return await _context.Machines.ToListAsync();
         }
 
-        // ✅ Get a machine by its fingerprint hash (Primary Key)
+        /// <summary>
+        /// Get machine by fingerprint hash
+        /// </summary>
         [HttpGet("by-hash/{hash}")]
         public async Task<ActionResult<machines>> GetMachineByHash(string hash)
         {
@@ -386,8 +493,10 @@ namespace BitRaserApiProject.Controllers
             return machine == null ? NotFound() : Ok(machine);
         }
 
+        /// <summary>
+        /// Get machine by MAC address
+        /// </summary>
         [AllowAnonymous]
-        // ✅ Get a machine by MAC Address
         [HttpGet("by-mac/{mac}")]
         public async Task<ActionResult<machines>> GetMachineByMac(string mac)
         {
@@ -395,7 +504,9 @@ namespace BitRaserApiProject.Controllers
             return machine == null ? NotFound() : Ok(machine);
         }
 
-        // ✅ Get machines by user email
+        /// <summary>
+        /// Get machines by user email
+        /// </summary>
         [HttpGet("by-email/{email}")]
         public async Task<ActionResult<IEnumerable<machines>>> GetMachinesByEmail(string email)
         {
@@ -403,40 +514,45 @@ namespace BitRaserApiProject.Controllers
             return machines.Any() ? Ok(machines) : NotFound();
         }
 
-        //// ✅ Get license status by MAC Address
-        //[HttpGet("license-status/{mac}")]
-        //public async Task<IActionResult> GetLicenseStatus(string mac)
-        //{
-        //    var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
-        //    if (machine == null) return NotFound(new { message = "Machine not found" });
+        /// <summary>
+        /// Get license status by MAC Address
+        /// </summary>
+        [HttpGet("license-status/{mac}")]
+        public async Task<IActionResult> GetLicenseStatus(string mac)
+        {
+            var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
+            if (machine == null) return NotFound(new { message = "Machine not found" });
 
-        //    bool isActivated = machine.license_activated;
-        //    bool isExpired = isActivated && DateTime.UtcNow > machine.license_activation_date?.AddDays(machine.license_days_valid);
+            bool isActivated = machine.license_activated;
+            bool isExpired = isActivated && DateTime.UtcNow > machine.license_activation_date?.AddDays(machine.license_days_valid);
 
-        //    return Ok(new
-        //    {
-        //        machine.mac_address,
-        //        isActivated,
-        //        isExpired,
-        //        ActivationDate = machine.license_activation_date
-        //    });
-        //}
+            return Ok(new
+            {
+                machine.mac_address,
+                isActivated,
+                isExpired,
+                ActivationDate = machine.license_activation_date
+            });
+        }
 
-        //// ✅ Get remaining license days for an activated machine
-        //[HttpGet("remaining-days/{mac}")]
-        //public async Task<IActionResult> GetRemainingDays(string mac)
-        //{
-        //    var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
-        //    if (machine == null || !machine.license_activated)
-        //        return NotFound(new { message = "Machine not found or not activated" });
+        /// <summary>
+        /// Get remaining license days for an activated machine
+        /// </summary>
+        [HttpGet("remaining-days/{mac}")]
+        public async Task<IActionResult> GetRemainingDays(string mac)
+        {
+            var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
+            if (machine == null || !machine.license_activated)
+                return NotFound(new { message = "Machine not found or not activated" });
 
-        //    int remainingDays = Math.Max(0, (machine.license_activation_date?.AddDays(machine.license_days_valid) - DateTime.UtcNow)?.Days ?? 0);
+            int remainingDays = Math.Max(0, (machine.license_activation_date?.AddDays(machine.license_days_valid) - DateTime.UtcNow)?.Days ?? 0);
 
-        //    return Ok(new { machine.mac_address, remainingDays });
-        //}
+            return Ok(new { machine.mac_address, remainingDays });
+        }
 
-
-        // ✅ Create a machine entry using MAC, Email, CPU ID, or BIOS Serial
+        /// <summary>
+        /// Create a new machine
+        /// </summary>
         [HttpPost]
         public async Task<ActionResult<machines>> CreateMachine([FromBody] machines machine)
         {
@@ -449,7 +565,9 @@ namespace BitRaserApiProject.Controllers
             return CreatedAtAction(nameof(GetMachineByHash), new { hash = machine.fingerprint_hash }, machine);
         }
 
-        // ✅ Update a machine's details
+        /// <summary>
+        /// Update machine by hash
+        /// </summary>
         [HttpPut("{hash}")]
         public async Task<IActionResult> UpdateMachine(string hash, [FromBody] machines updatedMachine)
         {
@@ -465,7 +583,7 @@ namespace BitRaserApiProject.Controllers
             machine.bios_serial = updatedMachine.bios_serial;
             machine.os_version = updatedMachine.os_version;
             machine.user_email = updatedMachine.user_email;
-            //machine.license_activated = updatedMachine.license_activated;
+            machine.license_activated = updatedMachine.license_activated;
             machine.license_activation_date = updatedMachine.license_activation_date;
             machine.license_days_valid = updatedMachine.license_days_valid;
 
@@ -475,7 +593,9 @@ namespace BitRaserApiProject.Controllers
             return NoContent();
         }
 
-        // ✅ Delete a machine entry
+        /// <summary>
+        /// Delete machine by hash
+        /// </summary>
         [HttpDelete("{hash}")]
         public async Task<IActionResult> DeleteMachine(string hash)
         {
@@ -488,7 +608,9 @@ namespace BitRaserApiProject.Controllers
             return NoContent();
         }
 
-        // ✅ Renew a machine's license by adding additional days
+        /// <summary>
+        /// Renew machine license by MAC address
+        /// </summary>
         [HttpPatch("renew-license/{mac}")]
         public async Task<IActionResult> RenewLicense(string mac, [FromQuery] int additionalDays)
         {
@@ -506,6 +628,9 @@ namespace BitRaserApiProject.Controllers
         }
     }
 
+    /// <summary>
+    /// Audit reports management controller
+    /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
@@ -518,14 +643,18 @@ namespace BitRaserApiProject.Controllers
             _context = context;
         }
 
-        // Get all reports
+        /// <summary>
+        /// Get all audit reports
+        /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<audit_reports>>> GetAuditReports()
         {
             return await _context.AuditReports.ToListAsync();
         }
 
-        // Get single report by id
+        /// <summary>
+        /// Get audit report by ID
+        /// </summary>
         [HttpGet("{id}")]
         public async Task<ActionResult<audit_reports>> GetAuditReport(int id)
         {
@@ -533,7 +662,9 @@ namespace BitRaserApiProject.Controllers
             return report == null ? NotFound() : Ok(report);
         }
 
-        // Get all reports by client email
+        /// <summary>
+        /// Get audit reports by client email
+        /// </summary>
         [HttpGet("by-email/{email}")]
         public async Task<ActionResult<IEnumerable<audit_reports>>> GetAuditReportsByEmail(string email)
         {
@@ -541,7 +672,9 @@ namespace BitRaserApiProject.Controllers
             return reports.Any() ? Ok(reports) : NotFound();
         }
 
-        // Create a new report (full data) — anonymous allowed for flexibility
+        /// <summary>
+        /// Create a new audit report
+        /// </summary>
         [AllowAnonymous]
         [HttpPost]
         public async Task<ActionResult<audit_reports>> CreateAuditReport([FromBody] audit_reports report)
@@ -551,7 +684,9 @@ namespace BitRaserApiProject.Controllers
             return CreatedAtAction(nameof(GetAuditReport), new { id = report.report_id }, report);
         }
 
-        // Update full report data by id (except synced)
+        /// <summary>
+        /// Update audit report by ID
+        /// </summary>
         [AllowAnonymous]
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateAuditReport(int id, [FromBody] audit_reports updatedReport)
@@ -571,7 +706,9 @@ namespace BitRaserApiProject.Controllers
             return NoContent();
         }
 
-        // Delete report by id
+        /// <summary>
+        /// Delete audit report by ID
+        /// </summary>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteAuditReport(int id)
         {
@@ -583,9 +720,10 @@ namespace BitRaserApiProject.Controllers
             return NoContent();
         }
 
-        // --- New endpoints for your unique report ID flow ---
+        /// <summary>
+        /// Reserve a unique report ID
+        /// </summary>
         [AllowAnonymous]
-        // Reserve unique report ID (creates stub report with minimal data, synced = false)
         [HttpPost("reserve-id")]
         public async Task<ActionResult<int>> ReserveReportId([FromBody] string clientEmail)
         {
@@ -604,8 +742,10 @@ namespace BitRaserApiProject.Controllers
             return Ok(newReport.report_id);
         }
 
+        /// <summary>
+        /// Upload full report data after reserving ID
+        /// </summary>
         [AllowAnonymous]
-        // Upload full report data after reserving ID (except synced)
         [HttpPut("upload-report/{id}")]
         public async Task<IActionResult> UploadReportData(int id, [FromBody] audit_reports updatedReport)
         {
@@ -620,16 +760,16 @@ namespace BitRaserApiProject.Controllers
             report.erasure_method = updatedReport.erasure_method;
             report.report_details_json = updatedReport.report_details_json;
 
-            // synced flag remains unchanged here
-
             _context.Entry(report).State = EntityState.Modified;
             await _context.SaveChangesAsync();
 
             return NoContent();
         }
 
+        /// <summary>
+        /// Mark report as synced after full upload
+        /// </summary>
         [AllowAnonymous]
-        // Mark report as synced after full upload
         [HttpPatch("mark-synced/{id}")]
         public async Task<IActionResult> MarkReportSynced(int id)
         {
@@ -645,7 +785,9 @@ namespace BitRaserApiProject.Controllers
         }
     }
 
-
+    /// <summary>
+    /// Users management controller
+    /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
@@ -658,12 +800,18 @@ namespace BitRaserApiProject.Controllers
             _context = context;
         }
 
+        /// <summary>
+        /// Get all users
+        /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<users>>> GetUsers()
         {
             return await _context.Users.ToListAsync();
         }
 
+        /// <summary>
+        /// Get user by email
+        /// </summary>
         [HttpGet("{email}")]
         public async Task<ActionResult<users>> GetUserByEmail(string email)
         {
@@ -671,23 +819,29 @@ namespace BitRaserApiProject.Controllers
             return user == null ? NotFound() : Ok(user);
         }
 
+        /// <summary>
+        /// Create a new user
+        /// </summary>
         [AllowAnonymous]
         [HttpPost]
         public async Task<ActionResult<users>> CreateUser([FromBody] users user)
         {
-            // Hash the plain password before saving
-
-            if(user==null||string.IsNullOrEmpty(user.user_password)||string.IsNullOrEmpty(user.user_email))
+            if (user == null || string.IsNullOrEmpty(user.user_password) || string.IsNullOrEmpty(user.user_email))
                 return BadRequest("User, email, and password are required.");
+            
             var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == user.user_email);
             if (existingUser != null)
                 return Conflict("Email already in use.");
+            
             user.hash_password = BCrypt.Net.BCrypt.HashPassword(user.user_password);
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
             return CreatedAtAction(nameof(GetUserByEmail), new { email = user.user_email }, user);
         }
 
+        /// <summary>
+        /// Update user by email
+        /// </summary>
         [HttpPut("{email}")]
         public async Task<IActionResult> UpdateUser(string email, [FromBody] users updatedUser)
         {
@@ -704,10 +858,13 @@ namespace BitRaserApiProject.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Update user license by email
+        /// </summary>
         [HttpPatch("update-license/{email}")]
         public async Task<IActionResult> UpdateUserLicense(string email, [FromBody] string licenseJson)
         {
-            var decodedEmail = Uri.UnescapeDataString(email); // Properly decode %40 back to @
+            var decodedEmail = Uri.UnescapeDataString(email);
             var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == decodedEmail);
             if (user == null) return NotFound();
 
@@ -716,6 +873,9 @@ namespace BitRaserApiProject.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Update user payment details by email
+        /// </summary>
         [HttpPatch("update-payment/{email}")]
         public async Task<IActionResult> UpdatePaymentDetails(string email, [FromBody] string paymentJson)
         {
@@ -728,6 +888,9 @@ namespace BitRaserApiProject.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Change user password by email
+        /// </summary>
         [HttpPatch("change-password/{email}")]
         public async Task<IActionResult> ChangePassword(string email, [FromBody] string newPassword)
         {
@@ -735,11 +898,15 @@ namespace BitRaserApiProject.Controllers
             if (user == null)
                 return NotFound();
 
-            user.user_password = newPassword; // Reminder: hash passwords in production
+            user.user_password = newPassword;
+            user.hash_password = BCrypt.Net.BCrypt.HashPassword(newPassword);
             await _context.SaveChangesAsync();
             return NoContent();
         }
 
+        /// <summary>
+        /// Delete user by email
+        /// </summary>
         [HttpDelete("{email}")]
         public async Task<IActionResult> DeleteUser(string email)
         {
@@ -753,11 +920,16 @@ namespace BitRaserApiProject.Controllers
         }
     }
 
-   
+    /// <summary>
+    /// Server time utilities controller
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     public class TimeController : ControllerBase
     {
+        /// <summary>
+        /// Get current server time in UTC
+        /// </summary>
         [HttpGet("server-time")]
         public IActionResult GetServerTime()
         {
@@ -766,6 +938,9 @@ namespace BitRaserApiProject.Controllers
         }
     }
 
+    /// <summary>
+    /// Authentication controller
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     public class AuthController : ControllerBase
@@ -779,26 +954,27 @@ namespace BitRaserApiProject.Controllers
             _configuration = configuration;
         }
 
-
+        /// <summary>
+        /// Login request model
+        /// </summary>
         public class LoginRequest
         {
-            public string Email { get; set; }
-            public string Password { get; set; }
+            public string Email { get; set; } = string.Empty;
+            public string Password { get; set; } = string.Empty;
         }
 
-
+        /// <summary>
+        /// User login endpoint
+        /// </summary>
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest login)
         {
             if (!await IsValidUserAsync(login.Email, login.Password))
                 return Unauthorized(new { message = "Invalid credentials" });
 
-            // Generate JWT token here (your existing token generation code)
             var token = GenerateJwtToken(login.Email);
-
             return Ok(new { token });
         }
-
 
         private async Task<bool> IsValidUserAsync(string email, string password)
         {
@@ -816,6 +992,9 @@ namespace BitRaserApiProject.Controllers
             var secretKey = jwtSettings["Key"];
             var issuer = jwtSettings["Issuer"];
             var audience = jwtSettings["Audience"];
+
+            if (string.IsNullOrEmpty(secretKey))
+                throw new InvalidOperationException("JWT secret key is not configured");
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
             var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -838,6 +1017,9 @@ namespace BitRaserApiProject.Controllers
         }
     }
 
+    /// <summary>
+    /// Software updates controller
+    /// </summary>
     [Route("api/[controller]")]
     [ApiController]
     public class UpdatesController : ControllerBase
@@ -849,7 +1031,9 @@ namespace BitRaserApiProject.Controllers
             _context = context;
         }
 
-        // GET: api/updates/latest
+        /// <summary>
+        /// Get latest software version
+        /// </summary>
         [HttpGet("latest")]
         public async Task<ActionResult<Update>> GetLatestVersion()
         {
@@ -863,8 +1047,9 @@ namespace BitRaserApiProject.Controllers
             return Ok(latest);
         }
 
-        // GET: api/updates/check/{currentVersionId}
-        // Returns all versions with version_id > currentVersionId
+        /// <summary>
+        /// Check for updates based on current version ID
+        /// </summary>
         [HttpGet("check/{currentVersionId}")]
         public async Task<ActionResult<IEnumerable<Update>>> CheckForUpdates(int currentVersionId)
         {
@@ -874,21 +1059,30 @@ namespace BitRaserApiProject.Controllers
                 .ToListAsync();
 
             if (updates.Count == 0)
-                return NoContent(); // No updates available
+                return NoContent();
 
             return Ok(updates);
         }
     }
 
+    /// <summary>
+    /// License management controller
+    /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class LicenseController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-        public LicenseController(ApplicationDbContext context) { _context = context; }
+        
+        public LicenseController(ApplicationDbContext context) 
+        { 
+            _context = context; 
+        }
 
-        // GET: api/license/validate/{email}
+        /// <summary>
+        /// Validate user license by email
+        /// </summary>
         [HttpGet("validate/{email}")]
         public async Task<IActionResult> ValidateLicense(string email)
         {
@@ -896,9 +1090,9 @@ namespace BitRaserApiProject.Controllers
             if (user == null)
                 return NotFound(new { message = "User not found" });
 
-            // Parse license details from JSON (assume it contains activation_date and days_valid)
             DateTime? activationDate = null;
             int daysValid = 0;
+            
             if (!string.IsNullOrEmpty(user.license_details_json))
             {
                 try
@@ -931,6 +1125,10 @@ namespace BitRaserApiProject.Controllers
             });
         }
     }
+
+    /// <summary>
+    /// PDF generation controller
+    /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
@@ -943,19 +1141,20 @@ namespace BitRaserApiProject.Controllers
             _pdfService = pdfService;
         }
 
+        /// <summary>
+        /// Generate PDF report
+        /// </summary>
         [HttpPost("generate-report")]
         public IActionResult GenerateReport([FromBody] ReportRequest request)
         {
             var pdfBytes = _pdfService.GenerateReport(request);
-            return File(pdfBytes, "application/pdf", $"{request.ReportId}.pdf");
+            return File(pdfBytes, "application/pdf", $"{request.ReportData?.ReportId ?? "report"}.pdf");
         }
-
     }
-
-
-
-
 }
+
+
+
 
 
 
