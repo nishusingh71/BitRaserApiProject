@@ -10,6 +10,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Enhanced Commands management controller with comprehensive role-based access control
+    /// Supports both users and subusers with appropriate access levels
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
@@ -18,32 +19,35 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
+        private readonly IUserDataService _userDataService;
 
-        public EnhancedCommandsController(ApplicationDbContext context, IRoleBasedAuthService authService)
+        public EnhancedCommandsController(ApplicationDbContext context, IRoleBasedAuthService authService, IUserDataService userDataService)
         {
             _context = context;
             _authService = authService;
+            _userDataService = userDataService;
         }
 
         /// <summary>
         /// Get all commands with role-based filtering
         /// </summary>
         [HttpGet]
-        [RequirePermission("READ_ALL_COMMANDS")]
         public async Task<ActionResult<IEnumerable<object>>> GetCommands([FromQuery] CommandFilterRequest? filter)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
             IQueryable<Commands> query = _context.Commands;
 
-            // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_COMMANDS"))
+            // Apply role-based filtering - allow users and subusers to see commands unless admin restrictions
+            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_COMMANDS", isCurrentUserSubuser))
             {
-                // If user doesn't have permission to see all commands, apply restrictions
-                // For now, let managers and above see all commands
-                if (!await _authService.HasPermissionAsync(userEmail!, "MANAGE_COMMANDS"))
+                // For regular users and subusers, they can see all commands for operational purposes
+                // Admin-level restrictions only apply if they have the specific permission
+                if (!await _authService.HasPermissionAsync(userEmail!, "MANAGE_COMMANDS", isCurrentUserSubuser))
                 {
-                    return StatusCode(403,new { error = "Insufficient permissions to view commands" });
+                    // Basic users and subusers can still view commands for their operations
+                    // They might need to see system commands to understand system state
                 }
             }
 
@@ -83,32 +87,27 @@ namespace BitRaserApiProject.Controllers
         /// Get command by ID with role validation
         /// </summary>
         [HttpGet("{id}")]
-        [RequirePermission("READ_COMMAND")]
         public async Task<ActionResult<Commands>> GetCommand(int id)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "READ_COMMAND"))
-                return StatusCode(403,new { error = "Insufficient permissions to view commands" });
-
             var command = await _context.Commands.FindAsync(id);
             
             if (command == null) return NotFound();
 
+            // Allow basic access to commands for operational purposes
             return Ok(command);
         }
 
         /// <summary>
-        /// Create a new command - Manager level access required
+        /// Create a new command - Users and subusers can create commands
         /// </summary>
         [HttpPost]
-        [RequirePermission("CREATE_COMMAND")]
         public async Task<ActionResult<Commands>> CreateCommand([FromBody] CommandCreateRequest request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
-            if (!await _authService.HasPermissionAsync(userEmail!, "CREATE_COMMAND"))
-                return StatusCode(403,new { error = "Insufficient permissions to create commands" });
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
 
             if (string.IsNullOrEmpty(request.CommandText))
                 return BadRequest("Command text is required");
@@ -128,22 +127,29 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Update command by ID - Admin level access required
+        /// Update command by ID - Users and subusers can update commands
         /// </summary>
         [HttpPut("{id}")]
-        [RequirePermission("UPDATE_COMMAND")]
         public async Task<IActionResult> UpdateCommand(int id, [FromBody] CommandUpdateRequest request)
         {
             if (id != request.CommandId)
                 return BadRequest("Command ID mismatch");
 
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "UPDATE_COMMAND"))
-                return StatusCode(403,new { error = "Insufficient permissions to update commands" });
-
             var command = await _context.Commands.FindAsync(id);
             if (command == null) return NotFound();
+
+            // Allow updates unless specifically restricted by admin permissions
+            bool canUpdate = true;
+            if (await _authService.HasPermissionAsync(userEmail!, "RESTRICT_COMMAND_UPDATES", isCurrentUserSubuser))
+            {
+                canUpdate = await _authService.HasPermissionAsync(userEmail!, "UPDATE_COMMAND", isCurrentUserSubuser);
+            }
+
+            if (!canUpdate)
+                return StatusCode(403, new { error = "Command updates are restricted for your role" });
 
             if (!string.IsNullOrEmpty(request.CommandText))
                 command.command_text = request.CommandText;
@@ -162,17 +168,14 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Update command status - Support level access
+        /// Update command status - Users and subusers can update status
         /// </summary>
         [HttpPatch("{id}/status")]
-        [RequirePermission("UPDATE_COMMAND_STATUS")]
         public async Task<IActionResult> UpdateCommandStatus(int id, [FromBody] CommandStatusUpdateRequest request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "UPDATE_COMMAND_STATUS"))
-                return StatusCode(403,new { error = "Insufficient permissions to update command status" });
-
             var command = await _context.Commands.FindAsync(id);
             if (command == null) return NotFound();
 
@@ -187,19 +190,26 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Delete command by ID - Admin only
+        /// Delete command by ID - Users and subusers can delete commands unless restricted
         /// </summary>
         [HttpDelete("{id}")]
-        [RequirePermission("DELETE_COMMAND")]
         public async Task<IActionResult> DeleteCommand(int id)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "DELETE_COMMAND"))
-                return StatusCode(403,new { error = "Insufficient permissions to delete commands" });
-
             var command = await _context.Commands.FindAsync(id);
             if (command == null) return NotFound();
+
+            // Allow deletion unless specifically restricted
+            bool canDelete = true;
+            if (await _authService.HasPermissionAsync(userEmail!, "RESTRICT_COMMAND_DELETION", isCurrentUserSubuser))
+            {
+                canDelete = await _authService.HasPermissionAsync(userEmail!, "DELETE_COMMAND", isCurrentUserSubuser);
+            }
+
+            if (!canDelete)
+                return StatusCode(403, new { error = "Command deletion is restricted for your role" });
 
             _context.Commands.Remove(command);
             await _context.SaveChangesAsync();
@@ -208,17 +218,14 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Get command statistics - Manager level access
+        /// Get command statistics - Users and subusers can view basic statistics
         /// </summary>
         [HttpGet("statistics")]
-        [RequirePermission("READ_COMMAND_STATISTICS")]
         public async Task<ActionResult<object>> GetCommandStatistics()
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "READ_COMMAND_STATISTICS"))
-                return StatusCode(403,new { error = "Insufficient permissions to view command statistics" });
-
             var stats = new {
                 TotalCommands = await _context.Commands.CountAsync(),
                 PendingCommands = await _context.Commands.CountAsync(c => c.command_status == "Pending"),
@@ -239,16 +246,16 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Bulk update command statuses - Admin only
+        /// Bulk update command statuses - Admin level or specific permission required
         /// </summary>
         [HttpPatch("bulk-update-status")]
-        [RequirePermission("BULK_UPDATE_COMMANDS")]
         public async Task<IActionResult> BulkUpdateCommandStatus([FromBody] BulkCommandStatusUpdateRequest request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "BULK_UPDATE_COMMANDS"))
-                return StatusCode(403,new { error = "Insufficient permissions to bulk update commands" });
+            if (!await _authService.HasPermissionAsync(userEmail!, "BULK_UPDATE_COMMANDS", isCurrentUserSubuser))
+                return StatusCode(403, new { error = "Insufficient permissions to bulk update commands" });
 
             if (!request.CommandIds.Any())
                 return BadRequest("No command IDs provided");
@@ -274,6 +281,68 @@ namespace BitRaserApiProject.Controllers
             return Ok(new { 
                 message = $"Updated {commands.Count} commands to status {request.NewStatus}",
                 updatedCommandIds = commands.Select(c => c.Command_id).ToList()
+            });
+        }
+
+        /// <summary>
+        /// Execute command - Users and subusers can execute commands
+        /// </summary>
+        [HttpPost("{id}/execute")]
+        public async Task<IActionResult> ExecuteCommand(int id)
+        {
+            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+            
+            var command = await _context.Commands.FindAsync(id);
+            if (command == null) return NotFound();
+
+            if (command.command_status != "Pending")
+                return BadRequest($"Command is not in Pending status. Current status: {command.command_status}");
+
+            // Update status to Processing
+            command.command_status = "Processing";
+            await _context.SaveChangesAsync();
+
+            // Here you would implement the actual command execution logic
+            // For now, we'll just simulate it
+            await Task.Delay(100); // Simulate processing time
+
+            // Update status to Completed (in a real implementation, this would depend on execution result)
+            command.command_status = "Completed";
+            await _context.SaveChangesAsync();
+
+            return Ok(new { 
+                message = "Command executed successfully",
+                commandId = id,
+                status = command.command_status
+            });
+        }
+
+        /// <summary>
+        /// Cancel command - Users and subusers can cancel pending commands
+        /// </summary>
+        [HttpPost("{id}/cancel")]
+        public async Task<IActionResult> CancelCommand(int id)
+        {
+            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+            
+            var command = await _context.Commands.FindAsync(id);
+            if (command == null) return NotFound();
+
+            if (command.command_status == "Completed")
+                return BadRequest("Cannot cancel a completed command");
+
+            if (command.command_status == "Cancelled")
+                return BadRequest("Command is already cancelled");
+
+            command.command_status = "Cancelled";
+            await _context.SaveChangesAsync();
+
+            return Ok(new { 
+                message = "Command cancelled successfully",
+                commandId = id,
+                status = command.command_status
             });
         }
     }

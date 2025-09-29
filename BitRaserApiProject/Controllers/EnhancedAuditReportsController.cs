@@ -11,6 +11,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Enhanced Audit Reports management controller with comprehensive role-based access control
+    /// Supports both users and subusers with appropriate access levels
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
@@ -19,12 +20,14 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
+        private readonly IUserDataService _userDataService;
         private readonly PdfService _pdfService;
 
-        public EnhancedAuditReportsController(ApplicationDbContext context, IRoleBasedAuthService authService, PdfService pdfService)
+        public EnhancedAuditReportsController(ApplicationDbContext context, IRoleBasedAuthService authService, IUserDataService userDataService, PdfService pdfService)
         {
             _context = context;
             _authService = authService;
+            _userDataService = userDataService;
             _pdfService = pdfService;
         }
 
@@ -32,17 +35,17 @@ namespace BitRaserApiProject.Controllers
         /// Get all audit reports with role-based filtering
         /// </summary>
         [HttpGet]
-        [RequirePermission("READ_ALL_REPORTS")]
         public async Task<ActionResult<IEnumerable<object>>> GetAuditReports([FromQuery] ReportFilterRequest? filter)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
             IQueryable<audit_reports> query = _context.AuditReports;
 
             // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS"))
+            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser))
             {
-                // Users can only see their own reports
+                // Users and subusers can only see their own reports
                 query = query.Where(r => r.client_email == userEmail);
             }
 
@@ -87,19 +90,21 @@ namespace BitRaserApiProject.Controllers
         /// Get audit report by ID with ownership validation
         /// </summary>
         [HttpGet("{id}")]
-        [RequirePermission("READ_REPORT")]
         public async Task<ActionResult<audit_reports>> GetAuditReport(int id)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             var report = await _context.AuditReports.FindAsync(id);
             
             if (report == null) return NotFound();
 
-            // Users can only view their own reports unless they have admin permission
-            if (report.client_email != userEmail && 
-                !await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS"))
+            // Users and subusers can only view their own reports unless they have admin permission
+            bool canView = report.client_email == userEmail ||
+                          await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser);
+
+            if (!canView)
             {
-                return StatusCode(403,new { error = "You can only view your own reports" });
+                return StatusCode(403, new { error = "You can only view your own reports" });
             }
 
             return Ok(report);
@@ -109,16 +114,19 @@ namespace BitRaserApiProject.Controllers
         /// Get audit reports by client email with management hierarchy
         /// </summary>
         [HttpGet("by-email/{email}")]
-        [RequirePermission("READ_USER_REPORTS")]
         public async Task<ActionResult<IEnumerable<audit_reports>>> GetAuditReportsByEmail(string email)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             // Check if user can view reports for this email
-            if (email != currentUserEmail && 
-                !await _authService.CanManageUserAsync(currentUserEmail!, email))
+            bool canView = email == currentUserEmail ||
+                          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser) ||
+                          await _authService.CanManageUserAsync(currentUserEmail!, email);
+
+            if (!canView)
             {
-                return StatusCode(403,new { error = "You can only view your own reports or reports of users you manage" });
+                return StatusCode(403, new { error = "You can only view your own reports or reports of users you manage" });
             }
 
             var reports = await _context.AuditReports
@@ -131,6 +139,7 @@ namespace BitRaserApiProject.Controllers
 
         /// <summary>
         /// Create a new audit report with automatic client assignment
+        /// Supports both users and subusers
         /// </summary>
         [AllowAnonymous]
         [HttpPost]
@@ -141,10 +150,11 @@ namespace BitRaserApiProject.Controllers
                 return BadRequest("Client email is required for anonymous report creation");
 
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
+            var targetEmail = request.ClientEmail;
+
             var report = new audit_reports
             {
-                client_email = request.ClientEmail,
+                client_email = targetEmail,
                 report_name = request.ReportName ?? $"Audit Report {DateTime.UtcNow:yyyy-MM-dd HH:mm}",
                 erasure_method = request.ErasureMethod ?? "Unknown",
                 report_datetime = DateTime.UtcNow,
@@ -152,13 +162,19 @@ namespace BitRaserApiProject.Controllers
                 synced = false
             };
 
-            // If user is authenticated and has permission, allow them to create reports for others
+            // If user is authenticated, apply business rules
             if (!string.IsNullOrEmpty(userEmail))
             {
-                if (request.ClientEmail != userEmail && 
-                    !await _authService.HasPermissionAsync(userEmail, "CREATE_REPORTS_FOR_OTHERS"))
+                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+                
+                // Allow users and subusers to create reports for themselves
+                // Allow users with special permissions to create for others
+                if (request.ClientEmail != userEmail)
                 {
-                    report.client_email = userEmail; // Override to current user
+                    if (!await _authService.HasPermissionAsync(userEmail, "CREATE_REPORTS_FOR_OTHERS", isCurrentUserSubuser))
+                    {
+                        report.client_email = userEmail; // Override to current user
+                    }
                 }
             }
 
@@ -172,29 +188,31 @@ namespace BitRaserApiProject.Controllers
         /// Update audit report by ID with ownership validation
         /// </summary>
         [HttpPut("{id}")]
-        [RequirePermission("UPDATE_REPORT")]
         public async Task<IActionResult> UpdateAuditReport(int id, [FromBody] AuditReportUpdateRequest request)
         {
             if (id != request.ReportId)
                 return BadRequest(new { message = "Report ID mismatch" });
 
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             var report = await _context.AuditReports.FindAsync(id);
             
             if (report == null) return NotFound();
 
-            // Users can only update their own reports unless they have admin permission
-            if (report.client_email != userEmail && 
-                !await _authService.HasPermissionAsync(userEmail!, "UPDATE_ALL_REPORTS"))
+            // Users and subusers can only update their own reports unless they have admin permission
+            bool canUpdate = report.client_email == userEmail ||
+                           await _authService.HasPermissionAsync(userEmail!, "UPDATE_ALL_REPORTS", isCurrentUserSubuser);
+
+            if (!canUpdate)
             {
-                return StatusCode(403,new { error = "You can only update your own reports" });
+                return StatusCode(403, new { error = "You can only update your own reports" });
             }
 
             // Don't allow changing client_email unless user has admin permission
             if (request.ClientEmail != report.client_email && 
-                !await _authService.HasPermissionAsync(userEmail!, "UPDATE_ALL_REPORTS"))
+                !await _authService.HasPermissionAsync(userEmail!, "UPDATE_ALL_REPORTS", isCurrentUserSubuser))
             {
-                return StatusCode(403,new { error = "You cannot change the client email of a report" });
+                return StatusCode(403, new { error = "You cannot change the client email of a report" });
             }
 
             if (!string.IsNullOrEmpty(request.ReportName))
@@ -216,19 +234,21 @@ namespace BitRaserApiProject.Controllers
         /// Delete audit report by ID with proper authorization
         /// </summary>
         [HttpDelete("{id}")]
-        [RequirePermission("DELETE_REPORT")]
         public async Task<IActionResult> DeleteAuditReport(int id)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             var report = await _context.AuditReports.FindAsync(id);
             
             if (report == null) return NotFound();
 
-            // Users can only delete their own reports unless they have admin permission
-            if (report.client_email != userEmail && 
-                !await _authService.HasPermissionAsync(userEmail!, "DELETE_ALL_REPORTS"))
+            // Users and subusers can only delete their own reports unless they have admin permission
+            bool canDelete = report.client_email == userEmail ||
+                           await _authService.HasPermissionAsync(userEmail!, "DELETE_ALL_REPORTS", isCurrentUserSubuser);
+
+            if (!canDelete)
             {
-                return StatusCode(403,new { error = "You can only delete your own reports" });
+                return StatusCode(403, new { error = "You can only delete your own reports" });
             }
 
             _context.AuditReports.Remove(report);
@@ -238,7 +258,7 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Reserve a unique report ID for client applications
+        /// Reserve a unique report ID for client applications (both users and subusers)
         /// </summary>
         [AllowAnonymous]
         [HttpPost("reserve-id")]
@@ -327,17 +347,17 @@ namespace BitRaserApiProject.Controllers
         /// Get report statistics for a user or all users
         /// </summary>
         [HttpGet("statistics")]
-        [RequirePermission("READ_REPORT_STATISTICS")]
         public async Task<ActionResult<object>> GetReportStatistics([FromQuery] string? clientEmail)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
             IQueryable<audit_reports> query = _context.AuditReports;
 
             // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORT_STATISTICS"))
+            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORT_STATISTICS", isCurrentUserSubuser))
             {
-                // Users can only see their own statistics
+                // Users and subusers can only see their own statistics
                 clientEmail = userEmail;
             }
 
@@ -371,16 +391,17 @@ namespace BitRaserApiProject.Controllers
         /// Export reports to CSV format
         /// </summary>
         [HttpGet("export-csv")]
-        [RequirePermission("EXPORT_REPORTS")]
         public async Task<IActionResult> ExportReportsCSV([FromQuery] ReportExportRequest request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
             IQueryable<audit_reports> query = _context.AuditReports;
 
             // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS"))
+            if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser))
             {
+                // Users and subusers can export their own reports
                 query = query.Where(r => r.client_email == userEmail);
             }
 
@@ -407,16 +428,17 @@ namespace BitRaserApiProject.Controllers
         /// Export reports to PDF format using existing PDF service (Basic)
         /// </summary>
         [HttpGet("export-pdf")]
-        [RequirePermission("EXPORT_REPORTS")]
         public async Task<IActionResult> ExportReportsPDF([FromQuery] ReportExportRequest request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
             IQueryable<audit_reports> query = _context.AuditReports;
 
             // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS"))
+            if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser))
             {
+                // Users and subusers can export their own reports
                 query = query.Where(r => r.client_email == userEmail);
             }
 
@@ -446,17 +468,18 @@ namespace BitRaserApiProject.Controllers
         /// Export reports to PDF with file uploads (Headers, Signatures, Watermark)
         /// </summary>
         [HttpPost("export-pdf-with-files")]
-        [RequirePermission("EXPORT_REPORTS")]
         [Consumes("multipart/form-data")]
         public async Task<IActionResult> ExportReportsPDFWithFiles([FromForm] ReportExportWithFilesRequest request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
             IQueryable<audit_reports> query = _context.AuditReports;
 
             // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS"))
+            if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser))
             {
+                // Users and subusers can export their own reports
                 query = query.Where(r => r.client_email == userEmail);
             }
 
@@ -486,19 +509,21 @@ namespace BitRaserApiProject.Controllers
         /// Export single report to PDF by ID (Basic)
         /// </summary>
         [HttpGet("{id}/export-pdf")]
-        [RequirePermission("EXPORT_REPORTS")]
         public async Task<IActionResult> ExportSingleReportPDF(int id, [FromQuery] PdfExportOptions? options)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             var report = await _context.AuditReports.FindAsync(id);
             
             if (report == null) return NotFound();
 
-            // Users can only export their own reports unless they have admin permission
-            if (report.client_email != userEmail && 
-                !await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS"))
+            // Users and subusers can only export their own reports unless they have admin permission
+            bool canExport = report.client_email == userEmail ||
+                           await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser);
+
+            if (!canExport)
             {
-                return StatusCode(403,new { error = "You can only export your own reports" });
+                return StatusCode(403, new { error = "You can only export your own reports" });
             }
 
             // Generate PDF for single report
@@ -512,20 +537,22 @@ namespace BitRaserApiProject.Controllers
         /// Export single report to PDF with file uploads (Headers, Signatures, Watermark)
         /// </summary>
         [HttpPost("{id}/export-pdf-with-files")]
-        [RequirePermission("EXPORT_REPORTS")]
         [Consumes("multipart/form-data")]
         public async Task<IActionResult> ExportSingleReportPDFWithFiles(int id, [FromForm] SingleReportExportWithFilesRequest request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             var report = await _context.AuditReports.FindAsync(id);
             
             if (report == null) return NotFound();
 
-            // Users can only export their own reports unless they have admin permission
-            if (report.client_email != userEmail && 
-                !await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS"))
+            // Users and subusers can only export their own reports unless they have admin permission
+            bool canExport = report.client_email == userEmail ||
+                           await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser);
+
+            if (!canExport)
             {
-                return StatusCode(403,new { error = "You can only export your own reports" });
+                return StatusCode(403, new { error = "You can only export your own reports" });
             }
 
             // Generate PDF for single report with uploaded files

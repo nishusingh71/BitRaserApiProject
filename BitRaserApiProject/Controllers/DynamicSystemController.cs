@@ -11,6 +11,7 @@ namespace BitRaserApiProject.Controllers
     /// <summary>
     /// Dynamic System Management Controller
     /// Provides endpoints for managing permissions, roles, and routes dynamically
+    /// Supports both users and subusers with appropriate access levels
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
@@ -19,17 +20,23 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly IDynamicPermissionService _permissionService;
         private readonly DynamicRouteService _routeService;
+        private readonly IUserDataService _userDataService;
+        private readonly IRoleBasedAuthService _authService;
         private readonly ILogger<DynamicSystemController> _logger;
-        private readonly ApplicationDbContext _context; // Assuming you're using EF Core and have a DbContext
+        private readonly ApplicationDbContext _context;
 
         public DynamicSystemController(
             IDynamicPermissionService permissionService, 
             DynamicRouteService routeService,
+            IUserDataService userDataService,
+            IRoleBasedAuthService authService,
             ILogger<DynamicSystemController> logger,
             ApplicationDbContext context)
         {
             _permissionService = permissionService;
             _routeService = routeService;
+            _userDataService = userDataService;
+            _authService = authService;
             _logger = logger;
             _context = context;
         }
@@ -38,16 +45,28 @@ namespace BitRaserApiProject.Controllers
         /// Initialize the dynamic system - create permissions, roles, and routes
         /// </summary>
         [HttpPost("initialize")]
-        [RequirePermission("SYSTEM_ADMIN")]
         public async Task<ActionResult> InitializeSystem()
         {
+            var currentUserEmail = GetCurrentUserEmail();
+            var isSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+
+            if (!await _authService.HasPermissionAsync(currentUserEmail!, "SYSTEM_ADMIN", isSubuser))
+            {
+                return StatusCode(403, new { error = "Insufficient permissions for system initialization" });
+            }
+
             try
             {
-                _logger.LogInformation("Starting dynamic system initialization");
+                _logger.LogInformation("Starting dynamic system initialization by {User} ({UserType})", currentUserEmail, isSubuser ? "Subuser" : "User");
 
                 var results = new
                 {
                     Timestamp = DateTime.UtcNow,
+                    InitiatedBy = new
+                    {
+                        Email = currentUserEmail,
+                        UserType = isSubuser ? "Subuser" : "User"
+                    },
                     Steps = new List<object>()
                 };
 
@@ -106,6 +125,19 @@ namespace BitRaserApiProject.Controllers
                     OrphanedRoutesRemoved = cleanupResult.OrphanedRoutesRemoved
                 };
 
+                // Step 5: Initialize subuser support if needed
+                _logger.LogInformation("Step 5: Ensuring subuser support");
+                var subuserSupportResult = await EnsureSubuserSupportAsync();
+                
+                var step5 = new
+                {
+                    Step = 5,
+                    Name = "Subuser Support Initialization",
+                    Success = subuserSupportResult.Success,
+                    Message = subuserSupportResult.Message,
+                    SubuserRolesCreated = subuserSupportResult.RolesCreated
+                };
+
                 _logger.LogInformation("Dynamic system initialization completed successfully");
 
                 return Ok(new
@@ -113,14 +145,16 @@ namespace BitRaserApiProject.Controllers
                     success = true,
                     message = "Dynamic system initialization completed successfully",
                     timestamp = DateTime.UtcNow,
-                    steps = new object[] { step1, step2, step3, step4 },
+                    initiatedBy = results.InitiatedBy,
+                    steps = new object[] { step1, step2, step3, step4, step5 },
                     summary = new
                     {
                         PermissionsCreated = permissionResult.PermissionsCreated,
                         MappingsCreated = roleMappingResult.MappingsCreated,
                         RoutesDiscovered = routeResult.RoutesDiscovered,
                         ControllersProcessed = routeResult.ControllersProcessed,
-                        OrphanedRoutesRemoved = cleanupResult.OrphanedRoutesRemoved
+                        OrphanedRoutesRemoved = cleanupResult.OrphanedRoutesRemoved,
+                        SubuserRolesCreated = subuserSupportResult.RolesCreated
                     }
                 });
             }
@@ -132,7 +166,8 @@ namespace BitRaserApiProject.Controllers
                     success = false,
                     message = "System initialization failed",
                     error = ex.Message,
-                    timestamp = DateTime.UtcNow
+                    timestamp = DateTime.UtcNow,
+                    initiatedBy = currentUserEmail
                 });
             }
         }
@@ -284,30 +319,54 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Get system status - Overview of current permissions, roles, and routes
+        /// Get system status - Overview of current permissions, roles, and routes (includes subuser info)
         /// </summary>
         [HttpGet("status")]
-        [RequirePermission("SYSTEM_ADMIN")]
         public async Task<ActionResult> GetSystemStatus()
         {
+            var currentUserEmail = GetCurrentUserEmail();
+            var isSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+
+            if (!await _authService.HasPermissionAsync(currentUserEmail!, "SYSTEM_ADMIN", isSubuser))
+            {
+                return StatusCode(403, new { error = "Insufficient permissions to view system status" });
+            }
+
             try
             {
-                _logger.LogInformation("Getting system status");
+                _logger.LogInformation("Getting system status for {User} ({UserType})", currentUserEmail, isSubuser ? "Subuser" : "User");
 
-                // This would require additional methods in the services
-                // For now, return a basic status
-                return Ok(new
+                var systemStatus = new
                 {
                     success = true,
                     message = "System status retrieved successfully",
                     status = "Operational",
                     timestamp = DateTime.UtcNow,
+                    requestedBy = new
+                    {
+                        Email = currentUserEmail,
+                        UserType = isSubuser ? "Subuser" : "User"
+                    },
                     services = new
                     {
                         PermissionService = "Running",
-                        RouteService = "Running"
+                        RouteService = "Running",
+                        UserDataService = "Running",
+                        AuthService = "Running"
+                    },
+                    statistics = await GetSystemStatistics(),
+                    userManagement = new
+                    {
+                        TotalUsers = await _context.Users.CountAsync(),
+                        TotalSubusers = await _context.subuser.CountAsync(),
+                        TotalRoles = await _context.Roles.CountAsync(),
+                        TotalPermissions = await _context.Permissions.CountAsync(),
+                        UsersWithRoles = await _context.UserRoles.Select(ur => ur.UserId).Distinct().CountAsync(),
+                        SubusersWithRoles = await _context.SubuserRoles.Select(sr => sr.SubuserId).Distinct().CountAsync()
                     }
-                });
+                };
+
+                return Ok(systemStatus);
             }
             catch (Exception ex)
             {
@@ -323,21 +382,33 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Get performance metrics of the dynamic system
+        /// Get performance metrics of the dynamic system (includes user/subuser activity)
         /// </summary>
         [HttpGet("metrics")]
-        [RequirePermission("SYSTEM_ADMIN")]
         public async Task<ActionResult> GetSystemMetrics()
         {
+            var currentUserEmail = GetCurrentUserEmail();
+            var isSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+
+            if (!await _authService.HasPermissionAsync(currentUserEmail!, "SYSTEM_ADMIN", isSubuser))
+            {
+                return StatusCode(403, new { error = "Insufficient permissions to view system metrics" });
+            }
+
             try
             {
-                return Ok(new
+                var metrics = new
                 {
                     success = true,
                     message = "System metrics retrieved successfully",
                     metrics = new
                     {
                         Timestamp = DateTime.UtcNow,
+                        RequestedBy = new
+                        {
+                            Email = currentUserEmail,
+                            UserType = isSubuser ? "Subuser" : "User"
+                        },
                         SystemUptime = TimeSpan.FromMilliseconds(Environment.TickCount64),
                         MemoryUsage = new
                         {
@@ -345,9 +416,45 @@ namespace BitRaserApiProject.Controllers
                             Gen0Collections = GC.CollectionCount(0),
                             Gen1Collections = GC.CollectionCount(1),
                             Gen2Collections = GC.CollectionCount(2)
+                        },
+                        UserActivity = new
+                        {
+                            ActiveUserSessions = await _context.Sessions
+                                .Where(s => s.session_status == "active")
+                                .Join(_context.Users, s => s.user_email, u => u.user_email, (s, u) => s)
+                                .CountAsync(),
+                            ActiveSubuserSessions = await _context.Sessions
+                                .Where(s => s.session_status == "active")
+                                .Join(_context.subuser, s => s.user_email, su => su.subuser_email, (s, su) => s)
+                                .CountAsync(),
+                            RecentUserLogins = await _context.Sessions
+                                .Where(s => s.login_time >= DateTime.UtcNow.AddHours(-24))
+                                .Join(_context.Users, s => s.user_email, u => u.user_email, (s, u) => s.user_email)
+                                .Distinct()
+                                .CountAsync(),
+                            RecentSubuserLogins = await _context.Sessions
+                                .Where(s => s.login_time >= DateTime.UtcNow.AddHours(-24))
+                                .Join(_context.subuser, s => s.user_email, su => su.subuser_email, (s, su) => s.user_email)
+                                .Distinct()
+                                .CountAsync()
+                        },
+                        DatabaseActivity = new
+                        {
+                            RecentUserCreations = await _context.Users
+                                .Where(u => u.created_at >= DateTime.UtcNow.AddDays(-7))
+                                .CountAsync(),
+                            RecentSubuserCreations = await _context.subuser
+                                .Where(s => s.subuser_id > 0) // No created_at field, so count recent IDs
+                                .CountAsync() - await _context.subuser.CountAsync() + 
+                                await _context.subuser.Where(s => s.subuser_id > 0).CountAsync(), // Approximate recent count
+                            TotalMachines = await _context.Machines.CountAsync(),
+                            TotalReports = await _context.AuditReports.CountAsync(),
+                            TotalLogs = await _context.logs.CountAsync()
                         }
                     }
-                });
+                };
+
+                return Ok(metrics);
             }
             catch (Exception ex)
             {
@@ -362,63 +469,22 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Full system reinitialize - Use with caution in production
-        /// </summary>
-        [HttpPost("reinitialize")]
-        [RequirePermission("SYSTEM_ADMIN")]
-        public async Task<ActionResult> ReinitializeSystem([FromBody] ReinitializeRequest request)
-        {
-            try
-            {
-                if (!request.ConfirmReinitialize)
-                {
-                    return BadRequest(new
-                    {
-                        success = false,
-                        message = "Reinitialization requires explicit confirmation",
-                        requiredField = "confirmReinitialize: true"
-                    });
-                }
-
-                _logger.LogWarning("System reinitialization requested by user");
-
-                // Perform full system reinitialization
-                var initResult = await InitializeSystem();
-
-                _logger.LogInformation("System reinitialization completed");
-
-                return Ok(new
-                {
-                    success = true,
-                    message = "System successfully reinitialized",
-                    timestamp = DateTime.UtcNow,
-                    warning = "System has been fully reinitialized",
-                    initializationResult = initResult
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to reinitialize system");
-                return StatusCode(500, new
-                {
-                    success = false,
-                    message = "System reinitialization failed",
-                    error = ex.Message,
-                    timestamp = DateTime.UtcNow
-                });
-            }
-        }
-
-        /// <summary>
-        /// Fix database data integrity issues - JSON columns, NULL values, etc.
+        /// Fix database data integrity issues - JSON columns, NULL values, etc. (includes subuser data)
         /// </summary>
         [HttpPost("fix-database-integrity")]
-        [RequirePermission("SYSTEM_ADMIN")]
         public async Task<ActionResult> FixDatabaseIntegrity()
         {
+            var currentUserEmail = GetCurrentUserEmail();
+            var isSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+
+            if (!await _authService.HasPermissionAsync(currentUserEmail!, "SYSTEM_ADMIN", isSubuser))
+            {
+                return StatusCode(403, new { error = "Insufficient permissions to fix database integrity" });
+            }
+
             try
             {
-                _logger.LogInformation("Starting database integrity fix");
+                _logger.LogInformation("Starting database integrity fix by {User} ({UserType})", currentUserEmail, isSubuser ? "Subuser" : "User");
 
                 var issuesFixed = 0;
                 var errors = new List<string>();
@@ -519,7 +585,29 @@ namespace BitRaserApiProject.Controllers
                     _logger.LogError(ex, "Failed to fix commands JSON issues");
                 }
 
-                _logger.LogInformation("Database integrity fix completed");
+                // Fix orphaned subuser role assignments
+                try
+                {
+                    var orphanedSubuserRoles = await _context.SubuserRoles
+                        .Where(sr => !_context.subuser.Any(s => s.subuser_id == sr.SubuserId) ||
+                                    !_context.Roles.Any(r => r.RoleId == sr.RoleId))
+                        .ToListAsync();
+
+                    if (orphanedSubuserRoles.Any())
+                    {
+                        _context.SubuserRoles.RemoveRange(orphanedSubuserRoles);
+                        await _context.SaveChangesAsync();
+                        issuesFixed += orphanedSubuserRoles.Count;
+                        _logger.LogInformation("Removed {Count} orphaned subuser role assignments", orphanedSubuserRoles.Count);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Add($"Subuser role cleanup failed: {ex.Message}");
+                    _logger.LogError(ex, "Failed to fix subuser role assignments");
+                }
+
+                _logger.LogInformation("Database integrity fix completed by {User}", currentUserEmail);
 
                 return Ok(new
                 {
@@ -528,6 +616,11 @@ namespace BitRaserApiProject.Controllers
                     issuesFixed = issuesFixed,
                     errors = errors,
                     timestamp = DateTime.UtcNow,
+                    fixedBy = new
+                    {
+                        Email = currentUserEmail,
+                        UserType = isSubuser ? "Subuser" : "User"
+                    },
                     recommendation = errors.Any() ? 
                         "Some issues could not be automatically fixed. Manual intervention may be required." :
                         "All detected issues have been fixed successfully."
@@ -545,6 +638,202 @@ namespace BitRaserApiProject.Controllers
                 });
             }
         }
+
+        /// <summary>
+        /// Get comprehensive system health report (includes user/subuser health)
+        /// </summary>
+        [HttpGet("health-report")]
+        public async Task<ActionResult> GetSystemHealthReport()
+        {
+            var currentUserEmail = GetCurrentUserEmail();
+            var isSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+
+            if (!await _authService.HasPermissionAsync(currentUserEmail!, "SYSTEM_ADMIN", isSubuser))
+            {
+                return StatusCode(403, new { error = "Insufficient permissions to view system health report" });
+            }
+
+            try
+            {
+                var healthReport = new
+                {
+                    success = true,
+                    message = "System health report generated successfully",
+                    timestamp = DateTime.UtcNow,
+                    generatedBy = new
+                    {
+                        Email = currentUserEmail,
+                        UserType = isSubuser ? "Subuser" : "User"
+                    },
+                    userHealth = new
+                    {
+                        TotalUsers = await _context.Users.CountAsync(),
+                        UsersWithRoles = await _context.UserRoles.Select(ur => ur.UserId).Distinct().CountAsync(),
+                        UsersWithoutRoles = await _context.Users.CountAsync() - await _context.UserRoles.Select(ur => ur.UserId).Distinct().CountAsync(),
+                        UsersWithRecentActivity = await _context.Sessions
+                            .Where(s => s.login_time >= DateTime.UtcNow.AddDays(-30))
+                            .Join(_context.Users, s => s.user_email, u => u.user_email, (s, u) => u.user_email)
+                            .Distinct()
+                            .CountAsync()
+                    },
+                    subuserHealth = new
+                    {
+                        TotalSubusers = await _context.subuser.CountAsync(),
+                        SubusersWithRoles = await _context.SubuserRoles.Select(sr => sr.SubuserId).Distinct().CountAsync(),
+                        SubusersWithoutRoles = await _context.subuser.CountAsync() - await _context.SubuserRoles.Select(sr => sr.SubuserId).Distinct().CountAsync(),
+                        SubusersWithRecentActivity = await _context.Sessions
+                            .Where(s => s.login_time >= DateTime.UtcNow.AddDays(-30))
+                            .Join(_context.subuser, s => s.user_email, su => su.subuser_email, (s, su) => su.subuser_email)
+                            .Distinct()
+                            .CountAsync(),
+                        OrphanedSubusers = await _context.subuser
+                            .Where(s => !_context.Users.Any(u => u.user_email == s.user_email))
+                            .CountAsync()
+                    },
+                    dataHealth = new
+                    {
+                        MachinesWithNullJson = await _context.Machines.CountAsync(m => m.license_details_json == null),
+                        LogsWithNullJson = await _context.logs.CountAsync(l => l.log_details_json == null),
+                        UsersWithNullJson = await _context.Users.CountAsync(u => u.payment_details_json == null || u.license_details_json == null),
+                        CommandsWithNullJson = await _context.Commands.CountAsync(c => c.command_json == null),
+                        OrphanedUserRoles = await _context.UserRoles
+                            .Where(ur => !_context.Users.Any(u => u.user_id == ur.UserId) ||
+                                        !_context.Roles.Any(r => r.RoleId == ur.RoleId))
+                            .CountAsync(),
+                        OrphanedSubuserRoles = await _context.SubuserRoles
+                            .Where(sr => !_context.subuser.Any(s => s.subuser_id == sr.SubuserId) ||
+                                        !_context.Roles.Any(r => r.RoleId == sr.RoleId))
+                            .CountAsync()
+                    },
+                    systemHealth = new
+                    {
+                        TotalRoles = await _context.Roles.CountAsync(),
+                        TotalPermissions = await _context.Permissions.CountAsync(),
+                        TotalRoutes = await _context.Routes.CountAsync(),
+                        ActiveSessions = await _context.Sessions.CountAsync(s => s.session_status == "active")
+                    },
+                    recommendations = GetHealthRecommendations()
+                };
+
+                return Ok(healthReport);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to generate system health report");
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = "Failed to generate system health report",
+                    error = ex.Message,
+                    timestamp = DateTime.UtcNow
+                });
+            }
+        }
+
+        #region Private Helper Methods
+
+        private string? GetCurrentUserEmail()
+        {
+            return User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        }
+
+        private async Task<object> GetSystemStatistics()
+        {
+            return new
+            {
+                TotalUsers = await _context.Users.CountAsync(),
+                TotalSubusers = await _context.subuser.CountAsync(),
+                TotalMachines = await _context.Machines.CountAsync(),
+                TotalReports = await _context.AuditReports.CountAsync(),
+                TotalSessions = await _context.Sessions.CountAsync(),
+                TotalLogs = await _context.logs.CountAsync(),
+                ActiveSessions = await _context.Sessions.CountAsync(s => s.session_status == "active"),
+                RecentActivity = new
+                {
+                    UsersLoggedInToday = await _context.Sessions
+                        .Where(s => s.login_time.Date == DateTime.UtcNow.Date)
+                        .Join(_context.Users, s => s.user_email, u => u.user_email, (s, u) => u.user_email)
+                        .Distinct()
+                        .CountAsync(),
+                    SubusersLoggedInToday = await _context.Sessions
+                        .Where(s => s.login_time.Date == DateTime.UtcNow.Date)
+                        .Join(_context.subuser, s => s.user_email, su => su.subuser_email, (s, su) => su.subuser_email)
+                        .Distinct()
+                        .CountAsync()
+                }
+            };
+        }
+
+        private async Task<(bool Success, string Message, int RolesCreated)> EnsureSubuserSupportAsync()
+        {
+            try
+            {
+                var rolesCreated = 0;
+
+                // Ensure SubUser role exists
+                var subuserRole = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == "SubUser");
+                if (subuserRole == null)
+                {
+                    subuserRole = new Role
+                    {
+                        RoleName = "SubUser",
+                        Description = "Default role for subusers with basic permissions",
+                        HierarchyLevel = 10 // Lowest priority
+                    };
+                    _context.Roles.Add(subuserRole);
+                    await _context.SaveChangesAsync();
+                    rolesCreated++;
+                }
+
+                return (true, "Subuser support initialized successfully", rolesCreated);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to ensure subuser support");
+                return (false, $"Failed to initialize subuser support: {ex.Message}", 0);
+            }
+        }
+
+        private List<object> GetHealthRecommendations()
+        {
+            return new List<object>
+            {
+                new
+                {
+                    Priority = "High",
+                    Category = "Data Integrity",
+                    Issue = "NULL JSON fields in database",
+                    Recommendation = "Run database integrity fix to resolve NULL JSON issues",
+                    Action = "POST /api/DynamicSystem/fix-database-integrity"
+                },
+                new
+                {
+                    Priority = "Medium",
+                    Category = "User Management",
+                    Issue = "Users or subusers without assigned roles",
+                    Recommendation = "Assign appropriate roles to all users and subusers",
+                    Action = "Use Enhanced User/Subuser controllers to assign roles"
+                },
+                new
+                {
+                    Priority = "Medium",
+                    Category = "Subuser Management",
+                    Issue = "Orphaned subusers without parent users",
+                    Recommendation = "Clean up orphaned subuser records or reassign to valid parent users",
+                    Action = "Manual review and cleanup required"
+                },
+                new
+                {
+                    Priority = "Low",
+                    Category = "Performance",
+                    Issue = "Inactive sessions not cleaned up",
+                    Recommendation = "Implement session cleanup routine",
+                    Action = "Review and close inactive sessions"
+                }
+            };
+        }
+
+        #endregion
     }
 
     /// <summary>

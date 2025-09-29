@@ -10,6 +10,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Enhanced Machines management controller with email-based operations and role-based access control
+    /// Supports both users and subusers with appropriate access levels
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
@@ -18,26 +19,36 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
+        private readonly IUserDataService _userDataService;
 
-        public EnhancedMachinesController(ApplicationDbContext context, IRoleBasedAuthService authService)
+        public EnhancedMachinesController(ApplicationDbContext context, IRoleBasedAuthService authService, IUserDataService userDataService)
         {
             _context = context;
             _authService = authService;
+            _userDataService = userDataService;
         }
 
         /// <summary>
         /// Get machines by user email with role-based filtering
+        /// Supports both users and subusers
         /// </summary>
         [HttpGet("by-email/{userEmail}")]
-        [RequirePermission("READ_MACHINE")]
         public async Task<ActionResult<IEnumerable<object>>> GetMachinesByUserEmail(string userEmail, [FromQuery] MachineFilterRequest? filter)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
-            // Check if user can view machines for this email
-            if (userEmail != currentUserEmail && !await CanManageUserAsync(currentUserEmail!, userEmail))
+            // Allow access if:
+            // 1. Requesting own machines (user or subuser)
+            // 2. User has permission to view other machines
+            // 3. Manager can view managed user machines
+            bool canAccess = userEmail == currentUserEmail ||
+                           await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser) ||
+                           await CanManageUserAsync(currentUserEmail!, userEmail);
+
+            if (!canAccess)
             {
-                return StatusCode(403,new { error = "You can only view your own machines or machines of users you manage" });
+                return StatusCode(403, new { error = "You can only view your own machines or machines of users you manage" });
             }
 
             IQueryable<machines> query = _context.Machines.Where(m => m.user_email == userEmail);
@@ -75,6 +86,7 @@ namespace BitRaserApiProject.Controllers
                 .Select(m => new {
                     fingerprintHash = m.fingerprint_hash,
                     userEmail = m.user_email,
+                    subuserEmail = m.subuser_email,
                     macAddress = m.mac_address,
                     osVersion = m.os_version,
                     licenseActivated = m.license_activated,  
@@ -93,25 +105,28 @@ namespace BitRaserApiProject.Controllers
         /// Get all machines with role-based filtering
         /// </summary>
         [HttpGet]
-        [RequirePermission("READ_ALL_MACHINES")]
         public async Task<ActionResult<IEnumerable<object>>> GetAllMachines([FromQuery] MachineFilterRequest? filter)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             IQueryable<machines> query = _context.Machines;
 
             // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES"))
+            if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser))
             {
-                // Users can only see their own machines unless they have elevated permissions
-                if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_MANAGED_USER_MACHINES"))
+                // Users and subusers can only see their own machines unless they have elevated permissions
+                if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_MANAGED_USER_MACHINES", isCurrentUserSubuser))
                 {
                     var managedUserEmails = await GetManagedUserEmailsAsync(currentUserEmail!);
-                    query = query.Where(m => managedUserEmails.Contains(m.user_email));
+                    query = query.Where(m => managedUserEmails.Contains(m.user_email) || 
+                                           m.user_email == currentUserEmail ||
+                                           m.subuser_email == currentUserEmail);
                 }
                 else
                 {
-                    query = query.Where(m => m.user_email == currentUserEmail);
+                    // Show own machines (for both users and subusers)
+                    query = query.Where(m => m.user_email == currentUserEmail || m.subuser_email == currentUserEmail);
                 }
             }
 
@@ -144,6 +159,7 @@ namespace BitRaserApiProject.Controllers
                 .Select(m => new {
                     fingerprintHash = m.fingerprint_hash,
                     userEmail = m.user_email,
+                    subuserEmail = m.subuser_email,
                     macAddress = m.mac_address,
                     osVersion = m.os_version,
                     licenseActivated = m.license_activated,
@@ -176,6 +192,7 @@ namespace BitRaserApiProject.Controllers
                 return Ok(new {
                     macAddress = machine.mac_address,
                     userEmail = machine.user_email,
+                    subuserEmail = machine.subuser_email,
                     licenseActivated = machine.license_activated,
                     licenseActivationDate = machine.license_activation_date,
                     licenseDaysValid = machine.license_days_valid,
@@ -185,46 +202,63 @@ namespace BitRaserApiProject.Controllers
 
             // Full information for authenticated users
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             // Check if user can view this machine
-            if (machine.user_email != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES"))
+            bool canAccess = machine.user_email == currentUserEmail ||
+                           machine.subuser_email == currentUserEmail ||
+                           await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser);
+
+            if (!canAccess)
             {
-                return StatusCode(403,new { error = "You can only view your own machines" });
+                return StatusCode(403, new { error = "You can only view your own machines" });
             }
 
             return Ok(machine);
         }
 
         /// <summary>
-        /// Register new machine for user email
+        /// Register new machine for user or subuser email
         /// </summary>
         [HttpPost("register/{userEmail}")]
-        [RequirePermission("CREATE_MACHINE")]
         public async Task<ActionResult<object>> RegisterMachine(string userEmail, [FromBody] MachineRegisterRequest request)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
-            // Check if user can register machine for this email
-            if (userEmail != currentUserEmail && !await CanManageUserAsync(currentUserEmail!, userEmail))
+            // Allow registration if:
+            // 1. User registering for themselves
+            // 2. Subuser registering for themselves 
+            // 3. User has permission to register for others
+            bool canRegister = userEmail == currentUserEmail ||
+                             await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_MACHINE", isCurrentUserSubuser) ||
+                             await CanManageUserAsync(currentUserEmail!, userEmail);
+
+            if (!canRegister)
             {
-                return StatusCode(403,new { error = "You can only register machines for yourself or users you manage" });
+                return StatusCode(403, new { error = "You can only register machines for yourself or users you manage" });
             }
 
-            // Validate that user exists
-            var userExists = await _context.Users.AnyAsync(u => u.user_email == userEmail);
-            if (!userExists)
-                return BadRequest($"User with email {userEmail} not found");
+            // Validate that user exists (for users) or validate subuser exists (for subusers)
+            bool targetExists = await _userDataService.UserExistsAsync(userEmail) || 
+                               await _userDataService.SubuserExistsAsync(userEmail);
+            
+            if (!targetExists)
+                return BadRequest($"User or subuser with email {userEmail} not found");
 
             // Check if machine already exists
             var existingMachine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == request.MacAddress);
             if (existingMachine != null)
                 return Conflict($"Machine with MAC address {request.MacAddress} already registered");
 
+            // Determine if the target is a subuser
+            var targetIsSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+            
             // Create machine
             var newMachine = new machines
             {
-                user_email = userEmail,
+                user_email = targetIsSubuser ? (await _userDataService.GetSubuserByEmailAsync(userEmail))?.user_email ?? userEmail : userEmail,
+                subuser_email = targetIsSubuser ? userEmail : null,
                 mac_address = request.MacAddress,
                 fingerprint_hash = request.FingerprintHash,
                 physical_drive_id = request.PhysicalDriveId,
@@ -247,6 +281,7 @@ namespace BitRaserApiProject.Controllers
             var response = new {
                 fingerprintHash = newMachine.fingerprint_hash,
                 userEmail = newMachine.user_email,
+                subuserEmail = newMachine.subuser_email,
                 macAddress = newMachine.mac_address,
                 licenseActivated = newMachine.license_activated,
                 createdAt = newMachine.created_at,
@@ -260,17 +295,20 @@ namespace BitRaserApiProject.Controllers
         /// Update machine by MAC address
         /// </summary>
         [HttpPut("by-mac/{macAddress}")]
-        [RequirePermission("UPDATE_MACHINE")]
         public async Task<IActionResult> UpdateMachine(string macAddress, [FromBody] MachineUpdateRequest request)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == macAddress);
             
             if (machine == null) return NotFound($"Machine with MAC address {macAddress} not found");
 
             // Check if user can update this machine
-            if (machine.user_email != currentUserEmail &&
-                !await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_MACHINES"))
+            bool canUpdate = machine.user_email == currentUserEmail ||
+                           machine.subuser_email == currentUserEmail ||
+                           await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_MACHINES", isCurrentUserSubuser);
+
+            if (!canUpdate)
             {
                 return StatusCode(403, new { error = "You can only update your own machines" });
             }
@@ -304,19 +342,22 @@ namespace BitRaserApiProject.Controllers
         /// Activate license for machine by MAC address
         /// </summary>
         [HttpPatch("by-mac/{macAddress}/activate-license")]
-        [RequirePermission("MANAGE_MACHINE_LICENSES")]
         public async Task<IActionResult> ActivateLicense(string macAddress, [FromBody] LicenseActivationRequest request)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == macAddress);
             
             if (machine == null) return NotFound($"Machine with MAC address {macAddress} not found");
 
             // Check if user can manage licenses for this machine
-            if (machine.user_email != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "MANAGE_ALL_MACHINE_LICENSES"))
+            bool canManageLicense = machine.user_email == currentUserEmail ||
+                                  machine.subuser_email == currentUserEmail ||
+                                  await _authService.HasPermissionAsync(currentUserEmail!, "MANAGE_ALL_MACHINE_LICENSES", isCurrentUserSubuser);
+
+            if (!canManageLicense)
             {
-                return StatusCode(403,new { error = "You can only manage licenses for your own machines" });
+                return StatusCode(403, new { error = "You can only manage licenses for your own machines" });
             }
 
             machine.license_activated = true;
@@ -333,6 +374,7 @@ namespace BitRaserApiProject.Controllers
                 message = "License activated successfully", 
                 macAddress = macAddress,
                 userEmail = machine.user_email,
+                subuserEmail = machine.subuser_email,
                 licenseActivated = machine.license_activated,
                 activationDate = machine.license_activation_date,
                 daysValid = machine.license_days_valid,
@@ -344,19 +386,22 @@ namespace BitRaserApiProject.Controllers
         /// Deactivate license for machine by MAC address
         /// </summary>
         [HttpPatch("by-mac/{macAddress}/deactivate-license")]
-        [RequirePermission("MANAGE_MACHINE_LICENSES")]
         public async Task<IActionResult> DeactivateLicense(string macAddress)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == macAddress);
             
             if (machine == null) return NotFound($"Machine with MAC address {macAddress} not found");
 
             // Check permissions
-            if (machine.user_email != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "MANAGE_ALL_MACHINE_LICENSES"))
+            bool canManageLicense = machine.user_email == currentUserEmail ||
+                                  machine.subuser_email == currentUserEmail ||
+                                  await _authService.HasPermissionAsync(currentUserEmail!, "MANAGE_ALL_MACHINE_LICENSES", isCurrentUserSubuser);
+
+            if (!canManageLicense)
             {
-                return StatusCode(403,new { error = "You can only manage licenses for your own machines" });
+                return StatusCode(403, new { error = "You can only manage licenses for your own machines" });
             }
 
             machine.license_activated = false;
@@ -367,6 +412,7 @@ namespace BitRaserApiProject.Controllers
                 message = "License deactivated successfully", 
                 macAddress = macAddress,
                 userEmail = machine.user_email,
+                subuserEmail = machine.subuser_email,
                 licenseActivated = machine.license_activated,
                 deactivatedAt = DateTime.UtcNow
             });
@@ -376,19 +422,22 @@ namespace BitRaserApiProject.Controllers
         /// Delete machine by MAC address
         /// </summary>
         [HttpDelete("by-mac/{macAddress}")]
-        [RequirePermission("DELETE_MACHINE")]
         public async Task<IActionResult> DeleteMachine(string macAddress)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == macAddress);
             
             if (machine == null) return NotFound($"Machine with MAC address {macAddress} not found");
 
             // Check permissions
-            if (machine.user_email != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "DELETE_ALL_MACHINES"))
+            bool canDelete = machine.user_email == currentUserEmail ||
+                           machine.subuser_email == currentUserEmail ||
+                           await _authService.HasPermissionAsync(currentUserEmail!, "DELETE_ALL_MACHINES", isCurrentUserSubuser);
+
+            if (!canDelete)
             {
-                return StatusCode(403,new { error = "You can only delete your own machines" });
+                return StatusCode(403, new { error = "You can only delete your own machines" });
             }
 
             _context.Machines.Remove(machine);
@@ -398,6 +447,7 @@ namespace BitRaserApiProject.Controllers
                 message = "Machine deleted successfully", 
                 macAddress = macAddress,
                 userEmail = machine.user_email,
+                subuserEmail = machine.subuser_email,
                 deletedAt = DateTime.UtcNow
             });
         }
@@ -406,44 +456,48 @@ namespace BitRaserApiProject.Controllers
         /// Get machine statistics by user email
         /// </summary>
         [HttpGet("statistics/{userEmail}")]
-        [RequirePermission("READ_MACHINE_STATISTICS")]
         public async Task<ActionResult<object>> GetMachineStatistics(string userEmail)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             // Check if user can view statistics for this email
-            if (userEmail != currentUserEmail && !await CanManageUserAsync(currentUserEmail!, userEmail))
+            bool canViewStats = userEmail == currentUserEmail ||
+                              await _authService.HasPermissionAsync(currentUserEmail!, "READ_MACHINE_STATISTICS", isCurrentUserSubuser) ||
+                              await CanManageUserAsync(currentUserEmail!, userEmail);
+
+            if (!canViewStats)
             {
-                return StatusCode(403,new { error = "You can only view statistics for your own machines or machines you manage" });
+                return StatusCode(403, new { error = "You can only view statistics for your own machines or machines you manage" });
             }
 
             var stats = new {
                 UserEmail = userEmail,
-                TotalMachines = await _context.Machines.CountAsync(m => m.user_email == userEmail),
-                ActiveLicenses = await _context.Machines.CountAsync(m => m.user_email == userEmail && m.license_activated),
-                InactiveLicenses = await _context.Machines.CountAsync(m => m.user_email == userEmail && !m.license_activated),
+                TotalMachines = await _context.Machines.CountAsync(m => m.user_email == userEmail || m.subuser_email == userEmail),
+                ActiveLicenses = await _context.Machines.CountAsync(m => (m.user_email == userEmail || m.subuser_email == userEmail) && m.license_activated),
+                InactiveLicenses = await _context.Machines.CountAsync(m => (m.user_email == userEmail || m.subuser_email == userEmail) && !m.license_activated),
                 ExpiredLicenses = await _context.Machines.CountAsync(m => 
-                    m.user_email == userEmail && 
+                    (m.user_email == userEmail || m.subuser_email == userEmail) && 
                     m.license_activation_date.HasValue && 
                     m.license_activation_date.Value.AddDays(m.license_days_valid) < DateTime.UtcNow),
                 ExpiringInNext30Days = await _context.Machines.CountAsync(m => 
-                    m.user_email == userEmail && 
+                    (m.user_email == userEmail || m.subuser_email == userEmail) && 
                     m.license_activation_date.HasValue && 
                     m.license_activation_date.Value.AddDays(m.license_days_valid) > DateTime.UtcNow && 
                     m.license_activation_date.Value.AddDays(m.license_days_valid) <= DateTime.UtcNow.AddDays(30)),
                 MachinesRegisteredToday = await _context.Machines.CountAsync(m => 
-                    m.user_email == userEmail && m.created_at.Date == DateTime.UtcNow.Date),
+                    (m.user_email == userEmail || m.subuser_email == userEmail) && m.created_at.Date == DateTime.UtcNow.Date),
                 MachinesRegisteredThisWeek = await _context.Machines.CountAsync(m => 
-                    m.user_email == userEmail && m.created_at >= DateTime.UtcNow.AddDays(-7)),
+                    (m.user_email == userEmail || m.subuser_email == userEmail) && m.created_at >= DateTime.UtcNow.AddDays(-7)),
                 MachinesRegisteredThisMonth = await _context.Machines.CountAsync(m => 
-                    m.user_email == userEmail && m.created_at.Month == DateTime.UtcNow.Month),
+                    (m.user_email == userEmail || m.subuser_email == userEmail) && m.created_at.Month == DateTime.UtcNow.Month),
                 VmStatusDistribution = await _context.Machines
-                    .Where(m => m.user_email == userEmail)
+                    .Where(m => m.user_email == userEmail || m.subuser_email == userEmail)
                     .GroupBy(m => m.vm_status)
                     .Select(g => new { VmStatus = g.Key, Count = g.Count() })
                     .ToListAsync(),
                 OsVersionDistribution = await _context.Machines
-                    .Where(m => m.user_email == userEmail)
+                    .Where(m => m.user_email == userEmail || m.subuser_email == userEmail)
                     .GroupBy(m => m.os_version)
                     .Select(g => new { OsVersion = g.Key, Count = g.Count() })
                     .OrderByDescending(x => x.Count)
@@ -458,8 +512,10 @@ namespace BitRaserApiProject.Controllers
 
         private async Task<bool> CanManageUserAsync(string currentUserEmail, string targetUserEmail)
         {
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+            
             // Check if current user has admin permissions
-            if (await _authService.HasPermissionAsync(currentUserEmail, "READ_ALL_MACHINES"))
+            if (await _authService.HasPermissionAsync(currentUserEmail, "READ_ALL_MACHINES", isCurrentUserSubuser))
                 return true;
 
             // Check if current user can manage this specific user

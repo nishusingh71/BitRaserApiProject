@@ -282,6 +282,23 @@ namespace BitRaserApiProject.Services
                 new("READ_ALL_LOG_STATISTICS", "View system-wide log analytics"),
                 new("CLEANUP_LOGS", "Clean up old log entries"),
 
+                // Update Management permissions (NEW)
+                new("READ_ALL_UPDATES", "View all software updates"),
+                new("READ_UPDATE", "View individual update details"),
+                new("CREATE_UPDATES", "Create new software updates"),
+                new("UPDATE_UPDATES", "Update existing software updates"),
+                new("DELETE_UPDATES", "Delete software updates"),
+                new("MANAGE_ALL_UPDATES", "Full update management access"),
+                new("PUBLISH_UPDATES", "Publish updates for distribution"),
+                new("DEPRECATE_UPDATES", "Mark updates as deprecated"),
+                new("VIEW_UPDATE_STATISTICS", "View update analytics and statistics"),
+                new("MANAGE_UPDATE_LIFECYCLE", "Manage update lifecycle (active, deprecated, recalled)"),
+                new("VALIDATE_UPDATE_CHECKSUMS", "Validate and generate update checksums"),
+                new("MANAGE_UPDATE_PLATFORMS", "Manage platform-specific update settings"),
+                new("SCHEDULE_UPDATES", "Schedule automatic update deployments"),
+                new("ROLLBACK_UPDATES", "Manage update rollback operations"),
+                new("VIEW_UPDATE_DOWNLOADS", "View update download statistics and logs"),
+
                 // Profile Management permissions (NEW)
                 new("VIEW_PROFILE", "View own profile information"),
                 new("UPDATE_PROFILE", "Update own profile information"),
@@ -327,6 +344,11 @@ namespace BitRaserApiProject.Services
                     "READ_ALL_SESSIONS", "END_ALL_SESSIONS", "READ_ALL_SESSION_STATISTICS", "CLEANUP_SESSIONS",
                     "READ_ALL_LOGS", "CREATE_LOG", "DELETE_LOG", "SEARCH_LOGS", 
                     "EXPORT_ALL_LOGS", "READ_ALL_LOG_STATISTICS", "CLEANUP_LOGS",
+                    // Update Management (SuperAdmin)
+                    "READ_ALL_UPDATES", "CREATE_UPDATES", "UPDATE_UPDATES", "DELETE_UPDATES", "MANAGE_ALL_UPDATES",
+                    "PUBLISH_UPDATES", "DEPRECATE_UPDATES", "VIEW_UPDATE_STATISTICS", "MANAGE_UPDATE_LIFECYCLE",
+                    "VALIDATE_UPDATE_CHECKSUMS", "MANAGE_UPDATE_PLATFORMS", "SCHEDULE_UPDATES", 
+                    "ROLLBACK_UPDATES", "VIEW_UPDATE_DOWNLOADS",
                     // Profile Management (SuperAdmin)
                     "VIEW_PROFILE", "UPDATE_PROFILE", "VIEW_USER_PROFILE", "VIEW_SENSITIVE_PROFILE_INFO",
                     "VIEW_HIERARCHY", "VIEW_ORGANIZATION_HIERARCHY", "MANAGE_HIERARCHY", "ASSIGN_DIRECT_REPORTS",
@@ -345,6 +367,10 @@ namespace BitRaserApiProject.Services
                     "READ_ALL_COMMANDS", "CREATE_COMMAND", "UPDATE_COMMAND", "READ_COMMAND_STATISTICS", "BULK_UPDATE_COMMANDS",
                     "READ_ALL_SESSIONS", "END_ALL_SESSIONS", "READ_ALL_SESSION_STATISTICS",
                     "READ_ALL_LOGS", "CREATE_LOG", "SEARCH_LOGS", "EXPORT_ALL_LOGS", "READ_ALL_LOG_STATISTICS",
+                    // Update Management (Admin)
+                    "READ_ALL_UPDATES", "CREATE_UPDATES", "UPDATE_UPDATES", "DELETE_UPDATES", "MANAGE_ALL_UPDATES",
+                    "PUBLISH_UPDATES", "DEPRECATE_UPDATES", "VIEW_UPDATE_STATISTICS", "MANAGE_UPDATE_LIFECYCLE",
+                    "VALIDATE_UPDATE_CHECKSUMS", "MANAGE_UPDATE_PLATFORMS", "VIEW_UPDATE_DOWNLOADS",
                     // Profile Management (Admin)
                     "VIEW_PROFILE", "UPDATE_PROFILE", "VIEW_USER_PROFILE", "VIEW_SENSITIVE_PROFILE_INFO",
                     "VIEW_HIERARCHY", "VIEW_ORGANIZATION_HIERARCHY", "MANAGE_HIERARCHY", "ASSIGN_DIRECT_REPORTS",
@@ -361,6 +387,9 @@ namespace BitRaserApiProject.Services
                     "READ_COMMAND", "MANAGE_COMMANDS", "UPDATE_COMMAND_STATUS", "READ_COMMAND_STATISTICS",
                     "READ_USER_SESSIONS", "END_USER_SESSIONS", "READ_SESSION_STATISTICS",
                     "READ_USER_LOGS", "SEARCH_LOGS", "READ_LOG_STATISTICS",
+                    // Update Management (Manager) - Limited permissions
+                    "READ_ALL_UPDATES", "CREATE_UPDATES", "UPDATE_UPDATES", "VIEW_UPDATE_STATISTICS",
+                    "PUBLISH_UPDATES", "VIEW_UPDATE_DOWNLOADS",
                     // Profile Management (Manager)
                     "VIEW_PROFILE", "UPDATE_PROFILE", "VIEW_USER_PROFILE", "VIEW_HIERARCHY", 
                     "ASSIGN_DIRECT_REPORTS", "SEARCH_USERS", "VIEW_USER_ACTIVITY", 
@@ -376,6 +405,8 @@ namespace BitRaserApiProject.Services
                     "READ_COMMAND", "UPDATE_COMMAND_STATUS", "READ_COMMAND_STATISTICS",
                     "READ_SESSION", "READ_USER_SESSIONS", "READ_SESSION_STATISTICS",
                     "READ_LOG", "READ_USER_LOGS", "SEARCH_LOGS", "READ_LOG_STATISTICS",
+                    // Update Management (Support) - Read-only access
+                    "READ_ALL_UPDATES", "VIEW_UPDATE_STATISTICS", "VIEW_UPDATE_DOWNLOADS",
                     // Profile Management (Support)
                     "VIEW_PROFILE", "UPDATE_PROFILE", "VIEW_USER_PROFILE", "VIEW_HIERARCHY", 
                     "SEARCH_USERS", "VIEW_USER_ACTIVITY"
@@ -389,8 +420,23 @@ namespace BitRaserApiProject.Services
                     "READ_REPORT", "UPDATE_REPORT", "EXPORT_REPORTS",
                     "READ_SESSION", "END_SESSION", "EXTEND_SESSION",
                     "READ_LOG",
+                    // Update Management (User) - Basic read access only
+                    "READ_UPDATE",
                     // Profile Management (User) - Basic profile access only
                     "VIEW_PROFILE", "UPDATE_PROFILE"
+                }),
+
+                new("SubUser", new[]
+                {
+                    "ViewOnly",
+                    "READ_MACHINE",
+                    "READ_REPORT", "EXPORT_REPORTS",
+                    "READ_SESSION", "END_SESSION",
+                    "READ_LOG",
+                    // Update Management (SubUser) - Very limited access
+                    "READ_UPDATE",
+                    // Profile Management (SubUser) - Basic profile access only
+                    "VIEW_PROFILE"
                 })
             };
         }

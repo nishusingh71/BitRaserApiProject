@@ -159,24 +159,67 @@ namespace BitRaserApiProject.Models
         public string user_password_hash { get; set; } // User's password hash
     }
 
-    // Add the missing Update class
+    // Enhanced Update model with additional properties
     public class Update
     {
         [Key]
         public int version_id { get; set; } // Primary Key
 
         [Required, MaxLength(20)]
-        public string version_number { get; set; } // e.g. "1.0.0"
+        public string version_number { get; set; } = string.Empty; // e.g. "1.0.0"
 
         [Required]
-        public string changelog { get; set; } // Description of changes
+        public string changelog { get; set; } = string.Empty; // Description of changes
 
         [Required, MaxLength(500)]
-        public string download_link { get; set; } // URL to installer
+        public string download_link { get; set; } = string.Empty; // URL to installer
 
         public DateTime release_date { get; set; } = DateTime.UtcNow; // Release timestamp
 
-        public bool is_mandatory_update { get; set; } = false; // Release timestamp
+        public bool is_mandatory_update { get; set; } = false; // Whether update is mandatory
+
+        // Enhanced properties
+        [MaxLength(50)]
+        public string? update_type { get; set; } = "minor"; // "major", "minor", "patch", "hotfix"
+
+        [MaxLength(20)]
+        public string? update_status { get; set; } = "active"; // "active", "deprecated", "recalled"
+
+        public long? file_size_bytes { get; set; } // Size of update file in bytes
+
+        [MaxLength(255)]
+        public string? checksum_md5 { get; set; } // MD5 checksum for file verification
+
+        [MaxLength(255)]
+        public string? checksum_sha256 { get; set; } // SHA256 checksum for file verification
+
+        [MaxLength(255)]
+        public string? minimum_os_version { get; set; } // Minimum OS version required
+
+        [MaxLength(500)]
+        public string? supported_platforms { get; set; } // Comma-separated platform list
+
+        public DateTime? deprecation_date { get; set; } // When this version will be deprecated
+
+        [MaxLength(255)]
+        public string? created_by_email { get; set; } // Email of user who created this update
+
+        public DateTime created_at { get; set; } = DateTime.UtcNow; // Creation timestamp
+
+        public DateTime updated_at { get; set; } = DateTime.UtcNow; // Last modification timestamp
+
+        [MaxLength(1000)]
+        public string? security_notes { get; set; } // Security-related information
+
+        [MaxLength(1000)]
+        public string? installation_notes { get; set; } // Special installation instructions
+
+        public bool requires_restart { get; set; } = false; // Whether system restart is required
+
+        public bool auto_download_enabled { get; set; } = true; // Whether auto-download is allowed
+
+        [MaxLength(100)]
+        public string? rollback_version { get; set; } // Version to rollback to if this update fails
     }
     
     // Role-based system models
@@ -194,6 +237,16 @@ namespace BitRaserApiProject.Models
         public int HierarchyLevel { get; set; }
         
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        
+        // Navigation properties
+        [JsonIgnore]
+        public ICollection<RolePermission>? RolePermissions { get; set; } = new List<RolePermission>();
+        
+        [JsonIgnore]
+        public ICollection<UserRole>? UserRoles { get; set; } = new List<UserRole>();
+        
+        [JsonIgnore]
+        public ICollection<SubuserRole>? SubuserRoles { get; set; } = new List<SubuserRole>();
     }
 
     public class Permission
@@ -208,6 +261,23 @@ namespace BitRaserApiProject.Models
         public string Description { get; set; } = string.Empty;
         
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        
+        // Navigation properties
+        [JsonIgnore]
+        public ICollection<RolePermission>? RolePermissions { get; set; } = new List<RolePermission>();
+    }
+
+    public class RolePermission
+    {
+        public int RoleId { get; set; }
+        public int PermissionId { get; set; }
+        
+        // Navigation properties
+        [JsonIgnore]
+        public Role? Role { get; set; }
+        
+        [JsonIgnore]
+        public Permission? Permission { get; set; }
     }
 
     public class UserRole
@@ -216,6 +286,13 @@ namespace BitRaserApiProject.Models
         public int RoleId { get; set; }
         public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
         public string AssignedByEmail { get; set; } = string.Empty;
+        
+        // Navigation properties
+        [JsonIgnore]
+        public users? User { get; set; }
+        
+        [JsonIgnore]
+        public Role? Role { get; set; }
     }
 
     public class SubuserRole
@@ -224,6 +301,13 @@ namespace BitRaserApiProject.Models
         public int RoleId { get; set; }
         public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
         public string AssignedByEmail { get; set; } = string.Empty;
+        
+        // Navigation properties
+        [JsonIgnore]
+        public subuser? Subuser { get; set; }
+        
+        [JsonIgnore]
+        public Role? Role { get; set; }
     }
 }
 

@@ -10,6 +10,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Enhanced Sessions management controller with automatic expiration and role-based access control
+    /// Supports both users and subusers with appropriate access levels
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
@@ -18,25 +19,27 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
+        private readonly IUserDataService _userDataService;
         
         // Default session expiration time (configurable)
         private readonly TimeSpan DefaultSessionTimeout = TimeSpan.FromHours(24); // 24 hours
         private readonly TimeSpan ExtendedSessionTimeout = TimeSpan.FromDays(7);  // 7 days for remember me
 
-        public EnhancedSessionsController(ApplicationDbContext context, IRoleBasedAuthService authService)
+        public EnhancedSessionsController(ApplicationDbContext context, IRoleBasedAuthService authService, IUserDataService userDataService)
         {
             _context = context;
             _authService = authService;
+            _userDataService = userDataService;
         }
 
         /// <summary>
         /// Get all sessions with role-based filtering and automatic cleanup
         /// </summary>
         [HttpGet]
-        [RequirePermission("READ_ALL_SESSIONS")]
         public async Task<ActionResult<IEnumerable<object>>> GetSessions([FromQuery] SessionFilterRequest? filter)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
             // Cleanup expired sessions first
             await CleanupExpiredSessionsAsync();
@@ -44,9 +47,9 @@ namespace BitRaserApiProject.Controllers
             IQueryable<Sessions> query = _context.Sessions;
 
             // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_SESSIONS"))
+            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_SESSIONS", isCurrentUserSubuser))
             {
-                // Users can only see their own sessions
+                // Users and subusers can only see their own sessions
                 query = query.Where(s => s.user_email == userEmail);
             }
 
@@ -98,19 +101,21 @@ namespace BitRaserApiProject.Controllers
         /// Get session by ID with ownership validation
         /// </summary>
         [HttpGet("{id}")]
-        [RequirePermission("READ_SESSION")]
         public async Task<ActionResult<object>> GetSession(int id)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             var session = await _context.Sessions.FindAsync(id);
             
             if (session == null) return NotFound();
 
-            // Users can only view their own sessions unless they have admin permission
-            if (session.user_email != userEmail && 
-                !await _authService.HasPermissionAsync(userEmail!, "READ_ALL_SESSIONS"))
+            // Users and subusers can only view their own sessions unless they have admin permission
+            bool canView = session.user_email == userEmail ||
+                          await _authService.HasPermissionAsync(userEmail!, "READ_ALL_SESSIONS", isCurrentUserSubuser);
+
+            if (!canView)
             {
-                return StatusCode(403,new { error = "You can only view your own sessions" });
+                return StatusCode(403, new { error = "You can only view your own sessions" });
             }
 
             // Check if session is expired
@@ -141,16 +146,19 @@ namespace BitRaserApiProject.Controllers
         /// Get user sessions by email with management hierarchy
         /// </summary>
         [HttpGet("by-email/{email}")]
-        [RequirePermission("READ_USER_SESSIONS")]
         public async Task<ActionResult<IEnumerable<object>>> GetSessionsByEmail(string email)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             // Check if user can view sessions for this email
-            if (email != currentUserEmail && 
-                !await _authService.CanManageUserAsync(currentUserEmail!, email))
+            bool canView = email == currentUserEmail ||
+                          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SESSIONS", isCurrentUserSubuser) ||
+                          await _authService.CanManageUserAsync(currentUserEmail!, email);
+
+            if (!canView)
             {
-                return StatusCode(403,new { error = "You can only view your own sessions or sessions of users you manage" });
+                return StatusCode(403, new { error = "You can only view your own sessions or sessions of users you manage" });
             }
 
             // Cleanup expired sessions first
@@ -178,7 +186,7 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Create a new session - Used during login
+        /// Create a new session - Used during login (for both users and subusers)
         /// </summary>
         [AllowAnonymous]
         [HttpPost]
@@ -187,10 +195,12 @@ namespace BitRaserApiProject.Controllers
             if (string.IsNullOrEmpty(request.UserEmail))
                 return BadRequest("User email is required");
 
-            // Validate that user exists
-            var userExists = await _context.Users.AnyAsync(u => u.user_email == request.UserEmail);
+            // Validate that user or subuser exists
+            bool userExists = await _userDataService.UserExistsAsync(request.UserEmail) ||
+                             await _userDataService.SubuserExistsAsync(request.UserEmail);
+            
             if (!userExists)
-                return BadRequest("User does not exist");
+                return BadRequest("User or subuser does not exist");
 
             var session = new Sessions
             {
@@ -219,22 +229,24 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// End session (logout) - Users can end their own sessions
+        /// End session (logout) - Users and subusers can end their own sessions
         /// </summary>
         [HttpPatch("{id}/end")]
-        [RequirePermission("END_SESSION")]
         public async Task<IActionResult> EndSession(int id)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             var session = await _context.Sessions.FindAsync(id);
             
             if (session == null) return NotFound();
 
-            // Users can only end their own sessions unless they have admin permission
-            if (session.user_email != userEmail && 
-                !await _authService.HasPermissionAsync(userEmail!, "END_ALL_SESSIONS"))
+            // Users and subusers can only end their own sessions unless they have admin permission
+            bool canEnd = session.user_email == userEmail ||
+                         await _authService.HasPermissionAsync(userEmail!, "END_ALL_SESSIONS", isCurrentUserSubuser);
+
+            if (!canEnd)
             {
-                return StatusCode(403,new { error = "You can only end your own sessions" });
+                return StatusCode(403, new { error = "You can only end your own sessions" });
             }
 
             if (session.session_status != "active")
@@ -250,19 +262,21 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// End all active sessions for a user - Admin or user themselves
+        /// End all active sessions for a user - Admin or user themselves (including subusers)
         /// </summary>
         [HttpPatch("end-all/{email}")]
-        [RequirePermission("END_USER_SESSIONS")]
         public async Task<IActionResult> EndAllUserSessions(string email)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             // Check if user can end sessions for this email
-            if (email != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "END_ALL_SESSIONS"))
+            bool canEnd = email == currentUserEmail ||
+                         await _authService.HasPermissionAsync(currentUserEmail!, "END_ALL_SESSIONS", isCurrentUserSubuser);
+
+            if (!canEnd)
             {
-                return StatusCode(403,new { error = "You can only end your own sessions or have admin permissions" });
+                return StatusCode(403, new { error = "You can only end your own sessions or have admin permissions" });
             }
 
             var activeSessions = await _context.Sessions
@@ -287,10 +301,9 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Extend session expiration time - Users can extend their own sessions
+        /// Extend session expiration time - Users and subusers can extend their own sessions
         /// </summary>
         [HttpPatch("{id}/extend")]
-        [RequirePermission("EXTEND_SESSION")]
         public async Task<IActionResult> ExtendSession(int id, [FromBody] SessionExtendRequest request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -298,9 +311,9 @@ namespace BitRaserApiProject.Controllers
             
             if (session == null) return NotFound();
 
-            // Users can only extend their own sessions
+            // Users and subusers can only extend their own sessions
             if (session.user_email != userEmail)
-                return StatusCode(403,new { error = "You can only extend your own sessions" });
+                return StatusCode(403, new { error = "You can only extend your own sessions" });
 
             if (session.session_status != "active")
                 return BadRequest("Cannot extend inactive session");
@@ -332,13 +345,13 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Get session statistics - Admin level access
+        /// Get session statistics - Users and subusers can see their own stats
         /// </summary>
         [HttpGet("statistics")]
-        [RequirePermission("READ_SESSION_STATISTICS")]
         public async Task<ActionResult<object>> GetSessionStatistics([FromQuery] string? userEmail)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             // Cleanup expired sessions first
             await CleanupExpiredSessionsAsync();
@@ -346,9 +359,9 @@ namespace BitRaserApiProject.Controllers
             IQueryable<Sessions> query = _context.Sessions;
 
             // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SESSION_STATISTICS"))
+            if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SESSION_STATISTICS", isCurrentUserSubuser))
             {
-                // Users can only see their own statistics
+                // Users and subusers can only see their own statistics
                 userEmail = currentUserEmail;
             }
 
@@ -387,13 +400,13 @@ namespace BitRaserApiProject.Controllers
         /// Cleanup all expired sessions - Admin only
         /// </summary>
         [HttpPost("cleanup-expired")]
-        [RequirePermission("CLEANUP_SESSIONS")]
         public async Task<IActionResult> CleanupExpiredSessions()
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "CLEANUP_SESSIONS"))
-                return StatusCode(403,new { error = "Insufficient permissions to cleanup sessions" });
+            if (!await _authService.HasPermissionAsync(userEmail!, "CLEANUP_SESSIONS", isCurrentUserSubuser))
+                return StatusCode(403, new { error = "Insufficient permissions to cleanup sessions" });
 
             var cleanedCount = await CleanupExpiredSessionsAsync();
 

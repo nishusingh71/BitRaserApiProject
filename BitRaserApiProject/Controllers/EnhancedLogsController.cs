@@ -11,6 +11,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Enhanced Logs management controller with comprehensive role-based access control and advanced filtering
+    /// Supports both users and subusers with appropriate access levels
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
@@ -19,29 +20,31 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
+        private readonly IUserDataService _userDataService;
 
-        public EnhancedLogsController(ApplicationDbContext context, IRoleBasedAuthService authService)
+        public EnhancedLogsController(ApplicationDbContext context, IRoleBasedAuthService authService, IUserDataService userDataService)
         {
             _context = context;
             _authService = authService;
+            _userDataService = userDataService;
         }
 
         /// <summary>
         /// Get all logs with role-based filtering and advanced search
         /// </summary>
         [HttpGet]
-        [RequirePermission("READ_ALL_LOGS")]
         public async Task<ActionResult<IEnumerable<object>>> GetLogs([FromQuery] LogFilterRequest? filter)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
             IQueryable<logs> query = _context.logs;
 
             // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_LOGS"))
+            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_LOGS", isCurrentUserSubuser))
             {
-                // Users can only see their own logs unless they have elevated permissions
-                if (await _authService.HasPermissionAsync(userEmail!, "READ_USER_LOGS"))
+                // Users and subusers can only see their own logs unless they have elevated permissions
+                if (await _authService.HasPermissionAsync(userEmail!, "READ_USER_LOGS", isCurrentUserSubuser))
                 {
                     // Managers and Support can see logs for users they manage
                     var managedUsers = await GetManagedUsersAsync(userEmail!);
@@ -49,7 +52,7 @@ namespace BitRaserApiProject.Controllers
                 }
                 else
                 {
-                    // Regular users see only their own logs
+                    // Regular users and subusers see only their own logs
                     query = query.Where(l => l.user_email == userEmail);
                 }
             }
@@ -110,7 +113,6 @@ namespace BitRaserApiProject.Controllers
         /// Get log by ID with role validation
         /// </summary>
         [HttpGet("{id}")]
-        [RequirePermission("READ_LOG")]
         public async Task<ActionResult<logs>> GetLog(int id)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -120,7 +122,7 @@ namespace BitRaserApiProject.Controllers
 
             // Check if user can view this log
             if (!await CanViewLogAsync(userEmail!, log))
-                return StatusCode(403,new { error = "Insufficient permissions to view this log entry" });
+                return StatusCode(403, new { error = "Insufficient permissions to view this log entry" });
 
             return Ok(log);
         }
@@ -129,16 +131,19 @@ namespace BitRaserApiProject.Controllers
         /// Get logs by user email with management hierarchy
         /// </summary>
         [HttpGet("by-email/{email}")]
-        [RequirePermission("READ_USER_LOGS")]
         public async Task<ActionResult<IEnumerable<logs>>> GetLogsByEmail(string email)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             // Check if user can view logs for this email
-            if (email != currentUserEmail && 
-                !await _authService.CanManageUserAsync(currentUserEmail!, email))
+            bool canView = email == currentUserEmail ||
+                          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_LOGS", isCurrentUserSubuser) ||
+                          await _authService.CanManageUserAsync(currentUserEmail!, email);
+
+            if (!canView)
             {
-                return StatusCode(403,new { error = "You can only view your own logs or logs of users you manage" });
+                return StatusCode(403, new { error = "You can only view your own logs or logs of users you manage" });
             }
 
             var logEntries = await _context.logs
@@ -150,16 +155,22 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Create a new log entry - System level or Admin access
+        /// Create a new log entry - Users and subusers can create their own logs
         /// </summary>
         [HttpPost]
-        [RequirePermission("CREATE_LOG")]
         public async Task<ActionResult<logs>> CreateLog([FromBody] LogCreateRequest request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "CREATE_LOG"))
-                return StatusCode(403,new { error = "Insufficient permissions to create log entries" });
+            // Allow users and subusers to create logs for themselves, or if they have special permissions
+            var targetUserEmail = request.UserEmail ?? userEmail;
+            
+            bool canCreate = targetUserEmail == userEmail ||
+                           await _authService.HasPermissionAsync(userEmail!, "CREATE_LOG", isCurrentUserSubuser);
+
+            if (!canCreate)
+                return StatusCode(403, new { error = "You can only create logs for yourself or if you have special permissions" });
 
             if (string.IsNullOrEmpty(request.LogMessage))
                 return BadRequest("Log message is required");
@@ -170,7 +181,7 @@ namespace BitRaserApiProject.Controllers
 
             var log = new logs
             {
-                user_email = request.UserEmail ?? userEmail, // Use current user if not specified
+                user_email = targetUserEmail,
                 log_level = request.LogLevel,
                 log_message = request.LogMessage,
                 log_details_json = request.LogDetailsJson ?? "{}",
@@ -184,21 +195,26 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Create log entry for specific user email - System level or Admin access
+        /// Create log entry for specific user email - Admin level or self
         /// </summary>
         [HttpPost("for-user/{userEmail}")]
-        [RequirePermission("CREATE_LOG")]
         public async Task<ActionResult<logs>> CreateLogForUser(string userEmail, [FromBody] LogCreateRequest request)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
-            if (!await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_LOG"))
-                return StatusCode(403,new { error = "Insufficient permissions to create log entries" });
+            // Allow if creating for self or has admin permissions
+            bool canCreate = userEmail == currentUserEmail ||
+                           await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_LOG", isCurrentUserSubuser);
 
-            // Validate that target user exists
-            var userExists = await _context.Users.AnyAsync(u => u.user_email == userEmail);
-            if (!userExists)
-                return BadRequest($"User with email {userEmail} not found");
+            if (!canCreate)
+                return StatusCode(403, new { error = "You can only create logs for yourself or if you have special permissions" });
+
+            // Validate that target user exists (user or subuser)
+            bool targetExists = await _userDataService.UserExistsAsync(userEmail) || 
+                               await _userDataService.SubuserExistsAsync(userEmail);
+            if (!targetExists)
+                return BadRequest($"User or subuser with email {userEmail} not found");
 
             if (string.IsNullOrEmpty(request.LogMessage))
                 return BadRequest("Log message is required");
@@ -249,19 +265,23 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Delete log entries - Admin only (with retention policy)
+        /// Delete log entries - Users can delete their own logs, admins can delete any
         /// </summary>
         [HttpDelete("{id}")]
-        [RequirePermission("DELETE_LOG")]
         public async Task<IActionResult> DeleteLog(int id)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "DELETE_LOG"))
-                return StatusCode(403,new { error = "Insufficient permissions to delete log entries" });
-
             var log = await _context.logs.FindAsync(id);
             if (log == null) return NotFound();
+
+            // Allow deletion if it's the user's own log or they have admin permissions
+            bool canDelete = log.user_email == userEmail ||
+                           await _authService.HasPermissionAsync(userEmail!, "DELETE_LOG", isCurrentUserSubuser);
+
+            if (!canDelete)
+                return StatusCode(403, new { error = "You can only delete your own log entries or need admin permissions" });
 
             _context.logs.Remove(log);
             await _context.SaveChangesAsync();
@@ -270,29 +290,27 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Get log statistics and analytics - Manager level access
+        /// Get log statistics and analytics - Manager level access or own logs
         /// </summary>
         [HttpGet("statistics")]
-        [RequirePermission("READ_LOG_STATISTICS")]
         public async Task<ActionResult<object>> GetLogStatistics([FromQuery] LogStatisticsRequest? request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "READ_LOG_STATISTICS"))
-                return StatusCode(403,new { error = "Insufficient permissions to view log statistics" });
-
             IQueryable<logs> query = _context.logs;
 
             // Apply role-based filtering for statistics
-            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_LOG_STATISTICS"))
+            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_LOG_STATISTICS", isCurrentUserSubuser))
             {
-                if (await _authService.HasPermissionAsync(userEmail!, "READ_USER_LOG_STATISTICS"))
+                if (await _authService.HasPermissionAsync(userEmail!, "READ_USER_LOG_STATISTICS", isCurrentUserSubuser))
                 {
                     var managedUsers = await GetManagedUsersAsync(userEmail!);
                     query = query.Where(l => managedUsers.Contains(l.user_email) || l.user_email == userEmail);
                 }
                 else
                 {
+                    // Users and subusers see only their own log statistics
                     query = query.Where(l => l.user_email == userEmail);
                 }
             }
@@ -339,26 +357,31 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Search logs with advanced filtering - Support level access
+        /// Search logs with advanced filtering - Support level access or own logs
         /// </summary>
         [HttpPost("search")]
-        [RequirePermission("SEARCH_LOGS")]
         public async Task<ActionResult<IEnumerable<object>>> SearchLogs([FromBody] LogSearchRequest request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "SEARCH_LOGS"))
-                return StatusCode(403,new { error = "Insufficient permissions to search logs" });
-
             try
             {
                 IQueryable<logs> query = _context.logs;
 
                 // Apply role-based filtering
-                if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_LOGS"))
+                if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_LOGS", isCurrentUserSubuser))
                 {
-                    var managedUsers = await GetManagedUsersAsync(userEmail!);
-                    query = query.Where(l => managedUsers.Contains(l.user_email) || l.user_email == userEmail);
+                    if (await _authService.HasPermissionAsync(userEmail!, "SEARCH_LOGS", isCurrentUserSubuser))
+                    {
+                        var managedUsers = await GetManagedUsersAsync(userEmail!);
+                        query = query.Where(l => managedUsers.Contains(l.user_email) || l.user_email == userEmail);
+                    }
+                    else
+                    {
+                        // Users and subusers can only search their own logs
+                        query = query.Where(l => l.user_email == userEmail);
+                    }
                 }
 
                 // Apply search filters - exclude problematic JSON searches if they might cause issues
@@ -433,24 +456,29 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Export logs to CSV - Admin access
+        /// Export logs to CSV - Admin access or own logs
         /// </summary>
         [HttpGet("export-csv")]
-        [RequirePermission("EXPORT_LOGS")]
         public async Task<IActionResult> ExportLogsCSV([FromQuery] LogExportRequest request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_LOGS"))
-                return StatusCode(403,new { error = "Insufficient permissions to export logs" });
-
             IQueryable<logs> query = _context.logs;
 
             // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_LOGS"))
+            if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_LOGS", isCurrentUserSubuser))
             {
-                var managedUsers = await GetManagedUsersAsync(userEmail!);
-                query = query.Where(l => managedUsers.Contains(l.user_email) || l.user_email == userEmail);
+                if (await _authService.HasPermissionAsync(userEmail!, "EXPORT_LOGS", isCurrentUserSubuser))
+                {
+                    var managedUsers = await GetManagedUsersAsync(userEmail!);
+                    query = query.Where(l => managedUsers.Contains(l.user_email) || l.user_email == userEmail);
+                }
+                else
+                {
+                    // Users and subusers can only export their own logs
+                    query = query.Where(l => l.user_email == userEmail);
+                }
             }
 
             // Apply filters
@@ -482,13 +510,13 @@ namespace BitRaserApiProject.Controllers
         /// Clean up old logs based on retention policy - Admin only
         /// </summary>
         [HttpPost("cleanup")]
-        [RequirePermission("CLEANUP_LOGS")]
         public async Task<IActionResult> CleanupOldLogs([FromBody] LogCleanupRequest request)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
-            if (!await _authService.HasPermissionAsync(userEmail!, "CLEANUP_LOGS"))
-                return StatusCode(403,new { error = "Insufficient permissions to cleanup logs" });
+            if (!await _authService.HasPermissionAsync(userEmail!, "CLEANUP_LOGS", isCurrentUserSubuser))
+                return StatusCode(403, new { error = "Insufficient permissions to cleanup logs" });
 
             var cutoffDate = request.RetentionDays.HasValue 
                 ? DateTime.UtcNow.AddDays(-request.RetentionDays.Value)
@@ -521,16 +549,18 @@ namespace BitRaserApiProject.Controllers
 
         private async Task<bool> CanViewLogAsync(string currentUserEmail, logs log)
         {
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+            
             // System admins can view all logs
-            if (await _authService.HasPermissionAsync(currentUserEmail, "READ_ALL_LOGS"))
+            if (await _authService.HasPermissionAsync(currentUserEmail, "READ_ALL_LOGS", isCurrentUserSubuser))
                 return true;
 
-            // Users can view their own logs
+            // Users and subusers can view their own logs
             if (log.user_email == currentUserEmail)
                 return true;
 
             // Managers can view logs of users they manage
-            if (await _authService.HasPermissionAsync(currentUserEmail, "READ_USER_LOGS"))
+            if (await _authService.HasPermissionAsync(currentUserEmail, "READ_USER_LOGS", isCurrentUserSubuser))
             {
                 return await _authService.CanManageUserAsync(currentUserEmail, log.user_email ?? "");
             }

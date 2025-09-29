@@ -10,6 +10,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Enhanced Profile Controller with hierarchical user management and comprehensive profile operations
+    /// Supports both users and subusers with appropriate access levels
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
@@ -18,38 +19,449 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
+        private readonly IUserDataService _userDataService;
 
-        public EnhancedProfileController(ApplicationDbContext context, IRoleBasedAuthService authService)
+        public EnhancedProfileController(ApplicationDbContext context, IRoleBasedAuthService authService, IUserDataService userDataService)
         {
             _context = context;
             _authService = authService;
+            _userDataService = userDataService;
         }
 
         /// <summary>
-        /// Get current user's profile with comprehensive details
+        /// Get current user's profile with comprehensive details (supports both users and subusers)
         /// </summary>
         [HttpGet("my-profile")]
-        [RequirePermission("VIEW_PROFILE")]
         public async Task<ActionResult<object>> GetMyProfile()
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
+            if (isCurrentUserSubuser)
+            {
+                return await GetSubuserProfile(currentUserEmail!);
+            }
+            else
+            {
+                return await GetUserProfile(currentUserEmail!);
+            }
+        }
+
+        /// <summary>
+        /// Get user or subuser profile by email with hierarchy validation
+        /// </summary>
+        [HttpGet("profile/{userEmail}")]
+        public async Task<ActionResult<object>> GetUserProfileByEmail(string userEmail)
+        {
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+            var isTargetSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+            
+            // Check if current user can view this profile
+            bool canView = userEmail == currentUserEmail ||
+                          await _authService.HasPermissionAsync(currentUserEmail!, "VIEW_USER_PROFILE", isCurrentUserSubuser) ||
+                          await CanManageUserAsync(currentUserEmail!, userEmail);
+
+            if (!canView)
+            {
+                return StatusCode(403, new { error = "You can only view profiles you have access to in your hierarchy" });
+            }
+
+            if (isTargetSubuser)
+            {
+                return await GetSubuserProfile(userEmail);
+            }
+            else
+            {
+                return await GetUserProfile(userEmail);
+            }
+        }
+
+        /// <summary>
+        /// Update current user's profile (supports both users and subusers)
+        /// </summary>
+        [HttpPut("my-profile")]
+        public async Task<IActionResult> UpdateMyProfile([FromBody] UpdateProfileRequest request)
+        {
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+            
+            if (isCurrentUserSubuser)
+            {
+                return await UpdateSubuserProfile(currentUserEmail!, request);
+            }
+            else
+            {
+                return await UpdateUserProfile(currentUserEmail!, request);
+            }
+        }
+
+        /// <summary>
+        /// Get users in current user's hierarchy (subordinates) - includes subusers
+        /// </summary>
+        [HttpGet("my-hierarchy")]
+        public async Task<ActionResult<object>> GetMyHierarchy()
+        {
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+            
+            if (isCurrentUserSubuser)
+            {
+                // Subusers cannot manage hierarchy
+                return StatusCode(403, new { error = "Subusers do not have hierarchy management access" });
+            }
+
+            var currentUser = await _context.Users
+                .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+                .FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+
+            if (currentUser == null) return NotFound("User not found");
+
+            var currentUserHighestRole = currentUser.UserRoles
+                .OrderBy(ur => ur.Role.HierarchyLevel)
+                .FirstOrDefault()?.Role;
+
+            if (currentUserHighestRole == null)
+                return Ok(new { message = "No hierarchy information available", subordinates = new List<object>() });
+
+            // Get subordinate users
+            var subordinateUsers = await _context.Users
+                .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+                .Where(u => u.user_email != currentUserEmail &&
+                           u.UserRoles.Any(ur => ur.Role.HierarchyLevel > currentUserHighestRole.HierarchyLevel))
+                .Select(u => new {
+                    u.user_email,
+                    u.user_name,
+                    u.created_at,
+                    UserType = "User",
+                    HighestRole = u.UserRoles
+                        .OrderBy(ur => ur.Role.HierarchyLevel)
+                        .FirstOrDefault().Role.RoleName,
+                    HierarchyLevel = u.UserRoles
+                        .OrderBy(ur => ur.Role.HierarchyLevel)
+                        .FirstOrDefault().Role.HierarchyLevel,
+                    CanManage = true
+                })
+                .OrderBy(u => u.HierarchyLevel)
+                .ThenBy(u => u.user_name)
+                .ToListAsync();
+
+            // Get subusers managed by current user
+            var managedSubusers = await _context.subuser
+                .Include(s => s.SubuserRoles)
+                .ThenInclude(sr => sr.Role)
+                .Where(s => s.user_email == currentUserEmail)
+                .Select(s => new {
+                    user_email = s.subuser_email,
+                    user_name = $"Subuser: {s.subuser_email}",
+                    created_at = DateTime.MinValue, // Subuser table doesn't have created_at
+                    UserType = "Subuser",
+                    HighestRole = s.SubuserRoles
+                        .OrderBy(sr => sr.Role.HierarchyLevel)
+                        .FirstOrDefault() != null 
+                            ? s.SubuserRoles.OrderBy(sr => sr.Role.HierarchyLevel).FirstOrDefault().Role.RoleName 
+                            : "SubUser",
+                    HierarchyLevel = s.SubuserRoles
+                        .OrderBy(sr => sr.Role.HierarchyLevel)
+                        .FirstOrDefault() != null 
+                            ? s.SubuserRoles.OrderBy(sr => sr.Role.HierarchyLevel).FirstOrDefault().Role.HierarchyLevel 
+                            : 10, // Default low priority
+                    CanManage = true
+                })
+                .ToListAsync();
+
+            // Get peers (same hierarchy level)
+            var peers = await _context.Users
+                .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+                .Where(u => u.user_email != currentUserEmail &&
+                           u.UserRoles.Any(ur => ur.Role.HierarchyLevel == currentUserHighestRole.HierarchyLevel))
+                .Select(u => new {
+                    u.user_email,
+                    u.user_name,
+                    u.created_at,
+                    UserType = "User",
+                    HighestRole = u.UserRoles
+                        .OrderBy(ur => ur.Role.HierarchyLevel)
+                        .FirstOrDefault().Role.RoleName
+                })
+                .OrderBy(u => u.user_name)
+                .ToListAsync();
+
+            var hierarchy = new
+            {
+                CurrentUser = new
+                {
+                    currentUser.user_email,
+                    currentUser.user_name,
+                    UserType = "User",
+                    Role = currentUserHighestRole.RoleName,
+                    HierarchyLevel = currentUserHighestRole.HierarchyLevel
+                },
+                DirectReports = subordinateUsers.Where(u => u.HierarchyLevel == currentUserHighestRole.HierarchyLevel + 1).ToList(),
+                ManagedSubusers = managedSubusers,
+                AllSubordinates = subordinateUsers,
+                Peers = peers,
+                HierarchyStatistics = new
+                {
+                    DirectReportCount = subordinateUsers.Count(u => u.HierarchyLevel == currentUserHighestRole.HierarchyLevel + 1),
+                    TotalSubordinateCount = subordinateUsers.Count,
+                    ManagedSubuserCount = managedSubusers.Count,
+                    PeerCount = peers.Count,
+                    CanManageUsers = subordinateUsers.Any() || managedSubusers.Any()
+                }
+            };
+
+            return Ok(hierarchy);
+        }
+
+        /// <summary>
+        /// Search users and subusers by hierarchy and filters
+        /// </summary>
+        [HttpGet("search-users")]
+        public async Task<ActionResult<object>> SearchUsers([FromQuery] UserSearchRequest request)
+        {
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+            
+            if (isCurrentUserSubuser)
+            {
+                return StatusCode(403, new { error = "Subusers cannot search other users" });
+            }
+
+            var users = new List<object>();
+            var subusers = new List<object>();
+
+            // Search users
+            IQueryable<users> userQuery = _context.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role);
+
+            // Apply hierarchy filter based on current user's level
+            if (!await _authService.HasPermissionAsync(currentUserEmail!, "VIEW_ALL_USERS", isCurrentUserSubuser))
+            {
+                var currentUserRole = await GetCurrentUserHighestRole(currentUserEmail!);
+                if (currentUserRole != null)
+                {
+                    // Only show users with same or lower hierarchy level
+                    userQuery = userQuery.Where(u => u.UserRoles.Any(ur => ur.Role.HierarchyLevel >= currentUserRole.HierarchyLevel));
+                }
+            }
+
+            // Apply search filters for users
+            if (!string.IsNullOrEmpty(request.SearchTerm))
+            {
+                userQuery = userQuery.Where(u => u.user_name.Contains(request.SearchTerm) || 
+                                               u.user_email.Contains(request.SearchTerm));
+            }
+
+            if (!string.IsNullOrEmpty(request.Role))
+            {
+                userQuery = userQuery.Where(u => u.UserRoles.Any(ur => ur.Role.RoleName == request.Role));
+            }
+
+            if (request.HierarchyLevel.HasValue)
+            {
+                userQuery = userQuery.Where(u => u.UserRoles.Any(ur => ur.Role.HierarchyLevel == request.HierarchyLevel.Value));
+            }
+
+            if (request.CreatedFrom.HasValue)
+            {
+                userQuery = userQuery.Where(u => u.created_at >= request.CreatedFrom.Value);
+            }
+
+            if (request.CreatedTo.HasValue)
+            {
+                userQuery = userQuery.Where(u => u.created_at <= request.CreatedTo.Value);
+            }
+
+            users = await userQuery
+                .OrderBy(u => u.UserRoles.Min(ur => ur.Role.HierarchyLevel))
+                .ThenBy(u => u.user_name)
+                .Skip(request.Page * request.PageSize / 2) // Split page size between users and subusers
+                .Take(request.PageSize / 2)
+                .Select(u => new {
+                    u.user_email,
+                    u.user_name,
+                    u.phone_number,
+                    u.created_at,
+                    UserType = "User",
+                    HighestRole = u.UserRoles
+                        .OrderBy(ur => ur.Role.HierarchyLevel)
+                        .FirstOrDefault().Role.RoleName,
+                    HierarchyLevel = u.UserRoles
+                        .OrderBy(ur => ur.Role.HierarchyLevel)
+                        .FirstOrDefault().Role.HierarchyLevel,
+                    CanManage = true
+                })
+                .ToListAsync<object>();
+
+            // Search subusers (only if user can manage subusers)
+            if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser))
+            {
+                IQueryable<subuser> subuserQuery = _context.subuser.Include(s => s.SubuserRoles).ThenInclude(sr => sr.Role);
+
+                // Apply search filters for subusers
+                if (!string.IsNullOrEmpty(request.SearchTerm))
+                {
+                    subuserQuery = subuserQuery.Where(s => s.subuser_email.Contains(request.SearchTerm));
+                }
+
+                subusers = await subuserQuery
+                    .OrderBy(s => s.subuser_email)
+                    .Skip(request.Page * request.PageSize / 2)
+                    .Take(request.PageSize / 2)
+                    .Select(s => new {
+                        user_email = s.subuser_email,
+                        user_name = $"Subuser: {s.subuser_email}",
+                        created_at = DateTime.MinValue,
+                        UserType = "Subuser",
+                        HighestRole = s.SubuserRoles
+                            .OrderBy(sr => sr.Role.HierarchyLevel)
+                            .Select(sr => sr.Role.RoleName)
+                            .FirstOrDefault() ?? "SubUser",
+                        HierarchyLevel = s.SubuserRoles
+                            .OrderBy(sr => sr.Role.HierarchyLevel)
+                            .Select(sr => sr.Role.HierarchyLevel)
+                            .FirstOrDefault(),
+                        CanManage = true,
+                        ParentUser = s.user_email
+                    })
+                    .ToListAsync<object>();
+            }
+
+            var allResults = users.Concat(subusers).ToList();
+            var totalCount = await userQuery.CountAsync() + (subusers.Any() ? await _context.subuser.CountAsync() : 0);
+
+            return Ok(new {
+                Users = allResults,
+                Pagination = new {
+                    Page = request.Page,
+                    PageSize = request.PageSize,
+                    TotalCount = totalCount,
+                    TotalPages = (int)Math.Ceiling((double)totalCount / request.PageSize),
+                    UserCount = users.Count,
+                    SubuserCount = subusers.Count
+                },
+                SearchCriteria = request
+            });
+        }
+
+        /// <summary>
+        /// Get profile statistics and analytics (includes subuser data)
+        /// </summary>
+        [HttpGet("profile-analytics")]
+        public async Task<ActionResult<object>> GetProfileAnalytics()
+        {
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+
+            if (isCurrentUserSubuser || !await _authService.HasPermissionAsync(currentUserEmail!, "VIEW_PROFILE_ANALYTICS", isCurrentUserSubuser))
+            {
+                return StatusCode(403, new { error = "Insufficient permissions to view profile analytics" });
+            }
+
+            var analytics = new
+            {
+                UserDistribution = await _context.UserRoles
+                    .Include(ur => ur.Role)
+                    .GroupBy(ur => ur.Role.RoleName)
+                    .Select(g => new { Role = g.Key, Count = g.Count(), UserType = "User" })
+                    .OrderBy(x => x.Role)
+                    .ToListAsync(),
+
+                SubuserDistribution = await _context.SubuserRoles
+                    .Include(sr => sr.Role)
+                    .GroupBy(sr => sr.Role.RoleName)
+                    .Select(g => new { Role = g.Key, Count = g.Count(), UserType = "Subuser" })
+                    .OrderBy(x => x.Role)
+                    .ToListAsync(),
+
+                HierarchyDistribution = await _context.UserRoles
+                    .Include(ur => ur.Role)
+                    .GroupBy(ur => ur.Role.HierarchyLevel)
+                    .Select(g => new { 
+                        HierarchyLevel = g.Key, 
+                        Count = g.Count(),
+                        RoleName = g.FirstOrDefault().Role.RoleName,
+                        UserType = "User"
+                    })
+                    .OrderBy(x => x.HierarchyLevel)
+                    .ToListAsync(),
+
+                RecentRegistrations = await _context.Users
+                    .Where(u => u.created_at >= DateTime.UtcNow.AddDays(-30))
+                    .GroupBy(u => u.created_at.Date)
+                    .Select(g => new { Date = g.Key, Count = g.Count(), UserType = "User" })
+                    .OrderByDescending(x => x.Date)
+                    .Take(30)
+                    .ToListAsync(),
+
+                ActiveUsers = new
+                {
+                    TotalUsers = await _context.Users.CountAsync(),
+                    TotalSubusers = await _context.subuser.CountAsync(),
+                    UsersWithSessions = await _context.Sessions
+                        .Where(s => s.login_time >= DateTime.UtcNow.AddDays(-30))
+                        .Join(_context.Users, s => s.user_email, u => u.user_email, (s, u) => s.user_email)
+                        .Distinct()
+                        .CountAsync(),
+                    SubusersWithSessions = await _context.Sessions
+                        .Where(s => s.login_time >= DateTime.UtcNow.AddDays(-30))
+                        .Join(_context.subuser, s => s.user_email, su => su.subuser_email, (s, su) => s.user_email)
+                        .Distinct()
+                        .CountAsync(),
+                    UsersWithRecentActivity = await _context.logs
+                        .Where(l => l.created_at >= DateTime.UtcNow.AddDays(-7))
+                        .Join(_context.Users, l => l.user_email, u => u.user_email, (l, u) => l.user_email)
+                        .Distinct()
+                        .CountAsync(),
+                    SubusersWithRecentActivity = await _context.logs
+                        .Where(l => l.created_at >= DateTime.UtcNow.AddDays(-7))
+                        .Join(_context.subuser, l => l.user_email, su => su.subuser_email, (l, su) => l.user_email)
+                        .Distinct()
+                        .CountAsync()
+                },
+
+                TopSubuserParents = await _context.subuser
+                    .GroupBy(s => s.user_email)
+                    .Select(g => new { ParentEmail = g.Key, SubuserCount = g.Count() })
+                    .OrderByDescending(x => x.SubuserCount)
+                    .Take(10)
+                    .ToListAsync(),
+
+                GeneratedAt = DateTime.UtcNow,
+                GeneratedBy = currentUserEmail
+            };
+
+            return Ok(analytics);
+        }
+
+        #region Private Helper Methods
+
+        private async Task<ActionResult<object>> GetUserProfile(string userEmail)
+        {
             var user = await _context.Users
                 .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
                 .ThenInclude(r => r.RolePermissions)
                 .ThenInclude(rp => rp.Permission)
-                .FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+                .FirstOrDefaultAsync(u => u.user_email == userEmail);
             
-            if (user == null) return NotFound("Profile not found");
+            if (user == null) return NotFound("User profile not found");
+
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var canViewSensitiveInfo = userEmail == currentUserEmail || 
+                                      await _authService.HasPermissionAsync(currentUserEmail!, "VIEW_SENSITIVE_PROFILE_INFO");
 
             var profile = new
             {
+                UserType = "User",
                 PersonalInfo = new
                 {
                     user.user_email,
                     user.user_name,
-                    user.phone_number,
+                    PhoneNumber = canViewSensitiveInfo ? user.phone_number : "****",
                     user.created_at,
                     user.updated_at,
                     AccountAge = DateTime.UtcNow - user.created_at,
@@ -74,79 +486,71 @@ namespace BitRaserApiProject.Controllers
                         .OrderBy(ur => ur.Role.HierarchyLevel)
                         .FirstOrDefault()?.Role.RoleName ?? "User"
                 },
-                Statistics = await GetUserStatistics(currentUserEmail!),
-                HierarchyInfo = await GetUserHierarchy(currentUserEmail!),
-                RecentActivity = await GetRecentActivity(currentUserEmail!)
+                Statistics = canViewSensitiveInfo ? await GetUserStatistics(userEmail) : null,
+                HierarchyInfo = await GetUserHierarchy(userEmail),
+                RecentActivity = canViewSensitiveInfo ? await GetRecentActivity(userEmail) : null
             };
 
             return Ok(profile);
         }
 
-        /// <summary>
-        /// Get user profile by email with hierarchy validation
-        /// </summary>
-        [HttpGet("profile/{userEmail}")]
-        [RequirePermission("VIEW_USER_PROFILE")]
-        public async Task<ActionResult<object>> GetUserProfile(string userEmail)
+        private async Task<ActionResult<object>> GetSubuserProfile(string subuserEmail)
         {
+            var subuser = await _context.subuser
+                .Include(s => s.SubuserRoles)
+                .ThenInclude(sr => sr.Role)
+                .ThenInclude(r => r.RolePermissions)
+                .ThenInclude(rp => rp.Permission)
+                .FirstOrDefaultAsync(s => s.subuser_email == subuserEmail);
+            
+            if (subuser == null) return NotFound("Subuser profile not found");
+
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
-            // Check if current user can view this profile
-            if (userEmail != currentUserEmail && !await CanManageUserAsync(currentUserEmail!, userEmail))
-            {
-                return StatusCode(403,new { error = "You can only view profiles you have access to in your hierarchy" });
-            }
-
-            var user = await _context.Users
-                .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-                .FirstOrDefaultAsync(u => u.user_email == userEmail);
-            
-            if (user == null) return NotFound($"User profile with email {userEmail} not found");
-
-            var canViewSensitiveInfo = await _authService.HasPermissionAsync(currentUserEmail!, "VIEW_SENSITIVE_PROFILE_INFO");
+            var canViewSensitiveInfo = subuserEmail == currentUserEmail || 
+                                      subuser.user_email == currentUserEmail ||
+                                      await _authService.HasPermissionAsync(currentUserEmail!, "VIEW_SENSITIVE_PROFILE_INFO");
 
             var profile = new
             {
+                UserType = "Subuser",
                 PersonalInfo = new
                 {
-                    user.user_email,
-                    user.user_name,
-                    PhoneNumber = canViewSensitiveInfo ? user.phone_number : "****",
-                    user.created_at,
-                    user.updated_at,
-                    AccountAge = DateTime.UtcNow - user.created_at
+                    subuser_email = subuser.subuser_email,
+                    parent_user_email = subuser.user_email,
+                    subuser_id = subuser.subuser_id,
+                    HasPassword = !string.IsNullOrEmpty(subuser.subuser_password),
+                    created_at = DateTime.MinValue, // Subuser table doesn't have created_at
+                    updated_at = DateTime.MinValue  // Subuser table doesn't have updated_at
                 },
                 SecurityInfo = new
                 {
-                    Roles = user.UserRoles.Select(ur => new {
-                        RoleName = ur.Role.RoleName,
-                        HierarchyLevel = ur.Role.HierarchyLevel,
-                        AssignedAt = ur.AssignedAt
+                    Roles = subuser.SubuserRoles.Select(sr => new {
+                        RoleName = sr.Role.RoleName,
+                        Description = sr.Role.Description,
+                        HierarchyLevel = sr.Role.HierarchyLevel,
+                        AssignedAt = sr.AssignedAt,
+                        AssignedBy = sr.AssignedByEmail
                     }).ToList(),
-                    HighestRole = user.UserRoles
-                        .OrderBy(ur => ur.Role.HierarchyLevel)
-                        .FirstOrDefault()?.Role.RoleName ?? "User"
+                    Permissions = subuser.SubuserRoles
+                        .SelectMany(sr => sr.Role.RolePermissions)
+                        .Select(rp => rp.Permission.PermissionName)
+                        .Distinct()
+                        .ToList(),
+                    HighestRole = subuser.SubuserRoles
+                        .OrderBy(sr => sr.Role.HierarchyLevel)
+                        .FirstOrDefault()?.Role.RoleName ?? "SubUser"
                 },
-                Statistics = canViewSensitiveInfo ? await GetUserStatistics(userEmail) : null,
-                HierarchyInfo = await GetUserHierarchyPublic(userEmail),
-                ManagementInfo = await GetManagementInfo(currentUserEmail!, userEmail)
+                Statistics = canViewSensitiveInfo ? await GetSubuserStatistics(subuserEmail) : null,
+                RecentActivity = canViewSensitiveInfo ? await GetRecentActivity(subuserEmail) : null
             };
 
             return Ok(profile);
         }
 
-        /// <summary>
-        /// Update current user's profile
-        /// </summary>
-        [HttpPut("my-profile")]
-        [RequirePermission("UPDATE_PROFILE")]
-        public async Task<IActionResult> UpdateMyProfile([FromBody] UpdateProfileRequest request)
+        private async Task<IActionResult> UpdateUserProfile(string userEmail, UpdateProfileRequest request)
         {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
-            if (user == null) return NotFound("Profile not found");
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+            if (user == null) return NotFound("User profile not found");
 
             // Update allowed fields
             if (!string.IsNullOrEmpty(request.UserName))
@@ -161,323 +565,45 @@ namespace BitRaserApiProject.Controllers
             await _context.SaveChangesAsync();
 
             return Ok(new { 
-                message = "Profile updated successfully", 
+                message = "User profile updated successfully", 
+                userType = "User",
                 updatedAt = user.updated_at 
             });
         }
 
-        /// <summary>
-        /// Get users in current user's hierarchy (subordinates)
-        /// </summary>
-        [HttpGet("my-hierarchy")]
-        [RequirePermission("VIEW_HIERARCHY")]
-        public async Task<ActionResult<object>> GetMyHierarchy()
+        private async Task<IActionResult> UpdateSubuserProfile(string subuserEmail, UpdateProfileRequest request)
         {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
-            var currentUser = await _context.Users
-                .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-                .FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+            var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == subuserEmail);
+            if (subuser == null) return NotFound("Subuser profile not found");
 
-            if (currentUser == null) return NotFound("User not found");
+            // For subusers, we can only update limited information
+            // Most profile updates should be done through the Enhanced Subuser Controller
 
-            var currentUserHighestRole = currentUser.UserRoles
-                .OrderBy(ur => ur.Role.HierarchyLevel)
-                .FirstOrDefault()?.Role;
+            return Ok(new { 
+                message = "Subuser profile information is limited. Use Enhanced Subuser Controller for full management.",
+                userType = "Subuser",
+                subuserEmail = subuserEmail,
+                parentUserEmail = subuser.user_email,
+                note = "Contact your parent user for profile updates or use /api/EnhancedSubuser endpoints"
+            });
+        }
 
-            if (currentUserHighestRole == null)
-                return Ok(new { message = "No hierarchy information available", subordinates = new List<object>() });
-
-            // Get users with lower hierarchy levels (higher numbers)
-            var subordinates = await _context.Users
-                .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-                .Where(u => u.user_email != currentUserEmail &&
-                           u.UserRoles.Any(ur => ur.Role.HierarchyLevel > currentUserHighestRole.HierarchyLevel))
-                .Select(u => new {
-                    u.user_email,
-                    u.user_name,
-                    u.created_at,
-                    HighestRole = u.UserRoles
-                        .OrderBy(ur => ur.Role.HierarchyLevel)
-                        .FirstOrDefault().Role.RoleName,
-                    HierarchyLevel = u.UserRoles
-                        .OrderBy(ur => ur.Role.HierarchyLevel)
-                        .FirstOrDefault().Role.HierarchyLevel,
-                    CanManage = true // They can manage all subordinates
-                })
-                .OrderBy(u => u.HierarchyLevel)
-                .ThenBy(u => u.user_name)
-                .ToListAsync();
-
-            // Get direct reports (users managed by current user)
-            var directReports = await GetDirectReports(currentUserEmail!);
-
-            // Get peers (same hierarchy level)
-            var peers = await _context.Users
-                .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-                .Where(u => u.user_email != currentUserEmail &&
-                           u.UserRoles.Any(ur => ur.Role.HierarchyLevel == currentUserHighestRole.HierarchyLevel))
-                .Select(u => new {
-                    u.user_email,
-                    u.user_name,
-                    u.created_at,
-                    HighestRole = u.UserRoles
-                        .OrderBy(ur => ur.Role.HierarchyLevel)
-                        .FirstOrDefault().Role.RoleName
-                })
-                .OrderBy(u => u.user_name)
-                .ToListAsync();
-
-            var hierarchy = new
+        private async Task<object> GetSubuserStatistics(string subuserEmail)
+        {
+            return new
             {
-                CurrentUser = new
-                {
-                    currentUser.user_email,
-                    currentUser.user_name,
-                    Role = currentUserHighestRole.RoleName,
-                    HierarchyLevel = currentUserHighestRole.HierarchyLevel
-                },
-                DirectReports = directReports,
-                AllSubordinates = subordinates,
-                Peers = peers,
-                HierarchyStatistics = new
-                {
-                    DirectReportCount = directReports.Count,
-                    TotalSubordinateCount = subordinates.Count,
-                    PeerCount = peers.Count,
-                    CanManageUsers = subordinates.Any()
-                }
+                TotalMachines = await _context.Machines.CountAsync(m => m.subuser_email == subuserEmail),
+                ActiveLicenses = await _context.Machines.CountAsync(m => m.subuser_email == subuserEmail && m.license_activated),
+                TotalReports = await _context.AuditReports.CountAsync(r => r.client_email == subuserEmail),
+                TotalSessions = await _context.Sessions.CountAsync(s => s.user_email == subuserEmail),
+                TotalLogs = await _context.logs.CountAsync(l => l.user_email == subuserEmail),
+                LastLoginDate = await _context.Sessions
+                    .Where(s => s.user_email == subuserEmail)
+                    .OrderByDescending(s => s.login_time)
+                    .Select(s => s.login_time)
+                    .FirstOrDefaultAsync()
             };
-
-            return Ok(hierarchy);
         }
-
-        /// <summary>
-        /// Get organizational hierarchy tree
-        /// </summary>
-        [HttpGet("organization-hierarchy")]
-        [RequirePermission("VIEW_ORGANIZATION_HIERARCHY")]
-        public async Task<ActionResult<object>> GetOrganizationHierarchy()
-        {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
-            // Get all roles ordered by hierarchy
-            var roles = await _context.Roles
-                .OrderBy(r => r.HierarchyLevel)
-                .ToListAsync();
-
-            var organizationTree = new List<object>();
-
-            foreach (var role in roles)
-            {
-                var usersInRole = await _context.UserRoles
-                    .Include(ur => ur.User)
-                    .Include(ur => ur.Role)
-                    .Where(ur => ur.RoleId == role.RoleId)
-                    .Select(ur => new {
-                        ur.User.user_email,
-                        ur.User.user_name,
-                        ur.User.created_at,
-                        AssignedAt = ur.AssignedAt,
-                        CanView = true // Implement logic based on current user's permissions
-                    })
-                    .ToListAsync();
-
-                organizationTree.Add(new {
-                    Role = role.RoleName,
-                    HierarchyLevel = role.HierarchyLevel,
-                    Description = role.Description,
-                    UserCount = usersInRole.Count,
-                    Users = usersInRole
-                });
-            }
-
-            return Ok(new {
-                OrganizationHierarchy = organizationTree,
-                TotalUsers = await _context.Users.CountAsync(),
-                TotalRoles = roles.Count,
-                GeneratedBy = currentUserEmail,
-                GeneratedAt = DateTime.UtcNow
-            });
-        }
-
-        /// <summary>
-        /// Assign user to direct reports (management relationship)
-        /// </summary>
-        [HttpPost("assign-direct-report")]
-        [RequirePermission("MANAGE_HIERARCHY")]
-        public async Task<IActionResult> AssignDirectReport([FromBody] AssignDirectReportRequest request)
-        {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
-            // Validate that current user can manage the target user
-            if (!await CanManageUserAsync(currentUserEmail!, request.UserEmail))
-            {
-                return StatusCode(403,new { error = "You cannot manage this user based on hierarchy rules" });
-            }
-
-            // Check if user exists
-            var targetUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.UserEmail);
-            if (targetUser == null)
-                return NotFound($"User with email {request.UserEmail} not found");
-
-            // Create management relationship (you can store this in a separate table if needed)
-            // For now, we'll use the existing role system to establish hierarchy
-
-            return Ok(new {
-                message = $"User {request.UserEmail} assigned as direct report",
-                manager = currentUserEmail,
-                directReport = request.UserEmail,
-                assignedAt = DateTime.UtcNow
-            });
-        }
-
-        /// <summary>
-        /// Search users by hierarchy and filters
-        /// </summary>
-        [HttpGet("search-users")]
-        [RequirePermission("SEARCH_USERS")]
-        public async Task<ActionResult<object>> SearchUsers([FromQuery] UserSearchRequest request)
-        {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
-            IQueryable<users> query = _context.Users.Include(u => u.UserRoles).ThenInclude(ur => ur.Role);
-
-            // Apply hierarchy filter based on current user's level
-            if (!await _authService.HasPermissionAsync(currentUserEmail!, "VIEW_ALL_USERS"))
-            {
-                var currentUserRole = await GetCurrentUserHighestRole(currentUserEmail!);
-                if (currentUserRole != null)
-                {
-                    // Only show users with same or lower hierarchy level
-                    query = query.Where(u => u.UserRoles.Any(ur => ur.Role.HierarchyLevel >= currentUserRole.HierarchyLevel));
-                }
-            }
-
-            // Apply search filters
-            if (!string.IsNullOrEmpty(request.SearchTerm))
-            {
-                query = query.Where(u => u.user_name.Contains(request.SearchTerm) || 
-                                        u.user_email.Contains(request.SearchTerm));
-            }
-
-            if (!string.IsNullOrEmpty(request.Role))
-            {
-                query = query.Where(u => u.UserRoles.Any(ur => ur.Role.RoleName == request.Role));
-            }
-
-            if (request.HierarchyLevel.HasValue)
-            {
-                query = query.Where(u => u.UserRoles.Any(ur => ur.Role.HierarchyLevel == request.HierarchyLevel.Value));
-            }
-
-            if (request.CreatedFrom.HasValue)
-            {
-                query = query.Where(u => u.created_at >= request.CreatedFrom.Value);
-            }
-
-            if (request.CreatedTo.HasValue)
-            {
-                query = query.Where(u => u.created_at <= request.CreatedTo.Value);
-            }
-
-            var users = await query
-                .OrderBy(u => u.UserRoles.Min(ur => ur.Role.HierarchyLevel))
-                .ThenBy(u => u.user_name)
-                .Skip(request.Page * request.PageSize)
-                .Take(request.PageSize)
-                .Select(u => new {
-                    u.user_email,
-                    u.user_name,
-                    u.phone_number,
-                    u.created_at,
-                    HighestRole = u.UserRoles
-                        .OrderBy(ur => ur.Role.HierarchyLevel)
-                        .FirstOrDefault().Role.RoleName,
-                    HierarchyLevel = u.UserRoles
-                        .OrderBy(ur => ur.Role.HierarchyLevel)
-                        .FirstOrDefault().Role.HierarchyLevel,
-                    CanManage = true // Calculate based on hierarchy
-                })
-                .ToListAsync();
-
-            var totalCount = await query.CountAsync();
-
-            return Ok(new {
-                Users = users,
-                Pagination = new {
-                    Page = request.Page,
-                    PageSize = request.PageSize,
-                    TotalCount = totalCount,
-                    TotalPages = (int)Math.Ceiling((double)totalCount / request.PageSize)
-                },
-                SearchCriteria = request
-            });
-        }
-
-        /// <summary>
-        /// Get profile statistics and analytics
-        /// </summary>
-        [HttpGet("profile-analytics")]
-        [RequirePermission("VIEW_PROFILE_ANALYTICS")]
-        public async Task<ActionResult<object>> GetProfileAnalytics()
-        {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-            var analytics = new
-            {
-                UserDistribution = await _context.UserRoles
-                    .Include(ur => ur.Role)
-                    .GroupBy(ur => ur.Role.RoleName)
-                    .Select(g => new { Role = g.Key, Count = g.Count() })
-                    .OrderBy(x => x.Role)
-                    .ToListAsync(),
-
-                HierarchyDistribution = await _context.UserRoles
-                    .Include(ur => ur.Role)
-                    .GroupBy(ur => ur.Role.HierarchyLevel)
-                    .Select(g => new { 
-                        HierarchyLevel = g.Key, 
-                        Count = g.Count(),
-                        RoleName = g.FirstOrDefault().Role.RoleName
-                    })
-                    .OrderBy(x => x.HierarchyLevel)
-                    .ToListAsync(),
-
-                RecentRegistrations = await _context.Users
-                    .Where(u => u.created_at >= DateTime.UtcNow.AddDays(-30))
-                    .GroupBy(u => u.created_at.Date)
-                    .Select(g => new { Date = g.Key, Count = g.Count() })
-                    .OrderByDescending(x => x.Date)
-                    .Take(30)
-                    .ToListAsync(),
-
-                ActiveUsers = new
-                {
-                    Total = await _context.Users.CountAsync(),
-                    WithSessions = await _context.Sessions
-                        .Where(s => s.login_time >= DateTime.UtcNow.AddDays(-30))
-                        .Select(s => s.user_email)
-                        .Distinct()
-                        .CountAsync(),
-                    WithRecentActivity = await _context.logs
-                        .Where(l => l.created_at >= DateTime.UtcNow.AddDays(-7))
-                        .Select(l => l.user_email)
-                        .Distinct()
-                        .CountAsync()
-                },
-
-                GeneratedAt = DateTime.UtcNow,
-                GeneratedBy = currentUserEmail
-            };
-
-            return Ok(analytics);
-        }
-
-        #region Private Helper Methods
 
         private async Task<object> GetUserStatistics(string userEmail)
         {
@@ -499,82 +625,52 @@ namespace BitRaserApiProject.Controllers
 
         private async Task<object> GetUserHierarchy(string userEmail)
         {
-            var user = await _context.Users
-                .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-                .FirstOrDefaultAsync(u => u.user_email == userEmail);
-
-            if (user == null) return null;
-
-            var highestRole = user.UserRoles.OrderBy(ur => ur.Role.HierarchyLevel).FirstOrDefault()?.Role;
-
-            return new
+            var isSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+            
+            if (isSubuser)
             {
-                CurrentLevel = highestRole?.HierarchyLevel,
-                CurrentRole = highestRole?.RoleName,
-                CanManageUsers = highestRole?.HierarchyLevel < 5, // Lower levels can manage higher levels
-                ManagedUserCount = await GetManagedUserCount(userEmail),
-                ReportsTo = await GetReportsTo(userEmail)
-            };
-        }
+                var subuser = await _context.subuser
+                    .Include(s => s.SubuserRoles)
+                    .ThenInclude(sr => sr.Role)
+                    .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
 
-        private async Task<object> GetUserHierarchyPublic(string userEmail)
-        {
-            var user = await _context.Users
-                .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-                .FirstOrDefaultAsync(u => u.user_email == userEmail);
+                if (subuser == null) return null;
 
-            if (user == null) return null;
+                var highestRole = subuser.SubuserRoles.OrderBy(sr => sr.Role.HierarchyLevel).FirstOrDefault()?.Role;
 
-            var highestRole = user.UserRoles.OrderBy(ur => ur.Role.HierarchyLevel).FirstOrDefault()?.Role;
-
-            return new
+                return new
+                {
+                    UserType = "Subuser",
+                    CurrentLevel = highestRole?.HierarchyLevel ?? 10,
+                    CurrentRole = highestRole?.RoleName ?? "SubUser",
+                    ParentUser = subuser.user_email,
+                    CanManageUsers = false, // Subusers cannot manage other users
+                    ManagedUserCount = 0,
+                    ReportsTo = subuser.user_email
+                };
+            }
+            else
             {
-                CurrentRole = highestRole?.RoleName,
-                HierarchyLevel = highestRole?.HierarchyLevel
-            };
-        }
+                var user = await _context.Users
+                    .Include(u => u.UserRoles)
+                    .ThenInclude(ur => ur.Role)
+                    .FirstOrDefaultAsync(u => u.user_email == userEmail);
 
-        private async Task<object> GetManagementInfo(string currentUserEmail, string targetUserEmail)
-        {
-            var canManage = await CanManageUserAsync(currentUserEmail, targetUserEmail);
-            var managedByCurrentUser = await IsDirectReport(currentUserEmail, targetUserEmail);
+                if (user == null) return null;
 
-            return new
-            {
-                CanManage = canManage,
-                IsDirectReport = managedByCurrentUser,
-                ManagementActions = canManage ? new[] {
-                    "assign_roles",
-                    "view_statistics",
-                    "manage_permissions",
-                    "view_activity"
-                } : new string[0]
-            };
-        }
+                var highestRole = user.UserRoles.OrderBy(ur => ur.Role.HierarchyLevel).FirstOrDefault()?.Role;
 
-        private async Task<List<object>> GetDirectReports(string managerEmail)
-        {
-            var managerRole = await GetCurrentUserHighestRole(managerEmail);
-            if (managerRole == null) return new List<object>();
-
-            // Get users with immediately lower hierarchy level
-            var directReports = await _context.Users
-                .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-                .Where(u => u.UserRoles.Any(ur => ur.Role.HierarchyLevel == managerRole.HierarchyLevel + 1))
-                .Select(u => new {
-                    u.user_email,
-                    u.user_name,
-                    u.created_at,
-                    Role = u.UserRoles
-                        .OrderBy(ur => ur.Role.HierarchyLevel)
-                        .FirstOrDefault().Role.RoleName
-                })
-                .ToListAsync<object>();
-
-            return directReports;
+                return new
+                {
+                    UserType = "User",
+                    CurrentLevel = highestRole?.HierarchyLevel,
+                    CurrentRole = highestRole?.RoleName,
+                    CanManageUsers = highestRole?.HierarchyLevel < 5, // Lower levels can manage higher levels
+                    ManagedUserCount = await GetManagedUserCount(userEmail),
+                    ManagedSubuserCount = await _context.subuser.CountAsync(s => s.user_email == userEmail),
+                    ReportsTo = await GetReportsTo(userEmail)
+                };
+            }
         }
 
         private async Task<object> GetRecentActivity(string userEmail)
@@ -611,6 +707,20 @@ namespace BitRaserApiProject.Controllers
         {
             if (managerEmail == targetUserEmail) return true;
 
+            var isManagerSubuser = await _userDataService.SubuserExistsAsync(managerEmail);
+            var isTargetSubuser = await _userDataService.SubuserExistsAsync(targetUserEmail);
+
+            // Subusers cannot manage anyone
+            if (isManagerSubuser) return false;
+
+            // Users can manage their own subusers
+            if (isTargetSubuser)
+            {
+                var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == targetUserEmail);
+                return subuser?.user_email == managerEmail;
+            }
+
+            // Regular user hierarchy management
             var managerRole = await GetCurrentUserHighestRole(managerEmail);
             var targetRole = await GetCurrentUserHighestRole(targetUserEmail);
 
@@ -656,13 +766,6 @@ namespace BitRaserApiProject.Controllers
                 .FirstOrDefaultAsync();
 
             return supervisor;
-        }
-
-        private async Task<bool> IsDirectReport(string managerEmail, string targetUserEmail)
-        {
-            // Implementation depends on how you track direct reporting relationships
-            // This is a simplified version based on hierarchy levels
-            return await CanManageUserAsync(managerEmail, targetUserEmail);
         }
 
         #endregion

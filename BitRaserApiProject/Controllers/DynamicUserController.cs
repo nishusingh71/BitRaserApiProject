@@ -10,6 +10,7 @@ namespace BitRaserApiProject.Controllers
     /// <summary>
     /// Dynamic User Management Controller - All operations are email-based
     /// No hardcoded IDs required for any operations
+    /// Supports both users and subusers with appropriate access levels
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
@@ -18,19 +19,22 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IUserDataService _userDataService;
+        private readonly IRoleBasedAuthService _authService;
         private readonly ILogger<DynamicUserController> _logger;
 
         public DynamicUserController(
             ApplicationDbContext context,
             IUserDataService userDataService,
+            IRoleBasedAuthService authService,
             ILogger<DynamicUserController> logger)
         {
             _context = context;
             _userDataService = userDataService;
+            _authService = authService;
             _logger = logger;
         }
 
-        #region User Profile Operations
+        #region User/Subuser Profile Operations
 
         [HttpGet("profile")]
         public async Task<IActionResult> GetMyProfile()
@@ -39,21 +43,48 @@ namespace BitRaserApiProject.Controllers
             if (string.IsNullOrEmpty(email))
                 return Unauthorized();
 
-            var user = await _userDataService.GetUserByEmailAsync(email);
-            if (user == null)
-                return NotFound("User not found");
+            var isSubuser = await _userDataService.SubuserExistsAsync(email);
 
-            var userInfo = new
+            if (isSubuser)
             {
-                user.user_email,
-                user.user_name,
-                user.phone_number,
-                roles = await _userDataService.GetUserRoleNamesAsync(email, false),
-                permissions = await _userDataService.GetUserPermissionsAsync(email, false),
-                subusers = (await _userDataService.GetSubusersByParentEmailAsync(email)).Select(s => s.subuser_email)
-            };
+                var subuser = await _userDataService.GetSubuserByEmailAsync(email);
+                if (subuser == null)
+                    return NotFound("Subuser not found");
 
-            return Ok(userInfo);
+                var subuserInfo = new
+                {
+                    subuser_email = subuser.subuser_email,
+                    parent_user_email = subuser.user_email,
+                    subuser_id = subuser.subuser_id,
+                    user_type = "Subuser",
+                    roles = await _userDataService.GetUserRoleNamesAsync(email, true),
+                    permissions = await _userDataService.GetUserPermissionsAsync(email, true),
+                    parent_subusers = new List<string>(), // Subusers cannot have subusers
+                    can_create_subusers = false
+                };
+
+                return Ok(subuserInfo);
+            }
+            else
+            {
+                var user = await _userDataService.GetUserByEmailAsync(email);
+                if (user == null)
+                    return NotFound("User not found");
+
+                var userInfo = new
+                {
+                    user.user_email,
+                    user.user_name,
+                    user.phone_number,
+                    user_type = "User",
+                    roles = await _userDataService.GetUserRoleNamesAsync(email, false),
+                    permissions = await _userDataService.GetUserPermissionsAsync(email, false),
+                    subusers = (await _userDataService.GetSubusersByParentEmailAsync(email)).Select(s => s.subuser_email),
+                    can_create_subusers = await _userDataService.HasPermissionAsync(email, "UserManagement")
+                };
+
+                return Ok(userInfo);
+            }
         }
 
         [HttpPut("profile")]
@@ -63,22 +94,41 @@ namespace BitRaserApiProject.Controllers
             if (string.IsNullOrEmpty(email))
                 return Unauthorized();
 
-            var user = await _userDataService.GetUserByEmailAsync(email);
-            if (user == null)
-                return NotFound("User not found");
+            var isSubuser = await _userDataService.SubuserExistsAsync(email);
 
-            user.user_name = request.UserName ?? user.user_name;
-            user.phone_number = request.PhoneNumber ?? user.phone_number;
+            if (isSubuser)
+            {
+                // Subusers have limited profile update options
+                return Ok(new { 
+                    message = "Subuser profile updates are limited. Contact your parent user for changes.",
+                    user_type = "Subuser",
+                    subuser_email = email,
+                    note = "Use Enhanced Subuser Controller for password changes or contact parent user for other updates"
+                });
+            }
+            else
+            {
+                var user = await _userDataService.GetUserByEmailAsync(email);
+                if (user == null)
+                    return NotFound("User not found");
 
-            _context.Entry(user).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
+                user.user_name = request.UserName ?? user.user_name;
+                user.phone_number = request.PhoneNumber ?? user.phone_number;
 
-            return Ok(new { message = "Profile updated successfully" });
+                _context.Entry(user).State = EntityState.Modified;
+                await _context.SaveChangesAsync();
+
+                return Ok(new { 
+                    message = "User profile updated successfully",
+                    user_type = "User",
+                    updated_at = DateTime.UtcNow
+                });
+            }
         }
 
         #endregion
 
-        #region Subuser Management
+        #region Subuser Management (Users Only)
 
         [HttpGet("subusers")]
         public async Task<IActionResult> GetMySubusers()
@@ -86,6 +136,12 @@ namespace BitRaserApiProject.Controllers
             var email = GetCurrentUserEmail();
             if (string.IsNullOrEmpty(email))
                 return Unauthorized();
+
+            var isSubuser = await _userDataService.SubuserExistsAsync(email);
+            if (isSubuser)
+            {
+                return StatusCode(403, new { error = "Subusers cannot manage other subusers" });
+            }
 
             var subusers = await _userDataService.GetSubusersByParentEmailAsync(email);
             
@@ -95,12 +151,19 @@ namespace BitRaserApiProject.Controllers
                 subuserInfo.Add(new
                 {
                     subuser.subuser_email,
+                    subuser.user_email,
+                    subuser.subuser_id,
                     roles = await _userDataService.GetUserRoleNamesAsync(subuser.subuser_email, true),
-                    permissions = await _userDataService.GetUserPermissionsAsync(subuser.subuser_email, true)
+                    permissions = await _userDataService.GetUserPermissionsAsync(subuser.subuser_email, true),
+                    has_password = !string.IsNullOrEmpty(subuser.subuser_password)
                 });
             }
 
-            return Ok(subuserInfo);
+            return Ok(new {
+                parent_user_email = email,
+                total_subusers = subuserInfo.Count,
+                subusers = subuserInfo
+            });
         }
 
         [HttpPost("subusers")]
@@ -110,6 +173,12 @@ namespace BitRaserApiProject.Controllers
             if (string.IsNullOrEmpty(parentEmail))
                 return Unauthorized();
 
+            var isSubuser = await _userDataService.SubuserExistsAsync(parentEmail);
+            if (isSubuser)
+            {
+                return StatusCode(403, new { error = "Subusers cannot create other subusers" });
+            }
+
             // Validate email format
             if (!await _userDataService.ValidateEmailFormatAsync(request.SubuserEmail))
                 return BadRequest("Invalid email format");
@@ -118,9 +187,9 @@ namespace BitRaserApiProject.Controllers
             if (await _userDataService.SubuserExistsAsync(request.SubuserEmail))
                 return Conflict("Subuser email already exists");
 
-            // Check if requester has permission to create subusers
-            if (!await _userDataService.HasPermissionAsync(parentEmail, "UserManagement"))
-                return StatusCode(403,new { error = "You don't have permission to create subusers" });
+            // Check if email is already used as a main user
+            if (await _userDataService.UserExistsAsync(request.SubuserEmail))
+                return Conflict("Email is already used as a main user account");
 
             // Get parent user
             var parentUser = await _userDataService.GetUserByEmailAsync(parentEmail);
@@ -140,13 +209,17 @@ namespace BitRaserApiProject.Controllers
             _context.subuser.Add(newSubuser);
             await _context.SaveChangesAsync();
 
-            // Assign default role if specified
-            if (!string.IsNullOrEmpty(request.DefaultRole))
-            {
-                await _userDataService.AssignRoleByEmailAsync(request.SubuserEmail, request.DefaultRole, parentEmail, true);
-            }
+            // Assign default role if specified, otherwise assign "SubUser" role
+            var roleToAssign = request.DefaultRole ?? "SubUser";
+            await _userDataService.AssignRoleByEmailAsync(request.SubuserEmail, roleToAssign, parentEmail, true);
 
-            return Ok(new { message = "Subuser created successfully", email = request.SubuserEmail });
+            return Ok(new { 
+                message = "Subuser created successfully", 
+                subuser_email = request.SubuserEmail,
+                parent_email = parentEmail,
+                default_role = roleToAssign,
+                created_at = DateTime.UtcNow
+            });
         }
 
         [HttpPut("subusers/{subuserEmail}/roles")]
@@ -156,15 +229,17 @@ namespace BitRaserApiProject.Controllers
             if (string.IsNullOrEmpty(parentEmail))
                 return Unauthorized();
 
+            var isSubuser = await _userDataService.SubuserExistsAsync(parentEmail);
+            if (isSubuser)
+            {
+                return StatusCode(403, new { error = "Subusers cannot manage roles" });
+            }
+
             // Check if this subuser belongs to the current user
             if (!await _userDataService.IsSubuserOfUserAsync(subuserEmail, parentEmail))
-				StatusCode(403, new { error = "You don't have permission to create subusers" });
+                return StatusCode(403, new { error = "You can only manage roles for your own subusers" });
 
-			// Check permission
-			if (!await _userDataService.HasPermissionAsync(parentEmail, "UserManagement"))
-				StatusCode(403, new { error = "You don't have permission to create subusers" });
-
-			var results = new List<object>();
+            var results = new List<object>();
 
             // Add roles
             foreach (var roleName in request.RolesToAdd ?? new List<string>())
@@ -180,7 +255,13 @@ namespace BitRaserApiProject.Controllers
                 results.Add(new { action = "remove", role = roleName, success });
             }
 
-            return Ok(new { message = "Role operations completed", results });
+            return Ok(new { 
+                message = "Role operations completed", 
+                subuser_email = subuserEmail,
+                parent_email = parentEmail,
+                results = results,
+                timestamp = DateTime.UtcNow
+            });
         }
 
         [HttpDelete("subusers/{subuserEmail}")]
@@ -190,18 +271,29 @@ namespace BitRaserApiProject.Controllers
             if (string.IsNullOrEmpty(parentEmail))
                 return Unauthorized();
 
+            var isSubuser = await _userDataService.SubuserExistsAsync(parentEmail);
+            if (isSubuser)
+            {
+                return StatusCode(403, new { error = "Subusers cannot delete other subusers" });
+            }
+
             // Check if this subuser belongs to the current user
             if (!await _userDataService.IsSubuserOfUserAsync(subuserEmail, parentEmail))
-				StatusCode(403, new { error = "You don't have permission to create subusers" });
+                return StatusCode(403, new { error = "You can only delete your own subusers" });
 
-			var subuser = await _userDataService.GetSubuserByEmailAsync(subuserEmail);
+            var subuser = await _userDataService.GetSubuserByEmailAsync(subuserEmail);
             if (subuser == null)
                 return NotFound("Subuser not found");
 
             _context.subuser.Remove(subuser);
             await _context.SaveChangesAsync();
 
-            return Ok(new { message = "Subuser deleted successfully" });
+            return Ok(new { 
+                message = "Subuser deleted successfully",
+                deleted_subuser_email = subuserEmail,
+                parent_email = parentEmail,
+                deleted_at = DateTime.UtcNow
+            });
         }
 
         #endregion
@@ -215,8 +307,15 @@ namespace BitRaserApiProject.Controllers
             if (string.IsNullOrEmpty(email))
                 return Unauthorized();
 
+            var isSubuser = await _userDataService.SubuserExistsAsync(email);
             var machines = await _userDataService.GetMachinesByUserEmailAsync(email);
-            return Ok(machines);
+
+            return Ok(new {
+                user_email = email,
+                user_type = isSubuser ? "Subuser" : "User",
+                total_machines = machines.Count(),
+                machines = machines
+            });
         }
 
         [HttpGet("reports")]
@@ -226,8 +325,15 @@ namespace BitRaserApiProject.Controllers
             if (string.IsNullOrEmpty(email))
                 return Unauthorized();
 
+            var isSubuser = await _userDataService.SubuserExistsAsync(email);
             var reports = await _userDataService.GetAuditReportsByEmailAsync(email);
-            return Ok(reports);
+
+            return Ok(new {
+                user_email = email,
+                user_type = isSubuser ? "Subuser" : "User",
+                total_reports = reports.Count(),
+                reports = reports
+            });
         }
 
         [HttpGet("sessions")]
@@ -237,8 +343,15 @@ namespace BitRaserApiProject.Controllers
             if (string.IsNullOrEmpty(email))
                 return Unauthorized();
 
+            var isSubuser = await _userDataService.SubuserExistsAsync(email);
             var sessions = await _userDataService.GetSessionsByEmailAsync(email);
-            return Ok(sessions);
+
+            return Ok(new {
+                user_email = email,
+                user_type = isSubuser ? "Subuser" : "User",
+                total_sessions = sessions.Count(),
+                sessions = sessions
+            });
         }
 
         [HttpGet("logs")]
@@ -248,8 +361,86 @@ namespace BitRaserApiProject.Controllers
             if (string.IsNullOrEmpty(email))
                 return Unauthorized();
 
+            var isSubuser = await _userDataService.SubuserExistsAsync(email);
             var logs = await _userDataService.GetLogsByEmailAsync(email);
-            return Ok(logs);
+
+            return Ok(new {
+                user_email = email,
+                user_type = isSubuser ? "Subuser" : "User",
+                total_logs = logs.Count(),
+                logs = logs
+            });
+        }
+
+        [HttpGet("statistics")]
+        public async Task<IActionResult> GetMyStatistics()
+        {
+            var email = GetCurrentUserEmail();
+            if (string.IsNullOrEmpty(email))
+                return Unauthorized();
+
+            var isSubuser = await _userDataService.SubuserExistsAsync(email);
+
+            var machines = await _userDataService.GetMachinesByUserEmailAsync(email);
+            var reports = await _userDataService.GetAuditReportsByEmailAsync(email);
+            var sessions = await _userDataService.GetSessionsByEmailAsync(email);
+            var logs = await _userDataService.GetLogsByEmailAsync(email);
+
+            var baseStatistics = new
+            {
+                user_email = email,
+                user_type = isSubuser ? "Subuser" : "User",
+                summary = new
+                {
+                    total_machines = machines.Count(),
+                    active_machines = machines.Count(m => m.license_activated),
+                    total_reports = reports.Count(),
+                    synced_reports = reports.Count(r => r.synced),
+                    total_sessions = sessions.Count(),
+                    active_sessions = sessions.Count(s => s.session_status == "active"),
+                    total_logs = logs.Count(),
+                    error_logs = logs.Count(l => l.log_level.ToLower().Contains("error"))
+                },
+                recent_activity = new
+                {
+                    last_login = sessions.OrderByDescending(s => s.login_time).FirstOrDefault()?.login_time,
+                    recent_machines = machines.OrderByDescending(m => m.created_at).Take(5).Select(m => new {
+                        m.mac_address,
+                        m.os_version,
+                        m.created_at,
+                        m.license_activated
+                    }),
+                    recent_reports = reports.OrderByDescending(r => r.report_datetime).Take(5).Select(r => new {
+                        r.report_id,
+                        r.report_name,
+                        r.report_datetime,
+                        r.synced
+                    })
+                }
+            };
+
+            if (!isSubuser)
+            {
+                var subusers = await _userDataService.GetSubusersByParentEmailAsync(email);
+                var extendedStatistics = new
+                {
+                    baseStatistics.user_email,
+                    baseStatistics.user_type,
+                    baseStatistics.summary,
+                    baseStatistics.recent_activity,
+                    subuser_management = new
+                    {
+                        total_subusers = subusers.Count(),
+                        subuser_list = subusers.Select(s => new {
+                            s.subuser_email,
+                            s.subuser_id
+                        })
+                    }
+                };
+                return Ok(extendedStatistics);
+            }
+
+            return Ok(baseStatistics);
         }
 
         #endregion
@@ -267,13 +458,41 @@ namespace BitRaserApiProject.Controllers
             var permissions = await _userDataService.GetUserPermissionsAsync(email, isSubuser);
             var roles = await _userDataService.GetUserRoleNamesAsync(email, isSubuser);
 
-            return Ok(new
+            var baseResponse = new
             {
                 email,
                 userType = isSubuser ? "subuser" : "user",
                 roles,
-                permissions
-            });
+                permissions,
+                access_info = new
+                {
+                    can_create_subusers = !isSubuser && await _userDataService.HasPermissionAsync(email, "UserManagement"),
+                    can_manage_roles = !isSubuser && await _userDataService.HasPermissionAsync(email, "UserManagement"),
+                    can_view_all_users = await _userDataService.HasPermissionAsync(email, "FullAccess", isSubuser),
+                    has_admin_access = await _userDataService.HasPermissionAsync(email, "FullAccess", isSubuser)
+                }
+            };
+
+            if (isSubuser)
+            {
+                var subuser = await _userDataService.GetSubuserByEmailAsync(email);
+                if (subuser != null)
+                {
+                    var extendedResponse = new
+                    {
+                        baseResponse.email,
+                        baseResponse.userType,
+                        baseResponse.roles,
+                        baseResponse.permissions,
+                        baseResponse.access_info,
+                        parent_user_email = subuser.user_email,
+                        subuser_id = subuser.subuser_id
+                    };
+                    return Ok(extendedResponse);
+                }
+            }
+
+            return Ok(baseResponse);
         }
 
         [HttpGet("available-roles")]
@@ -283,8 +502,24 @@ namespace BitRaserApiProject.Controllers
             if (string.IsNullOrEmpty(email))
                 return Unauthorized();
 
+            var isSubuser = await _userDataService.SubuserExistsAsync(email);
+            if (isSubuser)
+            {
+                return StatusCode(403, new { error = "Subusers cannot assign roles" });
+            }
+
             var availableRoles = await _userDataService.GetAvailableRolesForUserAsync(email);
-            return Ok(availableRoles.Select(r => new { r.RoleId, r.RoleName, r.Description, r.HierarchyLevel }));
+            return Ok(new {
+                user_email = email,
+                can_assign_roles = await _userDataService.HasPermissionAsync(email, "UserManagement"),
+                available_roles = availableRoles.Select(r => new { 
+                    r.RoleId, 
+                    r.RoleName, 
+                    r.Description, 
+                    r.HierarchyLevel,
+                    can_assign_to_subusers = r.RoleName != "Admin" && r.RoleName != "Manager" // Basic restriction
+                })
+            });
         }
 
         [HttpPost("check-access")]
@@ -300,10 +535,11 @@ namespace BitRaserApiProject.Controllers
             return Ok(new
             {
                 userEmail = email,
+                userType = isSubuser ? "subuser" : "user",
                 operation = request.Operation,
                 resourceOwner = request.ResourceOwner,
                 hasAccess,
-                userType = isSubuser ? "subuser" : "user"
+                checked_at = DateTime.UtcNow
             });
         }
 

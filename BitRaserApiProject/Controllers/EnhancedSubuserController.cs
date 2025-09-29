@@ -11,6 +11,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Enhanced Subuser management controller with email-based operations and role-based access control
+    /// Supports user-friendly subuser management without strict permission requirements
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
@@ -19,28 +20,34 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
+        private readonly IUserDataService _userDataService;
 
-        public EnhancedSubuserController(ApplicationDbContext context, IRoleBasedAuthService authService)
+        public EnhancedSubuserController(ApplicationDbContext context, IRoleBasedAuthService authService, IUserDataService userDataService)
         {
             _context = context;
             _authService = authService;
+            _userDataService = userDataService;
         }
 
         /// <summary>
         /// Get all subusers with role-based filtering (email-based operations)
         /// </summary>
         [HttpGet]
-        [RequirePermission("READ_ALL_SUBUSERS")]
         public async Task<ActionResult<IEnumerable<object>>> GetSubusers([FromQuery] SubuserFilterRequest? filter)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             IQueryable<subuser> query = _context.subuser;
 
             // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS"))
+            if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser))
             {
-                // Users can only see their own subusers
+                // Users can only see their own subusers, subusers cannot see subusers (unless given permission)
+                if (isCurrentUserSubuser)
+                {
+                    return StatusCode(403, new { error = "Subusers cannot manage other subusers" });
+                }
                 query = query.Where(s => s.user_email == currentUserEmail);
             }
 
@@ -78,10 +85,10 @@ namespace BitRaserApiProject.Controllers
         /// Get subuser by email with role validation
         /// </summary>
         [HttpGet("{email}")]
-        [RequirePermission("READ_SUBUSER")]
         public async Task<ActionResult<object>> GetSubuser(string email)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             var subuser = await _context.subuser
                 .Include(s => s.SubuserRoles)
@@ -93,10 +100,12 @@ namespace BitRaserApiProject.Controllers
             if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
             // Check if user can view this subuser
-            if (subuser.user_email != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS"))
+            bool canView = subuser.user_email == currentUserEmail ||
+                          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser);
+
+            if (!canView)
             {
-                return StatusCode(403,new { error = "You can only view your own subusers" });
+                return StatusCode(403, new { error = "You can only view your own subusers" });
             }
 
             var subuserDetails = new {
@@ -124,16 +133,19 @@ namespace BitRaserApiProject.Controllers
         /// Get subusers by parent user email with management hierarchy
         /// </summary>
         [HttpGet("by-parent/{parentEmail}")]
-        [RequirePermission("READ_USER_SUBUSERS")]
         public async Task<ActionResult<IEnumerable<object>>> GetSubusersByParent(string parentEmail)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             // Check if user can view subusers for this parent email
-            if (parentEmail != currentUserEmail && 
-                !await _authService.CanManageUserAsync(currentUserEmail!, parentEmail))
+            bool canView = parentEmail == currentUserEmail ||
+                          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser) ||
+                          await _authService.CanManageUserAsync(currentUserEmail!, parentEmail);
+
+            if (!canView)
             {
-                return StatusCode(403,new { error = "You can only view your own subusers or subusers of users you manage" });
+                return StatusCode(403, new { error = "You can only view your own subusers or subusers of users you manage" });
             }
 
             var subusers = await _context.subuser
@@ -154,16 +166,19 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Create a new subuser - Email-based creation
+        /// Create a new subuser - Users can create subusers for themselves
         /// </summary>
         [HttpPost]
-        [RequirePermission("CREATE_SUBUSER")]
         public async Task<ActionResult<object>> CreateSubuser([FromBody] SubuserCreateRequest request)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
-            if (!await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSER"))
-                return StatusCode(403,new { error = "Insufficient permissions to create subusers" });
+            // Subusers cannot create subusers (prevent recursive subuser creation)
+            if (isCurrentUserSubuser)
+            {
+                return StatusCode(403, new { error = "Subusers cannot create subusers" });
+            }
 
             // Validate input
             if (string.IsNullOrEmpty(request.SubuserEmail) || string.IsNullOrEmpty(request.SubuserPassword))
@@ -175,14 +190,20 @@ namespace BitRaserApiProject.Controllers
             if (existingSubuser != null)
                 return Conflict($"Subuser with email {request.SubuserEmail} already exists");
 
+            // Check if email is already used as a main user
+            var existingUser = await _context.Users
+                .FirstOrDefaultAsync(u => u.user_email == request.SubuserEmail);
+            if (existingUser != null)
+                return Conflict($"Email {request.SubuserEmail} is already used as a main user account");
+
             // Validate parent user email (use current user if not specified)
             var parentUserEmail = request.ParentUserEmail ?? currentUserEmail!;
             
             // Check if current user can create subuser for the specified parent
             if (parentUserEmail != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSERS_FOR_OTHERS"))
+                !await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSERS_FOR_OTHERS", isCurrentUserSubuser))
             {
-                return StatusCode(403,new { error = "You can only create subusers for yourself" });
+                return StatusCode(403, new { error = "You can only create subusers for yourself" });
             }
 
             // Validate parent user exists
@@ -208,6 +229,11 @@ namespace BitRaserApiProject.Controllers
             {
                 await AssignRoleToSubuserAsync(request.SubuserEmail, request.DefaultRole, currentUserEmail!);
             }
+            else
+            {
+                // Assign a default "SubUser" role if no role specified
+                await AssignRoleToSubuserAsync(request.SubuserEmail, "SubUser", currentUserEmail!);
+            }
 
             var response = new {
                 subuserEmail = newSubuser.subuser_email,
@@ -223,22 +249,24 @@ namespace BitRaserApiProject.Controllers
         /// Update subuser information by email
         /// </summary>
         [HttpPut("{email}")]
-        [RequirePermission("UPDATE_SUBUSER")]
         public async Task<IActionResult> UpdateSubuser(string email, [FromBody] SubuserUpdateRequest request)
         {
             if (email != request.SubuserEmail)
                 return BadRequest("Email mismatch in request");
 
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
             
             if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
             // Check if user can update this subuser
-            if (subuser.user_email != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_SUBUSERS"))
+            bool canUpdate = subuser.user_email == currentUserEmail ||
+                           await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
+
+            if (!canUpdate)
             {
-                return StatusCode(403,new { error = "You can only update your own subusers" });
+                return StatusCode(403, new { error = "You can only update your own subusers" });
             }
 
             // Update password if provided
@@ -251,9 +279,9 @@ namespace BitRaserApiProject.Controllers
             if (!string.IsNullOrEmpty(request.NewParentUserEmail) && 
                 request.NewParentUserEmail != subuser.user_email)
             {
-                if (!await _authService.HasPermissionAsync(currentUserEmail!, "REASSIGN_SUBUSERS"))
+                if (!await _authService.HasPermissionAsync(currentUserEmail!, "REASSIGN_SUBUSERS", isCurrentUserSubuser))
                 {
-                    return StatusCode(403,new { error = "Insufficient permissions to reassign subuser to different parent" });
+                    return StatusCode(403, new { error = "Insufficient permissions to reassign subuser to different parent" });
                 }
 
                 // Validate new parent user exists
@@ -280,19 +308,21 @@ namespace BitRaserApiProject.Controllers
         /// Change subuser password by email
         /// </summary>
         [HttpPatch("{email}/change-password")]
-        [RequirePermission("CHANGE_SUBUSER_PASSWORD")]
         public async Task<IActionResult> ChangeSubuserPassword(string email, [FromBody] ChangePasswordRequest request)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
             
             if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
             // Check if user can change password for this subuser
-            if (subuser.user_email != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "CHANGE_ALL_SUBUSER_PASSWORDS"))
+            bool canChange = subuser.user_email == currentUserEmail ||
+                           await _authService.HasPermissionAsync(currentUserEmail!, "CHANGE_ALL_SUBUSER_PASSWORDS", isCurrentUserSubuser);
+
+            if (!canChange)
             {
-                return StatusCode(403,new { error = "You can only change passwords for your own subusers" });
+                return StatusCode(403, new { error = "You can only change passwords for your own subusers" });
             }
 
             if (string.IsNullOrEmpty(request.NewPassword))
@@ -308,25 +338,24 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Assign role to subuser by email - Admin access
+        /// Assign role to subuser by email - Users can assign roles to their subusers
         /// </summary>
         [HttpPost("{email}/assign-role")]
-        [RequirePermission("ASSIGN_SUBUSER_ROLES")]
         public async Task<IActionResult> AssignRoleToSubuser(string email, [FromBody] AssignRoleRequest request)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
-            if (!await _authService.HasPermissionAsync(currentUserEmail!, "ASSIGN_SUBUSER_ROLES"))
-                return StatusCode(403,new { error = "Insufficient permissions to assign roles to subusers" });
-
             var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
             if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
             // Check if user can assign roles to this subuser
-            if (subuser.user_email != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "ASSIGN_ALL_SUBUSER_ROLES"))
+            bool canAssign = subuser.user_email == currentUserEmail ||
+                           await _authService.HasPermissionAsync(currentUserEmail!, "ASSIGN_ALL_SUBUSER_ROLES", isCurrentUserSubuser);
+
+            if (!canAssign)
             {
-                return StatusCode(403,new { error = "You can only assign roles to your own subusers" });
+                return StatusCode(403, new { error = "You can only assign roles to your own subusers" });
             }
 
             await AssignRoleToSubuserAsync(email, request.RoleName, currentUserEmail!);
@@ -344,19 +373,21 @@ namespace BitRaserApiProject.Controllers
         /// Remove role from subuser by email
         /// </summary>
         [HttpDelete("{email}/remove-role/{roleName}")]
-        [RequirePermission("REMOVE_SUBUSER_ROLES")]
         public async Task<IActionResult> RemoveRoleFromSubuser(string email, string roleName)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
             if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
             // Check permissions
-            if (subuser.user_email != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "REMOVE_ALL_SUBUSER_ROLES"))
+            bool canRemove = subuser.user_email == currentUserEmail ||
+                           await _authService.HasPermissionAsync(currentUserEmail!, "REMOVE_ALL_SUBUSER_ROLES", isCurrentUserSubuser);
+
+            if (!canRemove)
             {
-                return StatusCode(403,new { error = "You can only remove roles from your own subusers" });
+                return StatusCode(403, new { error = "You can only remove roles from your own subusers" });
             }
 
             var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
@@ -384,19 +415,21 @@ namespace BitRaserApiProject.Controllers
         /// Delete subuser by email
         /// </summary>
         [HttpDelete("{email}")]
-        [RequirePermission("DELETE_SUBUSER")]
         public async Task<IActionResult> DeleteSubuser(string email)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
             
             if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
             // Check if user can delete this subuser
-            if (subuser.user_email != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "DELETE_ALL_SUBUSERS"))
+            bool canDelete = subuser.user_email == currentUserEmail ||
+                           await _authService.HasPermissionAsync(currentUserEmail!, "DELETE_ALL_SUBUSERS", isCurrentUserSubuser);
+
+            if (!canDelete)
             {
-                return StatusCode(403,new { error = "You can only delete your own subusers" });
+                return StatusCode(403, new { error = "You can only delete your own subusers" });
             }
 
             _context.subuser.Remove(subuser);
@@ -413,16 +446,18 @@ namespace BitRaserApiProject.Controllers
         /// Get subuser statistics by parent user email
         /// </summary>
         [HttpGet("statistics/{parentEmail}")]
-        [RequirePermission("READ_SUBUSER_STATISTICS")]
         public async Task<ActionResult<object>> GetSubuserStatistics(string parentEmail)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
             // Check if user can view statistics for this parent email
-            if (parentEmail != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSER_STATISTICS"))
+            bool canView = parentEmail == currentUserEmail ||
+                          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSER_STATISTICS", isCurrentUserSubuser);
+
+            if (!canView)
             {
-                return StatusCode(403,new { error = "You can only view statistics for your own subusers" });
+                return StatusCode(403, new { error = "You can only view statistics for your own subusers" });
             }
 
             var stats = new {
