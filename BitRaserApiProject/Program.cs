@@ -67,6 +67,88 @@ var jwtAudience = Environment.GetEnvironmentVariable("Jwt__Audience")
     ?? builder.Configuration["Jwt:Audience"]
     ?? "BitRaserAPIUsers";
 
+// Configure CORS with comprehensive settings
+builder.Services.AddCors(options =>
+{
+    // Development policy - allows all origins (for testing)
+    options.AddPolicy("DevelopmentPolicy", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+
+    // Production policy - restricted origins for security
+    options.AddPolicy("ProductionPolicy", policy =>
+    {
+        var allowedOrigins = new List<string>();
+
+        // Get allowed origins from environment variables
+        var envOrigins = Environment.GetEnvironmentVariable("CORS__AllowedOrigins")
+            ?? builder.Configuration["CORS:AllowedOrigins"];
+
+        if (!string.IsNullOrEmpty(envOrigins))
+        {
+            allowedOrigins.AddRange(envOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                           .Select(origin => origin.Trim()));
+        }
+
+        // Default allowed origins for common frontend frameworks
+        if (allowedOrigins.Count == 0)
+        {
+            allowedOrigins.AddRange(new[]
+            {
+                "http://localhost:3000",    // React default
+                "http://localhost:3001",    // Alternative React port
+                "http://localhost:4200",    // Angular default
+                "http://localhost:5173",    // Vite default
+                "http://localhost:8080",    // Vue default
+                "http://localhost:8081",    // Alternative Vue port
+                "http://localhost:5000",    // .NET default
+                "http://localhost:5001",    // .NET HTTPS default
+                "https://localhost:3000",   // HTTPS variants
+                "https://localhost:4200",
+                "https://localhost:5173",
+                "https://localhost:8080",
+                "https://d-secure-web-app.vercel.app/",
+            });
+        }
+
+        policy.WithOrigins(allowedOrigins.ToArray())
+              .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
+              .WithHeaders("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With")
+              .AllowCredentials()
+              .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
+    });
+
+    // Strict policy for high-security environments
+    options.AddPolicy("StrictPolicy", policy =>
+    {
+        var strictOrigins = Environment.GetEnvironmentVariable("CORS__StrictOrigins")
+            ?? builder.Configuration["CORS:StrictOrigins"];
+
+        if (!string.IsNullOrEmpty(strictOrigins))
+        {
+            var origins = strictOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                                     .Select(origin => origin.Trim())
+                                     .ToArray();
+
+            policy.WithOrigins(origins)
+                  .WithMethods("GET", "POST", "PUT", "DELETE")
+                  .WithHeaders("Authorization", "Content-Type")
+                  .AllowCredentials();
+        }
+        else
+        {
+            // Default to localhost only if no strict origins specified
+            policy.WithOrigins("http://localhost:3000", "https://localhost:3000")
+                  .WithMethods("GET", "POST", "PUT", "DELETE")
+                  .WithHeaders("Authorization", "Content-Type")
+                  .AllowCredentials();
+        }
+    });
+});
+
 // Configure database with enhanced options
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
@@ -277,6 +359,24 @@ builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
 Console.WriteLine($"🚀 Server configured to start on port: {port}");
 
 var app = builder.Build();
+
+// Configure CORS policy based on environment
+if (app.Environment.IsDevelopment())
+{
+    app.UseCors("DevelopmentPolicy");
+    Console.WriteLine("🌐 CORS configured for Development (Allow All Origins)");
+}
+else if (app.Environment.IsProduction())
+{
+    var corsPolicy = Environment.GetEnvironmentVariable("CORS__Policy") ?? "ProductionPolicy";
+    app.UseCors(corsPolicy);
+    Console.WriteLine($"🌐 CORS configured for Production (Policy: {corsPolicy})");
+}
+else
+{
+    app.UseCors("ProductionPolicy");
+    Console.WriteLine("🌐 CORS configured with Production Policy");
+}
 
 // Configure Swagger for all environments
 if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
