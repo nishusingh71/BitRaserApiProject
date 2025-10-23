@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Attributes;
 using BCrypt.Net;
+using System.ComponentModel.DataAnnotations;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -206,25 +207,25 @@ namespace BitRaserApiProject.Controllers
                 return StatusCode(403, new { error = "Subusers cannot create subusers" });
             }
 
-            // Validate input
-            if (string.IsNullOrEmpty(request.SubuserEmail) || string.IsNullOrEmpty(request.SubuserPassword))
+            // Validate input - only email and password are required
+            if (string.IsNullOrEmpty(request.subuser_email) || string.IsNullOrEmpty(request.subuser_password))
                 return BadRequest("Subuser email and password are required");
 
             // Check if subuser already exists
             var existingSubuser = await _context.subuser
-                .FirstOrDefaultAsync(s => s.subuser_email == request.SubuserEmail);
+                .FirstOrDefaultAsync(s => s.subuser_email == request.subuser_email);
             if (existingSubuser != null)
-                return Conflict($"Subuser with email {request.SubuserEmail} already exists");
+                return Conflict($"Subuser with email {request.subuser_email} already exists");
 
             // Check if email is already used as a main user
             var existingUser = await _context.Users
-                .FirstOrDefaultAsync(u => u.user_email == request.SubuserEmail);
+                .FirstOrDefaultAsync(u => u.user_email == request.subuser_email);
             if (existingUser != null)
-                return Conflict($"Email {request.SubuserEmail} is already used as a main user account");
+                return Conflict($"Email {request.subuser_email} is already used as a main user account");
 
-            // Validate parent user email (use current user if not specified)
-            var parentUserEmail = request.ParentUserEmail ?? currentUserEmail!;
-            
+            // Validate parent user email (use current user if not specified) - parentUserEmail is optional
+            var parentUserEmail = request.parentUserEmail ?? currentUserEmail!;
+    
             // Check if current user can create subuser for the specified parent
             if (parentUserEmail != currentUserEmail && 
                 !await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSERS_FOR_OTHERS", isCurrentUserSubuser))
@@ -234,41 +235,57 @@ namespace BitRaserApiProject.Controllers
 
             // Validate parent user exists
             var parentUser = await _context.Users
-                .FirstOrDefaultAsync(u => u.user_email == parentUserEmail);
-            if (parentUser == null)
-                return BadRequest($"Parent user with email {parentUserEmail} not found");
+              .FirstOrDefaultAsync(u => u.user_email == parentUserEmail);
+     if (parentUser == null)
+          return BadRequest($"Parent user with email {parentUserEmail} not found");
 
-            // Create subuser
-            var newSubuser = new subuser
-            {
-                subuser_email = request.SubuserEmail,
-                subuser_password = BCrypt.Net.BCrypt.HashPassword(request.SubuserPassword),
-                user_email = parentUserEmail,
-                superuser_id = parentUser.user_id
-            };
+            // Create subuser with all fields
+       var newSubuser = new subuser
+         {
+       subuser_email = request.subuser_email,
+    subuser_password = BCrypt.Net.BCrypt.HashPassword(request.subuser_password),
+    user_email = parentUserEmail,
+                superuser_id = parentUser.user_id,
+     Name = request.subuser_name ?? request.subuser_email.Split('@')[0], // Use email prefix if name not provided
+        Department = request.department, // Optional
+       Role = request.role ?? "subuser", // Default to "subuser" if not provided
+  Phone = request.phone, // Optional
+        GroupId = !string.IsNullOrEmpty(request.subuser_group) && int.TryParse(request.subuser_group, out int groupId) ? groupId : (int?)null, // Convert string to int?
+      Status = "active",
+ IsEmailVerified = false,
+         CreatedAt = DateTime.UtcNow,
+         CreatedBy = parentUser.user_id
+  };
 
-            _context.subuser.Add(newSubuser);
-            await _context.SaveChangesAsync();
+    _context.subuser.Add(newSubuser);
+       await _context.SaveChangesAsync();
 
-            // Assign default role if specified
-            if (!string.IsNullOrEmpty(request.DefaultRole))
+       // Assign role if specified
+ if (!string.IsNullOrEmpty(request.role))
+ {
+    await AssignRoleToSubuserAsync(request.subuser_email, request.role, currentUserEmail!);
+  }
+ else
             {
-                await AssignRoleToSubuserAsync(request.SubuserEmail, request.DefaultRole, currentUserEmail!);
-            }
-            else
-            {
-                // Assign a default "SubUser" role if no role specified
-                await AssignRoleToSubuserAsync(request.SubuserEmail, "SubUser", currentUserEmail!);
+      // Assign a default "SubUser" role if no role specified
+                await AssignRoleToSubuserAsync(request.subuser_email, "SubUser", currentUserEmail!);
             }
 
             var response = new {
-                subuserEmail = newSubuser.subuser_email,
-                parentUserEmail = newSubuser.user_email,
-                subuserID = newSubuser.subuser_id,
-                message = "Subuser created successfully"
-            };
+          subuserEmail = newSubuser.subuser_email,
+      subuserName = newSubuser.Name,
+         department = newSubuser.Department,
+      role = newSubuser.Role,
+       phone = newSubuser.Phone,
+          subuserGroup = newSubuser.GroupId?.ToString(), // Convert back to string for response
+       parentUserEmail = newSubuser.user_email,
+       subuserID = newSubuser.subuser_id,
+   status = newSubuser.Status,
+         createdAt = newSubuser.CreatedAt,
+    message = "Subuser created successfully"
+   };
 
-            return CreatedAtAction(nameof(GetSubuser), new { email = newSubuser.subuser_email }, response);
+        return CreatedAtAction(nameof(GetSubuser), new { email = newSubuser.subuser_email }, response);
         }
 
         /// <summary>
@@ -572,14 +589,14 @@ namespace BitRaserApiProject.Controllers
     /// <summary>
     /// Subuser filter request model
     /// </summary>
-    public class SubuserFilterRequest
+  public class SubuserFilterRequest
     {
-        public string? ParentUserEmail { get; set; }
-        public string? SubuserEmail { get; set; }
-        public DateTime? CreatedFrom { get; set; }
-        public DateTime? CreatedTo { get; set; }
+      public string? ParentUserEmail { get; set; }
+  public string? SubuserEmail { get; set; }
+    public DateTime? CreatedFrom { get; set; }
+   public DateTime? CreatedTo { get; set; }
         public int Page { get; set; } = 0;
-        public int PageSize { get; set; } = 100;
+   public int PageSize { get; set; } = 100;
     }
 
     /// <summary>
@@ -587,10 +604,32 @@ namespace BitRaserApiProject.Controllers
     /// </summary>
     public class SubuserCreateRequest
     {
-        public string SubuserEmail { get; set; } = string.Empty;
-        public string SubuserPassword { get; set; } = string.Empty;
-        public string? ParentUserEmail { get; set; } // If null, uses current user
-        public string? DefaultRole { get; set; }
+  [Required(ErrorMessage = "Subuser email is required")]
+    [EmailAddress(ErrorMessage = "Invalid email format")]
+        [MaxLength(255)]
+        public string subuser_email { get; set; } = string.Empty;
+   
+        [Required(ErrorMessage = "Password is required")]
+        [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
+        public string subuser_password { get; set; } = string.Empty;
+        
+     [MaxLength(100)]
+ public string? subuser_name { get; set; }
+        
+        [MaxLength(100)]
+     public string? department { get; set; }
+      
+        [MaxLength(50)]
+   public string? role { get; set; }
+        
+    [MaxLength(20)]
+        public string? phone { get; set; }
+     
+      [MaxLength(100)]
+        public string? subuser_group { get; set; }  // Changed from int? to string?
+        
+        [EmailAddress(ErrorMessage = "Invalid parent email format")]
+   public string? parentUserEmail { get; set; } // Optional - If null, uses current user
     }
 
     /// <summary>
@@ -608,11 +647,11 @@ namespace BitRaserApiProject.Controllers
     /// </summary>
     public class ChangePasswordRequest
     {
-        public string NewPassword { get; set; } = string.Empty;
+public string NewPassword { get; set; } = string.Empty;
     }
 
     /// <summary>
-    /// Assign role request model
+ /// Assign role request model
     /// </summary>
     public class AssignRoleRequest
     {
