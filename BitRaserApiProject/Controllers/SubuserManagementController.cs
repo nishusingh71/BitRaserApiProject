@@ -224,7 +224,7 @@ namespace BitRaserApiProject.Controllers
 
         /// <summary>
         /// POST: api/SubuserManagement
-        /// Create new subuser
+        /// Create new subuser (Only Email and Password are required, rest are optional)
         /// </summary>
         [HttpPost]
         [Authorize(Roles = "superadmin,admin,manager")]
@@ -249,26 +249,26 @@ namespace BitRaserApiProject.Controllers
                 {
                     superuser_id = currentUser.user_id,
                     user_email = userEmail,
-                    subuser_username = dto.SubuserUsername,
-                    Name = dto.Name,
+                    subuser_username = dto.SubuserUsername, // Optional
+                    Name = dto.Name ?? dto.Email.Split('@')[0], // Default to email prefix if not provided
                     subuser_email = dto.Email,
                     subuser_password = BCrypt.Net.BCrypt.HashPassword(dto.Password),
-                    Phone = dto.Phone,
-                    JobTitle = dto.JobTitle,
-                    Department = dto.Department,
-                    Role = dto.Role,
-                    AccessLevel = dto.AccessLevel,
-                    MaxMachines = dto.MaxMachines,
-                    GroupId = dto.GroupId,
+                    Phone = dto.Phone, // Optional
+                    JobTitle = dto.JobTitle, // Optional
+                    Department = dto.Department, // Optional
+                    Role = dto.Role ?? "subuser", // Default to "subuser"
+                    AccessLevel = dto.AccessLevel ?? "limited", // Default to "limited"
+                    MaxMachines = dto.MaxMachines ?? 5, // Default to 5
+                    GroupId = dto.GroupId, // Optional
                     Status = "active",
                     IsEmailVerified = false,
-                    CanCreateSubusers = dto.CanCreateSubusers,
-                    CanViewReports = dto.CanViewReports,
-                    CanManageMachines = dto.CanManageMachines,
-                    CanAssignLicenses = dto.CanAssignLicenses,
-                    EmailNotifications = dto.EmailNotifications,
-                    SystemAlerts = dto.SystemAlerts,
-                    Notes = dto.Notes,
+                    CanCreateSubusers = dto.CanCreateSubusers ?? false, // Default to false
+                    CanViewReports = dto.CanViewReports ?? true, // Default to true
+                    CanManageMachines = dto.CanManageMachines ?? false, // Default to false
+                    CanAssignLicenses = dto.CanAssignLicenses ?? false, // Default to false
+                    EmailNotifications = dto.EmailNotifications ?? true, // Default to true
+                    SystemAlerts = dto.SystemAlerts ?? true, // Default to true
+                    Notes = dto.Notes, // Optional
                     CreatedBy = currentUser.user_id,
                     CreatedAt = DateTime.UtcNow
                 };
@@ -633,6 +633,233 @@ namespace BitRaserApiProject.Controllers
                 _logger.LogError(ex, "Error fetching subuser statistics");
                 return StatusCode(500, new { message = "Error retrieving statistics" });
             }
+        }
+
+        /// <summary>
+ /// GET: api/SubuserManagement/by-email/{email}
+        /// Get subuser by email
+        /// </summary>
+      [HttpGet("by-email/{email}")]
+        public async Task<ActionResult<SubuserDetailedDto>> GetSubuserByEmail(string email)
+    {
+            try
+ {
+           var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+           var userRoleClaim = User.FindFirst(ClaimTypes.Role)?.Value;
+
+           if (string.IsNullOrEmpty(userEmail))
+          return Unauthorized(new { message = "User not authenticated" });
+
+           var subuser = await _context.subuser
+            .FirstOrDefaultAsync(s => s.subuser_email == email);
+
+    if (subuser == null)
+        return NotFound(new { message = "Subuser not found" });
+
+     // Check access permissions
+   if ((userRoleClaim == "user" || userRoleClaim == "manager") && subuser.user_email != userEmail)
+              return Forbid();
+
+        var parentUser = await _context.Users.FindAsync(subuser.superuser_id);
+   var group = subuser.GroupId.HasValue ? await _context.Groups.FindAsync(subuser.GroupId.Value) : null;
+
+         return Ok(new SubuserDetailedDto
+                {
+        Id = subuser.subuser_id,
+      ParentUserId = subuser.superuser_id,
+               ParentUserName = parentUser?.user_name ?? "Unknown",
+           ParentUserEmail = parentUser?.user_email ?? "Unknown",
+     SubuserUsername = subuser.subuser_username,
+   Name = subuser.Name ?? subuser.subuser_email,
+         Email = subuser.subuser_email,
+       Phone = subuser.Phone,
+      JobTitle = subuser.JobTitle,
+    Department = subuser.Department,
+    Role = subuser.Role,
+      AccessLevel = subuser.AccessLevel,
+            AssignedMachines = subuser.AssignedMachines,
+                MaxMachines = subuser.MaxMachines,
+           GroupId = subuser.GroupId,
+          GroupName = group?.name,
+          Status = subuser.Status,
+           IsEmailVerified = subuser.IsEmailVerified,
+           CanCreateSubusers = subuser.CanCreateSubusers,
+             CanViewReports = subuser.CanViewReports,
+        CanManageMachines = subuser.CanManageMachines,
+   CanAssignLicenses = subuser.CanAssignLicenses,
+        LastLoginAt = subuser.LastLoginAt,
+           CreatedAt = subuser.CreatedAt,
+  UpdatedAt = subuser.UpdatedAt,
+   Notes = subuser.Notes
+    });
+            }
+  catch (Exception ex)
+ {
+        _logger.LogError(ex, "Error fetching subuser by email {Email}", email);
+                return StatusCode(500, new { message = "Error retrieving subuser" });
+       }
+     }
+
+ /// <summary>
+    /// PUT: api/SubuserManagement/by-email/{email}
+    /// Update subuser by email
+        /// </summary>
+        [HttpPut("by-email/{email}")]
+        [Authorize(Roles = "superadmin,admin,manager")]
+        public async Task<IActionResult> UpdateSubuserByEmail(string email, [FromBody] UpdateSubuserDto dto)
+        {
+         try
+            {
+     var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+   var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+
+           if (string.IsNullOrEmpty(userEmail))
+             return Unauthorized(new { message = "User not authenticated" });
+
+     var currentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+     if (currentUser == null)
+   return NotFound(new { message = "User not found" });
+
+                var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+  if (subuser == null)
+       return NotFound(new { message = "Subuser not found" });
+
+       // Check access permissions
+      if ((userRole == "manager") && subuser.user_email != userEmail)
+  return Forbid();
+
+        // Update properties
+       if (dto.SubuserUsername != null) subuser.subuser_username = dto.SubuserUsername;
+             if (dto.Name != null) subuser.Name = dto.Name;
+       if (dto.Phone != null) subuser.Phone = dto.Phone;
+  if (dto.JobTitle != null) subuser.JobTitle = dto.JobTitle;
+       if (dto.Department != null) subuser.Department = dto.Department;
+       if (dto.Role != null) subuser.Role = dto.Role;
+      if (dto.AccessLevel != null) subuser.AccessLevel = dto.AccessLevel;
+    if (dto.MaxMachines.HasValue) subuser.MaxMachines = dto.MaxMachines.Value;
+      if (dto.GroupId.HasValue) subuser.GroupId = dto.GroupId.Value;
+           if (dto.Status != null) subuser.Status = dto.Status;
+                if (dto.CanCreateSubusers.HasValue) subuser.CanCreateSubusers = dto.CanCreateSubusers.Value;
+           if (dto.CanViewReports.HasValue) subuser.CanViewReports = dto.CanViewReports.Value;
+  if (dto.CanManageMachines.HasValue) subuser.CanManageMachines = dto.CanManageMachines.Value;
+      if (dto.CanAssignLicenses.HasValue) subuser.CanAssignLicenses = dto.CanAssignLicenses.Value;
+   if (dto.EmailNotifications.HasValue) subuser.EmailNotifications = dto.EmailNotifications.Value;
+            if (dto.SystemAlerts.HasValue) subuser.SystemAlerts = dto.SystemAlerts.Value;
+         if (dto.Notes != null) subuser.Notes = dto.Notes;
+
+       subuser.UpdatedAt = DateTime.UtcNow;
+        subuser.UpdatedBy = currentUser.user_id;
+
+       await _context.SaveChangesAsync();
+
+  return Ok(new { message = "Subuser updated successfully", email = subuser.subuser_email });
+   }
+    catch (Exception ex)
+            {
+    _logger.LogError(ex, "Error updating subuser by email {Email}", email);
+          return StatusCode(500, new { message = "Error updating subuser" });
+        }
+        }
+
+        /// <summary>
+        /// PATCH: api/SubuserManagement/by-email/{email}
+        /// Partially update subuser by email (supports partial updates)
+        /// </summary>
+        [HttpPatch("by-email/{email}")]
+        [Authorize(Roles = "superadmin,admin,manager")]
+        public async Task<IActionResult> PatchSubuserByEmail(string email, [FromBody] UpdateSubuserDto dto)
+     {
+       try
+         {
+            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+          var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+
+ if (string.IsNullOrEmpty(userEmail))
+         return Unauthorized(new { message = "User not authenticated" });
+
+          var currentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+         if (currentUser == null)
+   return NotFound(new { message = "User not found" });
+
+      var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+     if (subuser == null)
+  return NotFound(new { message = "Subuser not found" });
+
+       // Check access permissions
+   if ((userRole == "manager") && subuser.user_email != userEmail)
+      return Forbid();
+
+             // Update only provided properties (partial update)
+        if (dto.SubuserUsername != null) subuser.subuser_username = dto.SubuserUsername;
+       if (dto.Name != null) subuser.Name = dto.Name;
+     if (dto.Phone != null) subuser.Phone = dto.Phone;
+        if (dto.JobTitle != null) subuser.JobTitle = dto.JobTitle;
+         if (dto.Department != null) subuser.Department = dto.Department;
+            if (dto.Role != null) subuser.Role = dto.Role;
+          if (dto.AccessLevel != null) subuser.AccessLevel = dto.AccessLevel;
+     if (dto.MaxMachines.HasValue) subuser.MaxMachines = dto.MaxMachines.Value;
+   if (dto.GroupId.HasValue) subuser.GroupId = dto.GroupId.Value;
+        if (dto.Status != null) subuser.Status = dto.Status;
+    if (dto.CanCreateSubusers.HasValue) subuser.CanCreateSubusers = dto.CanCreateSubusers.Value;
+       if (dto.CanViewReports.HasValue) subuser.CanViewReports = dto.CanViewReports.Value;
+      if (dto.CanManageMachines.HasValue) subuser.CanManageMachines = dto.CanManageMachines.Value;
+           if (dto.CanAssignLicenses.HasValue) subuser.CanAssignLicenses = dto.CanAssignLicenses.Value;
+        if (dto.EmailNotifications.HasValue) subuser.EmailNotifications = dto.EmailNotifications.Value;
+     if (dto.SystemAlerts.HasValue) subuser.SystemAlerts = dto.SystemAlerts.Value;
+              if (dto.Notes != null) subuser.Notes = dto.Notes;
+
+      subuser.UpdatedAt = DateTime.UtcNow;
+          subuser.UpdatedBy = currentUser.user_id;
+
+        await _context.SaveChangesAsync();
+
+                return Ok(new { 
+   message = "Subuser partially updated successfully",
+             email = subuser.subuser_email,
+     updatedAt = subuser.UpdatedAt
+    });
+        }
+            catch (Exception ex)
+       {
+       _logger.LogError(ex, "Error patching subuser by email {Email}", email);
+     return StatusCode(500, new { message = "Error updating subuser" });
+            }
+        }
+
+        /// <summary>
+        /// DELETE: api/SubuserManagement/by-email/{email}
+      /// Delete subuser by email
+        /// </summary>
+        [HttpDelete("by-email/{email}")]
+        [Authorize(Roles = "superadmin,admin,manager")]
+     public async Task<IActionResult> DeleteSubuserByEmail(string email)
+        {
+            try
+            {
+     var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var userRole = User.FindFirst(ClaimTypes.Role)?.Value;
+
+        if (string.IsNullOrEmpty(userEmail))
+             return Unauthorized(new { message = "User not authenticated" });
+
+ var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+    if (subuser == null)
+     return NotFound(new { message = "Subuser not found" });
+
+       // Check access permissions
+                if ((userRole == "manager") && subuser.user_email != userEmail)
+         return Forbid();
+
+        _context.subuser.Remove(subuser);
+         await _context.SaveChangesAsync();
+
+                return Ok(new { message = "Subuser deleted successfully", email = email });
+        }
+  catch (Exception ex)
+      {
+          _logger.LogError(ex, "Error deleting subuser by email {Email}", email);
+    return StatusCode(500, new { message = "Error deleting subuser" });
+    }
         }
     }
 }

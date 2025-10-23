@@ -380,9 +380,194 @@ Name = s.Name ?? s.subuser_email,
         }
 
         /// <summary>
+        /// GET: api/Group/{id}/members/by-email/{email}
+        /// Get specific member in a group by email
+  /// </summary>
+        [HttpGet("{id}/members/by-email/{email}")]
+        public async Task<ActionResult<GroupMemberDto>> GetGroupMemberByEmail(int id, string email)
+      {
+  try
+            {
+   var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+       if (string.IsNullOrEmpty(userEmail))
+   return Unauthorized(new { message = "User not authenticated" });
+
+ var group = await _context.Groups.FindAsync(id);
+             if (group == null)
+         return NotFound(new { message = "Group not found" });
+
+         var member = await _context.subuser
+         .Where(s => s.GroupId == id && s.subuser_email == email)
+      .Select(s => new GroupMemberDto
+      {
+  SubuserId = s.subuser_id,
+      SubuserEmail = s.subuser_email,
+        Name = s.Name ?? s.subuser_email,
+        Role = s.Role,
+  Status = s.Status,
+       JoinedAt = s.CreatedAt
+ })
+     .FirstOrDefaultAsync();
+
+         if (member == null)
+   return NotFound(new { message = "Member not found in this group" });
+
+              return Ok(member);
+   }
+          catch (Exception ex)
+  {
+    _logger.LogError(ex, "Error fetching group member by email for group {GroupId}", id);
+ return StatusCode(500, new { message = "Error retrieving group member", error = ex.Message });
+          }
+  }
+
+  /// <summary>
+        /// POST: api/Group/{id}/members/by-email
+        /// Add member to group by email
+        /// </summary>
+        [HttpPost("{id}/members/by-email")]
+        [Authorize(Roles = "superadmin,admin")]
+  public async Task<IActionResult> AddMemberByEmail(int id, [FromBody] AddMemberByEmailDto dto)
+  {
+        try
+      {
+   var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userEmail))
+         return Unauthorized(new { message = "User not authenticated" });
+
+          var group = await _context.Groups.FindAsync(id);
+   if (group == null)
+  return NotFound(new { message = "Group not found" });
+
+      var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == dto.Email);
+           if (subuser == null)
+ return NotFound(new { message = "Subuser not found with this email" });
+
+  if (subuser.GroupId == id)
+          return BadRequest(new { message = "Subuser is already in this group" });
+
+          subuser.GroupId = id;
+         subuser.UpdatedAt = DateTime.UtcNow;
+
+      await _context.SaveChangesAsync();
+
+                _logger.LogInformation("Subuser {Email} added to group {GroupId} by {AdminEmail}", dto.Email, id, userEmail);
+
+     return Ok(new
+     {
+      message = "Member added to group successfully",
+              groupId = id,
+             groupName = group.name,
+ memberEmail = dto.Email,
+         addedBy = userEmail,
+     addedAt = DateTime.UtcNow
+    });
+            }
+            catch (Exception ex)
+   {
+ _logger.LogError(ex, "Error adding member to group by email");
+    return StatusCode(500, new { message = "Error adding member to group", error = ex.Message });
+            }
+        }
+
+   /// <summary>
+     /// DELETE: api/Group/{id}/members/by-email/{email}
+        /// Remove member from group by email
+        /// </summary>
+     [HttpDelete("{id}/members/by-email/{email}")]
+        [Authorize(Roles = "superadmin,admin")]
+        public async Task<IActionResult> RemoveMemberByEmail(int id, string email)
+  {
+            try
+            {
+ var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+  if (string.IsNullOrEmpty(userEmail))
+       return Unauthorized(new { message = "User not authenticated" });
+
+  var group = await _context.Groups.FindAsync(id);
+     if (group == null)
+return NotFound(new { message = "Group not found" });
+
+         var subuser = await _context.subuser
+       .FirstOrDefaultAsync(s => s.subuser_email == email && s.GroupId == id);
+
+                if (subuser == null)
+   return NotFound(new { message = "Member not found in this group" });
+
+                subuser.GroupId = null;
+            subuser.UpdatedAt = DateTime.UtcNow;
+
+       await _context.SaveChangesAsync();
+
+ _logger.LogInformation("Subuser {Email} removed from group {GroupId} by {AdminEmail}", email, id, userEmail);
+
+    return Ok(new
+        {
+  message = "Member removed from group successfully",
+         groupId = id,
+               groupName = group.name,
+        memberEmail = email,
+       removedBy = userEmail,
+              removedAt = DateTime.UtcNow
+          });
+     }
+            catch (Exception ex)
+    {
+     _logger.LogError(ex, "Error removing member from group by email");
+        return StatusCode(500, new { message = "Error removing member from group", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+      /// GET: api/Group/by-member-email/{email}
+        /// Get group by member email
+        /// </summary>
+        [HttpGet("by-member-email/{email}")]
+        public async Task<ActionResult<GroupResponseDto>> GetGroupByMemberEmail(string email)
+        {
+      try
+{
+ var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+      if (string.IsNullOrEmpty(userEmail))
+        return Unauthorized(new { message = "User not authenticated" });
+
+        var subuser = await _context.subuser
+        .Include(s => s.GroupId)
+          .FirstOrDefaultAsync(s => s.subuser_email == email);
+
+        if (subuser == null)
+   return NotFound(new { message = "Subuser not found" });
+
+     if (!subuser.GroupId.HasValue)
+       return NotFound(new { message = "Subuser is not assigned to any group" });
+
+   var group = await _context.Groups.FindAsync(subuser.GroupId.Value);
+if (group == null)
+          return NotFound(new { message = "Group not found" });
+
+                return Ok(new GroupResponseDto
+              {
+    GroupId = group.group_id,
+                    GroupName = group.name,
+    GroupDescription = group.description,
+GroupLicenseAllocation = group.license_allocation,
+         GroupPermission = group.permissions_json,
+       Status = group.status,
+      CreatedAt = group.created_at,
+    UpdatedAt = group.updated_at
+       });
+  }
+     catch (Exception ex)
+            {
+       _logger.LogError(ex, "Error fetching group by member email");
+        return StatusCode(500, new { message = "Error retrieving group", error = ex.Message });
+   }
+   }
+
+     /// <summary>
         /// GET: api/Group/statistics
         /// Get group statistics
-        /// </summary>
+  /// </summary>
      [HttpGet("statistics")]
  [Authorize(Roles = "superadmin,admin")]
     public async Task<ActionResult<GroupStatisticsResponseDto>> GetStatistics()
@@ -510,9 +695,16 @@ public string SubuserEmail { get; set; } = string.Empty;
     public class TopGroupDto
     {
         public int GroupId { get; set; }
-        public string GroupName { get; set; } = string.Empty;
-      public int MemberCount { get; set; }
+public string GroupName { get; set; } = string.Empty;
+        public int MemberCount { get; set; }
         public int LicenseAllocation { get; set; }
+    }
+
+    public class AddMemberByEmailDto
+{
+        [Required(ErrorMessage = "Email is required")]
+        [EmailAddress(ErrorMessage = "Invalid email format")]
+        public string Email { get; set; } = string.Empty;
     }
 
     #endregion

@@ -41,43 +41,43 @@ namespace BitRaserApiProject.Models.DTOs
     public class CreateSubuserDto
     {
         [MaxLength(100)]
-public string? SubuserUsername { get; set; } // Added
+        public string? SubuserUsername { get; set; } // Optional
    
-        [Required, MaxLength(100)]
-    public string Name { get; set; } = string.Empty;
+        [MaxLength(100)]
+        public string? Name { get; set; } // Optional
     
         [Required, EmailAddress, MaxLength(100)]
-     public string Email { get; set; } = string.Empty;
-        
-   [Required, MinLength(8)]
-      public string Password { get; set; } = string.Empty;
+     public string Email { get; set; } = string.Empty; // Required
+    
+    [Required, MinLength(8)]
+      public string Password { get; set; } = string.Empty; // Required
         
    [MaxLength(20)]
-        public string? Phone { get; set; }
+        public string? Phone { get; set; } // Optional
         
         [MaxLength(100)]
-      public string? JobTitle { get; set; }
+      public string? JobTitle { get; set; } // Optional
         
         [MaxLength(100)]
-        public string? Department { get; set; }
-        
+        public string? Department { get; set; } // Optional
+     
+   [MaxLength(50)]
+        public string? Role { get; set; } // Optional - will default to "subuser"
+  
         [MaxLength(50)]
-        public string Role { get; set; } = "subuser";
+        public string? AccessLevel { get; set; } // Optional - will default to "limited"
+  
+        public int? MaxMachines { get; set; } // Optional - will default to 5
+ public int? GroupId { get; set; } // Optional
+        public bool? CanCreateSubusers { get; set; } // Optional - will default to false
+        public bool? CanViewReports { get; set; } // Optional - will default to true
+        public bool? CanManageMachines { get; set; } // Optional - will default to false
+        public bool? CanAssignLicenses { get; set; } // Optional - will default to false
+        public bool? EmailNotifications { get; set; } // Optional - will default to true
+        public bool? SystemAlerts { get; set; } // Optional - will default to true
         
-        [MaxLength(50)]
-     public string AccessLevel { get; set; } = "limited";
-        
-        public int? MaxMachines { get; set; } = 5;
-        public int? GroupId { get; set; }
- public bool CanCreateSubusers { get; set; } = false;
-        public bool CanViewReports { get; set; } = true;
-        public bool CanManageMachines { get; set; } = false;
-   public bool CanAssignLicenses { get; set; } = false;
-        public bool EmailNotifications { get; set; } = true;
-        public bool SystemAlerts { get; set; } = true;
-        
-[MaxLength(500)]
-    public string? Notes { get; set; }
+        [MaxLength(500)]
+        public string? Notes { get; set; } // Optional
     }
 
     public class UpdateSubuserDto
