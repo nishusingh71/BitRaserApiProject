@@ -23,6 +23,7 @@ namespace BitRaserApiProject
         public DbSet<Sessions> Sessions { get; set; }
         public DbSet<logs> logs { get; set; }
         public DbSet<subuser> subuser { get; set; }
+        public DbSet<Group> Groups { get; set; }
         
         // New DbSets for role-based system
         public DbSet<Role> Roles { get; set; }
@@ -30,8 +31,14 @@ namespace BitRaserApiProject
         public DbSet<RolePermission> RolePermissions { get; set; }
         public DbSet<UserRole> UserRoles { get; set; }
         public DbSet<SubuserRole> SubuserRoles { get; set; }
-        public DbSet<Route> Routes { get; set; }
+        public DbSet<Models.Route> Routes { get; set; }
         public DbSet<PermissionRoute> PermissionRoutes { get; set; }
+        
+        // System Settings and Report Generation
+        public DbSet<SystemSetting> SystemSettings { get; set; }
+        public DbSet<GeneratedReport> GeneratedReports { get; set; }
+        public DbSet<ReportTemplate> ReportTemplates { get; set; }
+        public DbSet<ScheduledReport> ScheduledReports { get; set; }
         
         public static string HashLicenseKey(string licenseKey)
         {
@@ -228,6 +235,10 @@ namespace BitRaserApiProject
                 .IsRequired();
 
             modelBuilder.Entity<subuser>()
+                .HasIndex(s => s.subuser_email)
+                .IsUnique();
+
+            modelBuilder.Entity<subuser>()
                 .Property(s => s.subuser_password)
                 .HasMaxLength(255)
                 .IsRequired();
@@ -236,6 +247,72 @@ namespace BitRaserApiProject
                 .Property(s => s.user_email)
                 .HasMaxLength(255)
                 .IsRequired();
+
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.Name)
+                .HasMaxLength(100);
+
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.Phone)
+                .HasMaxLength(20);
+
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.JobTitle)
+                .HasMaxLength(100);
+
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.Department)
+                .HasMaxLength(100);
+
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.Role)
+                .HasMaxLength(50)
+                .IsRequired();
+
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.AccessLevel)
+                .HasMaxLength(50);
+
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.PermissionsJson)
+                .HasColumnType("json");
+
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.MachineIdsJson)
+                .HasColumnType("json");
+
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.LicenseIdsJson)
+                .HasColumnType("json");
+
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.Status)
+                .HasMaxLength(50);
+
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.LastLoginIp)
+                .HasMaxLength(500);
+
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.Notes)
+                .HasMaxLength(500);
+
+            // Group table
+            modelBuilder.Entity<Group>()
+                .HasKey(g => g.group_id);
+
+            modelBuilder.Entity<Group>()
+                .Property(g => g.name)
+                .HasMaxLength(100)
+                .IsRequired();
+
+            modelBuilder.Entity<Group>()
+                .Property(g => g.description)
+                .HasMaxLength(500);
+
+            modelBuilder.Entity<Group>()
+                .Property(g => g.status)
+                .HasMaxLength(50);
 
             // Role-based system configurations
             
@@ -266,20 +343,20 @@ namespace BitRaserApiProject
                 .IsUnique();
 
             // Routes table
-            modelBuilder.Entity<Route>()
+            modelBuilder.Entity<Models.Route>()
                 .HasKey(r => r.RouteId);
 
-            modelBuilder.Entity<Route>()
+            modelBuilder.Entity<Models.Route>()
                 .Property(r => r.RoutePath)
                 .HasMaxLength(500)
                 .IsRequired();
 
-            modelBuilder.Entity<Route>()
+            modelBuilder.Entity<Models.Route>()
                 .Property(r => r.HttpMethod)
                 .HasMaxLength(10)
                 .IsRequired();
 
-            modelBuilder.Entity<Route>()
+            modelBuilder.Entity<Models.Route>()
                 .HasIndex(r => new { r.RoutePath, r.HttpMethod })
                 .IsUnique();
 
@@ -315,15 +392,17 @@ namespace BitRaserApiProject
             modelBuilder.Entity<SubuserRole>()
                 .HasKey(sr => new { sr.SubuserId, sr.RoleId });
 
-            modelBuilder.Entity<SubuserRole>()
-                .HasOne(sr => sr.Subuser)
-                .WithMany(s => s.SubuserRoles)
-                .HasForeignKey(sr => sr.SubuserId);
+            //modelBuilder.Entity<SubuserRole>()
+                //.HasOne(sr => sr.Subuser)
+                //.WithMany(s => s.SubuserRoles)
+                //.HasForeignKey(sr => sr.SubuserId)
+                //.OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<SubuserRole>()
                 .HasOne(sr => sr.Role)
                 .WithMany(r => r.SubuserRoles)
-                .HasForeignKey(sr => sr.RoleId);
+                .HasForeignKey(sr => sr.RoleId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             // PermissionRoute table (Many-to-Many)
             modelBuilder.Entity<PermissionRoute>()
@@ -338,6 +417,55 @@ namespace BitRaserApiProject
                 .HasOne(pr => pr.Route)
                 .WithMany(r => r.PermissionRoutes)
                 .HasForeignKey(pr => pr.RouteId);
+
+            // SystemSetting table
+            modelBuilder.Entity<SystemSetting>()
+                .HasKey(s => s.Id);
+
+            modelBuilder.Entity<SystemSetting>()
+                .Property(s => s.SettingKey)
+                .HasMaxLength(100)
+                .IsRequired();
+
+            modelBuilder.Entity<SystemSetting>()
+                .Property(s => s.Category)
+                .HasMaxLength(50)
+                .IsRequired();
+
+            modelBuilder.Entity<SystemSetting>()
+                .HasIndex(s => new { s.Category, s.SettingKey })
+                .IsUnique();
+
+            // GeneratedReport table
+            modelBuilder.Entity<GeneratedReport>()
+                .HasKey(g => g.Id);
+
+            modelBuilder.Entity<GeneratedReport>()
+                .Property(g => g.ReportId)
+                .HasMaxLength(100)
+                .IsRequired();
+
+            modelBuilder.Entity<GeneratedReport>()
+                .HasIndex(g => g.ReportId)
+                .IsUnique();
+
+            // ReportTemplate table
+            modelBuilder.Entity<ReportTemplate>()
+                .HasKey(t => t.Id);
+
+            modelBuilder.Entity<ReportTemplate>()
+                .Property(t => t.TemplateName)
+                .HasMaxLength(100)
+                .IsRequired();
+
+            // ScheduledReport table
+            modelBuilder.Entity<ScheduledReport>()
+                .HasKey(s => s.Id);
+
+            modelBuilder.Entity<ScheduledReport>()
+                .Property(s => s.ReportTitle)
+                .HasMaxLength(200)
+                .IsRequired();
 
             // Seed default roles
             modelBuilder.Entity<Role>().HasData(
@@ -514,314 +642,6 @@ namespace BitRaserApiProject
         }
     }
 
-    // ...existing models...
-
-    public class machines
-    {
-        [Key]
-        [Required]
-        public string fingerprint_hash { get; set; } // Unique machine identifier
-
-        [Required, MaxLength(255)]
-        public string mac_address { get; set; }
-
-        [Required, MaxLength(255)]
-        public string physical_drive_id { get; set; }
-
-        [Required, MaxLength(255)]
-        public string cpu_id { get; set; }
-
-        [Required, MaxLength(255)]
-        public string bios_serial { get; set; }
-
-        [Required, MaxLength(255)]
-        public string os_version { get; set; }
-
-        [MaxLength(255)]
-        public string user_email { get; set; }
-        
-        [MaxLength(255)]
-        public string? subuser_email { get; set; }
-
-        public bool license_activated { get; set; } // Activation status
-        public DateTime? license_activation_date { get; set; } // Null if never activated
-        public int license_days_valid { get; set; } = 0; // Number of valid days
-        public string license_details_json { get; set; } // Stores license info
-        public int demo_usage_count { get; set; } // Tracks demo usage count
-        public DateTime created_at { get; set; } = DateTime.UtcNow; // Auto-set by DB
-        public DateTime updated_at { get; set; } = DateTime.UtcNow; // Auto-updated by DB
-        public string vm_status { get; set; } // 'physical' or 'vm'
-    }
-
-    public class audit_reports
-    {
-        [Key]
-        public int report_id { get; set; } // Primary Key
-
-        [Required, MaxLength(255)]
-        public string client_email { get; set; } // Email of the client who performed erasure
-
-        [Required, MaxLength(255)]
-        public string report_name { get; set; } // Name of the report
-
-        [Required, MaxLength(255)]
-        public string erasure_method { get; set; } // Method used for erasure
-
-        [Required]
-        public DateTime report_datetime { get; set; } = DateTime.UtcNow; // Date and time of the report
-
-        [Required]
-        public string report_details_json { get; set; } // JSON containing detailed erasure process
-
-        public bool synced { get; set; } = false; // Indicates if report is synced to cloud
-    }
-
-    public class users
-    {
-        [Key]
-        public int user_id { get; set; } // Primary Key
-
-        [Required, MaxLength(255)]
-        public string user_name { get; set; } // Name of the user
-
-        [Required, MaxLength(255)]
-        public string user_email { get; set; } // Email (must be unique)
-
-        [Required, MaxLength(255)]
-        public string user_password { get; set; } // Plain password
-
-        [JsonIgnore]
-        public string? hash_password { get; set; } // Hashed password
-
-        public bool is_private_cloud { get; set; } = false; // Private cloud flag
-        public bool private_api { get; set; } = false; // Private API access flag
-
-        [MaxLength(20)]
-        public string phone_number { get; set; } // User's phone number
-        public string payment_details_json { get; set; } // JSON storing payment details
-        public string license_details_json { get; set; } // JSON storing license details
-        
-        public DateTime created_at { get; set; } = DateTime.UtcNow; // Account creation date
-        public DateTime updated_at { get; set; } = DateTime.UtcNow; // Last update date
-        
-        // Navigation properties for role-based system - ignore in JSON to prevent circular references
-        [JsonIgnore]
-        public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
-    }
-
-    public class LoginRequest
-    {
-        public string Username { get; set; }
-        public string Password { get; set; }
-    }
-
-    public class Update
-    {
-        [Key]
-        public int version_id { get; set; }  // Primary Key
-
-        [Required, MaxLength(20)]
-        public string version_number { get; set; }  // e.g. "1.0.0"
-
-        [Required]
-        public string changelog { get; set; }  // Description of changes
-
-        [Required, MaxLength(500)]
-        public string download_link { get; set; }  // URL to installer
-
-        public DateTime release_date { get; set; } = DateTime.UtcNow;  // Release timestamp
-
-        public bool is_mandatory_update { get; set; } = false;  // Flag for mandatory update
-    }
-
-    public class subuser
-    {
-        [Key]
-        public int subuser_id { get; set; } // Primary Key
-        public int superuser_id { get; set; } // Reference to users.user_id (superuser)
-        [Required, MaxLength(255)]
-        public string subuser_email { get; set; } // Email of the subuser
-        [Required, MaxLength(255)]
-        public string subuser_password { get; set; } // Hashed password
-        public string user_email { get; set; } // ID of the parent user
-        
-        // Navigation properties for role-based system - ignore in JSON to prevent circular references
-        [JsonIgnore]
-        public ICollection<SubuserRole> SubuserRoles { get; set; } = new List<SubuserRole>();
-    }
-
-    public class Sessions
-    {
-        [Key]
-        public int session_id { get; set; } // Primary Key
-        public string user_email { get; set; } // User email (instead of user_id)
-        public DateTime login_time { get; set; } // Login timestamp
-        public DateTime? logout_time { get; set; } // Logout timestamp (nullable)
-        public string ip_address { get; set; } // User IP address
-        public string device_info { get; set; } // Device/browser info
-        public string session_status { get; set; } // Status: active, closed, expired
-    }
-
-    public class logs
-    {
-        [Key]
-        public int log_id { get; set; } // Primary Key
-        public string user_email { get; set; } // User email (nullable for system logs)
-        public string log_level { get; set; } // e.g. Info, Warning, Error
-        public string log_message { get; set; } // Log message
-        public string log_details_json { get; set; } // Additional details in JSON
-        public DateTime created_at { get; set; } = DateTime.UtcNow; // Timestamp of log creation
-    }
-
-    public class Commands
-    {
-        [Key]
-        public int Command_id { get; set; } // Primary Key
-        public string command_text { get; set; } // Command text
-        public DateTime issued_at { get; set; } = DateTime.UtcNow; // When command was issued
-        public string command_json { get; set; } // JSON parameters
-        public string command_status { get; set; } // Status of command execution
-    }
-
-    public class User_role_profile
-    {
-        [Key]
-        public int role_id { get; set; } // Primary Key
-        public string user_email { get; set; } // User's email
-        public int manage_user_id { get; set; } // User ID who manages this role
-        public string role_name { get; set; } // Role name
-        public string role_email { get; set; } // Role email
-    }
-
-    public class User_role
-    {
-        [Key]
-        public int user_role_id { get; set; } // Primary Key
-        public int user_id { get; set; } // Foreign Key to users table
-        public int role_id { get; set; } // Foreign Key to User_role_profile table
-        public DateTime assigned_at { get; set; } = DateTime.UtcNow; // Timestamp when role was assigned
-        public DateTime updated_at { get; set; } // Timestamp when role was last updated    
-    }
-
-    // New Role-based System Models
-
-    public class Role
-    {
-        [Key]
-        public int RoleId { get; set; }
-        
-        [Required, MaxLength(100)]
-        public string RoleName { get; set; }
-        
-        [MaxLength(500)]
-        public string Description { get; set; }
-        
-        public int HierarchyLevel { get; set; } // 1 = highest (SuperAdmin), 5 = lowest (User)
-        
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        
-        // Navigation properties - ignore in JSON to prevent circular references
-        [JsonIgnore]
-        public ICollection<RolePermission> RolePermissions { get; set; } = new List<RolePermission>();
-        [JsonIgnore]
-        public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
-        [JsonIgnore]
-        public ICollection<SubuserRole> SubuserRoles { get; set; } = new List<SubuserRole>();
-    }
-
-    public class Permission
-    {
-        [Key]
-        public int PermissionId { get; set; }
-        
-        [Required, MaxLength(100)]
-        public string PermissionName { get; set; }
-        
-        [MaxLength(500)]
-        public string Description { get; set; }
-        
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        
-        // Navigation properties - ignore in JSON to prevent circular references
-        [JsonIgnore]
-        public ICollection<RolePermission> RolePermissions { get; set; } = new List<RolePermission>();
-        [JsonIgnore]
-        public ICollection<PermissionRoute> PermissionRoutes { get; set; } = new List<PermissionRoute>();
-    }
-
-    public class Route
-    {
-        [Key]
-        public int RouteId { get; set; }
-        
-        [Required, MaxLength(500)]
-        public string RoutePath { get; set; }
-        
-        [Required, MaxLength(10)]
-        public string HttpMethod { get; set; }
-        
-        [MaxLength(200)]
-        public string Description { get; set; }
-        
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        
-        // Navigation properties - ignore in JSON to prevent circular references
-        [JsonIgnore]
-        public ICollection<PermissionRoute> PermissionRoutes { get; set; } = new List<PermissionRoute>();
-    }
-
-    // Junction tables
-    public class RolePermission
-    {
-        public int RoleId { get; set; }
-        public int PermissionId { get; set; }
-        
-        // Navigation properties - ignore in JSON to prevent circular references
-        [JsonIgnore]
-        public Role Role { get; set; }
-        [JsonIgnore]
-        public Permission Permission { get; set; }
-    }
-
-    public class UserRole
-    {
-        public int UserId { get; set; }
-        public int RoleId { get; set; }
-        public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
-        public string AssignedByEmail { get; set; } // Who assigned this role
-        
-        // Navigation properties - ignore in JSON to prevent circular references
-        [JsonIgnore]
-        public users User { get; set; }
-        [JsonIgnore]
-        public Role Role { get; set; }
-    }
-
-    public class SubuserRole
-    {
-        public int SubuserId { get; set; }
-        public int RoleId { get; set; }
-        public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
-        public string AssignedByEmail { get; set; } // Who assigned this role
-        
-        // Navigation properties - ignore in JSON to prevent circular references
-        [JsonIgnore]
-        public subuser Subuser { get; set; }
-        [JsonIgnore]
-        public Role Role { get; set; }
-    }
-
-    public class PermissionRoute
-    {
-        public int PermissionId { get; set; }
-        public int RouteId { get; set; }
-        
-        // Navigation properties - ignore in JSON to prevent circular references
-        [JsonIgnore]
-        public Permission Permission { get; set; }
-        [JsonIgnore]
-        public Route Route { get; set; }
-    }
 
     public static class SecurityHelpers
     {

@@ -108,9 +108,10 @@ builder.Services.AddCors(options =>
                 "http://localhost:5001",    // .NET HTTPS default
                 "https://localhost:3000",   // HTTPS variants
                 "https://localhost:4200",
-                "https://localhost:5173",
+                "https://localhost:5174",
                 "https://localhost:8080",
-                "https://d-secure-web-app.vercel.app/",
+                "https://dsecure-frontend.vercel.app",
+                "https://dsecuretech.com"
             });
         }
 
@@ -141,8 +142,8 @@ builder.Services.AddCors(options =>
         else
         {
             // Default to localhost only if no strict origins specified
-            policy.WithOrigins("http://localhost:3000", "https://localhost:3000")
-                  .WithMethods("GET", "POST", "PUT", "DELETE")
+            policy.WithOrigins("http://localhost:3000", "https://localhost:3000", "https://dsecuretech.com")
+                  .WithMethods("GET", "POST", "PUT", "DELETE","PATCH")
                   .WithHeaders("Authorization", "Content-Type")
                   .AllowCredentials();
         }
@@ -280,7 +281,7 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo
     {
-        Title = "BitRaser API Project - Enhanced",
+        Title = "DSecure Api",
         Version = "2.0",
         Description = "Enhanced API for managing devices, users, licenses, and PDF reports with advanced Role-Based Access Control",
         Contact = new OpenApiContact
@@ -386,10 +387,87 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     {
         options.SwaggerEndpoint("/swagger/v1/swagger.json", "BitRaser API Project v2.0");
         options.RoutePrefix = "swagger";
-        options.DocumentTitle = "BitRaser API - Enhanced Documentation";
+        options.DocumentTitle = "D-Secure API - Enhanced Documentation";
         options.DefaultModelsExpandDepth(-1);
         options.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
         options.EnableTryItOutByDefault();
+        
+        // Inject JavaScript for automatic token clearing after logout
+        options.HeadContent = @"
+            <script>
+                document.addEventListener('DOMContentLoaded', function() {
+                    console.log('🔐 Swagger Token Auto-Clear loaded');
+                    
+                    // Override fetch to monitor logout API calls
+                    const originalFetch = window.fetch;
+                    window.fetch = function(...args) {
+                        const url = args[0];
+                        
+                        return originalFetch.apply(this, args).then(response => {
+                            // Check if this is a logout API call
+                            if (url && url.toString().includes('/logout') && response.ok) {
+                                response.clone().json().then(data => {
+                                    if (data && data.swaggerLogout) {
+                                        console.log('🚪 Logout detected - clearing Swagger tokens');
+                                        
+                                        setTimeout(() => {
+                                            // Clear all possible token storage locations
+                                            localStorage.removeItem('swagger-ui-bearer-token');
+                                            localStorage.removeItem('authToken');
+                                            localStorage.removeItem('auth-token');
+                                            localStorage.removeItem('jwt');
+                                            localStorage.removeItem('bearer-token');
+                                            
+                                            sessionStorage.removeItem('swagger-ui-bearer-token');
+                                            sessionStorage.removeItem('authToken');
+                                            sessionStorage.removeItem('auth-token');
+                                            
+                                            // Logout from Swagger UI
+                                            if (window.ui && window.ui.authActions) {
+                                                window.ui.authActions.logout(['Bearer']);
+                                                console.log('🔓 Swagger UI logout executed');
+                                            }
+                                            
+                                            // Refresh to show open lock icon
+                                            setTimeout(() => {
+                                                window.location.reload();
+                                            }, 500);
+                                            
+                                        }, 1000);
+                                    }
+                                }).catch(e => {
+                                    console.log('Response parsing failed:', e);
+                                });
+                            }
+                            
+                            return response;
+                        }).catch(error => {
+                            console.error('Fetch error:', error);
+                            return Promise.reject(error);
+                        });
+                    };
+                    
+                    // Add global function for manual token clearing
+                    window.clearSwaggerToken = function() {
+                        localStorage.removeItem('swagger-ui-bearer-token');
+                        sessionStorage.removeItem('swagger-ui-bearer-token');
+                        if (window.ui && window.ui.authActions) {
+                            window.ui.authActions.logout(['Bearer']);
+                        }
+                        location.reload();
+                        console.log('✅ Swagger token manually cleared');
+                    };
+                });
+            </script>
+            <style>
+                .swagger-ui .auth-wrapper .authorize { 
+                    border: 2px solid #49cc90; 
+                }
+                .swagger-ui .auth-wrapper .authorize.unlocked { 
+                    border: 2px solid #f93e3e; 
+                }
+            </style>
+        ";
     });
 }
 

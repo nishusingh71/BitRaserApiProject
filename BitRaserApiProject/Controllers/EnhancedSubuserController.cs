@@ -21,12 +21,18 @@ namespace BitRaserApiProject.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
+        private readonly ILogger<EnhancedSubuserController> _logger;
 
-        public EnhancedSubuserController(ApplicationDbContext context, IRoleBasedAuthService authService, IUserDataService userDataService)
+        public EnhancedSubuserController(
+            ApplicationDbContext context, 
+            IRoleBasedAuthService authService, 
+            IUserDataService userDataService,
+            ILogger<EnhancedSubuserController> logger)
         {
             _context = context;
             _authService = authService;
             _userDataService = userDataService;
+            _logger = logger;
         }
 
         /// <summary>
@@ -36,18 +42,29 @@ namespace BitRaserApiProject.Controllers
         public async Task<ActionResult<IEnumerable<object>>> GetSubusers([FromQuery] SubuserFilterRequest? filter)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+            if (string.IsNullOrEmpty(currentUserEmail))
+            {
+                return Unauthorized(new { message = "User not authenticated" });
+            }
+
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
             
             IQueryable<subuser> query = _context.subuser;
 
-            // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser))
+            // Check if user has admin-level permissions
+            bool hasAdminPermission = await _authService.HasPermissionAsync(
+                currentUserEmail, "READ_ALL_SUBUSERS", isCurrentUserSubuser);
+
+            if (!hasAdminPermission)
             {
-                // Users can only see their own subusers, subusers cannot see subusers (unless given permission)
+                // Regular users can see their own subusers
                 if (isCurrentUserSubuser)
                 {
-                    return StatusCode(403, new { error = "Subusers cannot manage other subusers" });
+                    // Subusers cannot see any subusers by default
+                    return Ok(new List<object>());
                 }
+                
+                // Filter to only show current user's subusers
                 query = query.Where(s => s.user_email == currentUserEmail);
             }
 
@@ -59,26 +76,35 @@ namespace BitRaserApiProject.Controllers
 
                 if (!string.IsNullOrEmpty(filter.SubuserEmail))
                     query = query.Where(s => s.subuser_email.Contains(filter.SubuserEmail));
-
-                // Note: subuser table doesn't have created_at column, so we'll skip date filtering for now
             }
 
-            var subusers = await query
-                .Include(s => s.SubuserRoles)
-                .ThenInclude(sr => sr.Role)
-                .OrderByDescending(s => s.subuser_id)
-                .Take(filter?.PageSize ?? 100)
-                .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-                .Select(s => new {
-                    s.subuser_email,
-                    s.user_email,
-                    s.subuser_id,
-                    roles = s.SubuserRoles.Select(sr => sr.Role.RoleName).ToList(),
-                    hasPassword = !string.IsNullOrEmpty(s.subuser_password)
-                })
-                .ToListAsync();
+            try
+            {
+                var subusers = await query
+                    .Include(s => s.SubuserRoles)
+                    .ThenInclude(sr => sr.Role)
+                    .OrderByDescending(s => s.subuser_id)
+                    .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+                    .Take(filter?.PageSize ?? 100)
+                    .Select(s => new {
+                        s.subuser_email,
+                        s.user_email,
+                        s.subuser_id,
+                        roles = s.SubuserRoles.Select(sr => sr.Role.RoleName).ToList(),
+                        hasPassword = !string.IsNullOrEmpty(s.subuser_password)
+                    })
+                    .ToListAsync();
 
-            return Ok(subusers);
+                return Ok(subusers);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving subusers for {Email}", currentUserEmail);
+                return StatusCode(500, new { 
+                    message = "Error retrieving subusers", 
+                    error = ex.Message 
+                });
+            }
         }
 
         /// <summary>
@@ -483,13 +509,31 @@ namespace BitRaserApiProject.Controllers
 
         #region Private Helper Methods
 
-        private async Task AssignRoleToSubuserAsync(string subuserEmail, string roleName, string assignedByEmail)
+        private async Task<bool> AssignRoleToSubuserAsync(string subuserEmail, string roleName, string assignedByEmail)
         {
-            var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == subuserEmail);
-            var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
-
-            if (subuser != null && role != null)
+            try
             {
+                var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == subuserEmail);
+                if (subuser == null)
+                {
+                    _logger.LogWarning("Subuser {Email} not found for role assignment", subuserEmail);
+                    return false;
+                }
+
+                var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
+                if (role == null)
+                {
+                    _logger.LogWarning("Role {RoleName} not found, creating default User role instead", roleName);
+                    
+                    // Fallback to default role if specified role doesn't exist
+                    role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == "User");
+                    if (role == null)
+                    {
+                        _logger.LogError("No default role found in system");
+                        return false;
+                    }
+                }
+
                 // Check if role already assigned
                 var existingRole = await _context.SubuserRoles
                     .FirstOrDefaultAsync(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == role.RoleId);
@@ -506,7 +550,17 @@ namespace BitRaserApiProject.Controllers
 
                     _context.SubuserRoles.Add(subuserRole);
                     await _context.SaveChangesAsync();
+                    
+                    _logger.LogInformation("Role {RoleName} assigned to subuser {Email}", role.RoleName, subuserEmail);
+                    return true;
                 }
+
+                return true; // Already assigned
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error assigning role {RoleName} to subuser {Email}", roleName, subuserEmail);
+                return false;
             }
         }
 

@@ -177,12 +177,13 @@ namespace BitRaserApiProject.Controllers
             if (existingUser != null)
                 return Conflict($"User with email {request.UserEmail} already exists");
 
-            // Create user
+            // Create user with both plain text and hashed password
             var newUser = new users
             {
                 user_email = request.UserEmail,
                 user_name = request.UserName,
-                user_password = BCrypt.Net.BCrypt.HashPassword(request.Password),
+                user_password = request.Password,  // Plain text
+                hash_password = BCrypt.Net.BCrypt.HashPassword(request.Password),  // Hashed
                 phone_number = request.PhoneNumber ?? "",
                 payment_details_json = request.PaymentDetailsJson ?? "{}",
                 license_details_json = request.LicenseDetailsJson ?? "{}",
@@ -233,12 +234,13 @@ namespace BitRaserApiProject.Controllers
             if (existingUser != null)
                 return Conflict($"User with email {request.UserEmail} already exists");
 
-            // Create user
+            // Create user with both plain text and hashed password
             var newUser = new users
             {
                 user_email = request.UserEmail,
                 user_name = request.UserName,
-                user_password = BCrypt.Net.BCrypt.HashPassword(request.Password),
+                user_password = request.Password,  // Plain text
+                hash_password = BCrypt.Net.BCrypt.HashPassword(request.Password),  // Hashed
                 phone_number = request.PhoneNumber ?? "",
                 payment_details_json = "{}",
                 license_details_json = "{}",
@@ -349,40 +351,249 @@ namespace BitRaserApiProject.Controllers
         /// Change user password by email
         /// </summary>
         [HttpPatch("{email}/change-password")]
-        [RequirePermission("CHANGE_USER_PASSWORDS")]
         public async Task<IActionResult> ChangePassword(string email, [FromBody] ChangeUserPasswordRequest request)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
-            
-            if (user == null) return NotFound($"User with email {email} not found");
-
-            // Users can change their own password, or admins can change others
-            if (email != currentUserEmail && !await _authService.HasPermissionAsync(currentUserEmail!, "CHANGE_USER_PASSWORDS"))
+            if (string.IsNullOrEmpty(currentUserEmail))
             {
-                return StatusCode(403,new { error = "You can only change your own password" });
+                return Unauthorized(new { message = "User not authenticated" });
             }
 
-            if (string.IsNullOrEmpty(request.NewPassword))
-                return BadRequest("New password is required");
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            if (user == null) 
+                return NotFound(new { message = $"User with email {email} not found" });
 
-            // Verify current password if it's the user changing their own password
-            if (email == currentUserEmail && !string.IsNullOrEmpty(request.CurrentPassword))
+            // Users can change their own password without permission check
+            // Admins need CHANGE_USER_PASSWORDS permission to change others' passwords
+            if (email != currentUserEmail)
             {
-                if (!BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.user_password))
+                // Trying to change someone else's password - need admin permission
+                if (!await _authService.HasPermissionAsync(currentUserEmail, "CHANGE_USER_PASSWORDS"))
                 {
-                    return BadRequest("Current password is incorrect");
+                    return StatusCode(403, new { error = "You can only change your own password or need CHANGE_USER_PASSWORDS permission to change others' passwords" });
                 }
             }
 
-            user.user_password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
-            user.updated_at = DateTime.UtcNow;
-            await _context.SaveChangesAsync();
+            if (string.IsNullOrEmpty(request.NewPassword))
+                return BadRequest(new { message = "New password is required" });
 
-            return Ok(new { 
-                message = "Password changed successfully", 
-                userEmail = email
-            });
+            // Verify current password if it's the user changing their own password
+            if (email == currentUserEmail)
+            {
+                // User is changing their own password - must provide current password
+                if (string.IsNullOrEmpty(request.CurrentPassword))
+                {
+                    return BadRequest(new { message = "Current password is required when changing your own password" });
+                }
+
+                // Verify current password with enhanced error handling
+                try
+                {
+                    bool isPasswordValid = false;
+
+                    // Check both password fields for verification
+                    // Priority: hash_password (BCrypt) > user_password (plain text or legacy hash)
+                    
+                    if (!string.IsNullOrEmpty(user.hash_password))
+                    {
+                        // Use hash_password field (preferred - BCrypt hashed)
+                        try
+                        {
+                            isPasswordValid = BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.hash_password);
+                        }
+                        catch (BCrypt.Net.SaltParseException)
+                        {
+                            // If hash_password is corrupted, try plain text comparison with user_password
+                            if (!string.IsNullOrEmpty(user.user_password))
+                            {
+                                isPasswordValid = user.user_password == request.CurrentPassword;
+                            }
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(user.user_password))
+                    {
+                        // Fallback to user_password field (legacy support)
+                        // Check if it's a BCrypt hash or plain text
+                        if (user.user_password.StartsWith("$2"))
+                        {
+                            try
+                            {
+                                isPasswordValid = BCrypt.Net.BCrypt.Verify(request.CurrentPassword, user.user_password);
+                            }
+                            catch (BCrypt.Net.SaltParseException)
+                            {
+                                // If BCrypt fails, try plain text comparison
+                                isPasswordValid = user.user_password == request.CurrentPassword;
+                            }
+                        }
+                        else
+                        {
+                            // Plain text password in user_password field
+                            isPasswordValid = user.user_password == request.CurrentPassword;
+                        }
+                    }
+
+                    if (!isPasswordValid)
+                    {
+                        return BadRequest(new { message = "Current password is incorrect" });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    return StatusCode(500, new { 
+                        message = "Error verifying current password", 
+                        error = ex.Message,
+                        hint = "Your password may be in an old format. Please contact administrator."
+                    });
+                }
+            }
+
+            // Update both password fields - plain text and hashed
+            try
+            {
+                // Store plain text password in user_password field
+                user.user_password = request.NewPassword;
+                
+                // Store BCrypt hashed password in hash_password field
+                user.hash_password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+                
+                // Update timestamp
+                user.updated_at = DateTime.UtcNow;
+
+                _context.Entry(user).State = EntityState.Modified;
+                await _context.SaveChangesAsync();
+
+                return Ok(new { 
+                    message = "Password changed successfully", 
+                    userEmail = email,
+                    updatedAt = user.updated_at,
+                    passwordUpdated = true,
+                    hashUpdated = true
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { 
+                    message = "Error changing password", 
+                    error = ex.Message 
+                });
+            }
+        }
+
+        /// <summary>
+        /// Update user license details by email
+        /// </summary>
+        [HttpPatch("{email}/update-license")]
+        public async Task<IActionResult> UpdateLicense(string email, [FromBody] UpdateLicenseRequest request)
+        {
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(currentUserEmail))
+            {
+                return Unauthorized(new { message = "User not authenticated" });
+            }
+
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            if (user == null) 
+                return NotFound(new { message = $"User with email {email} not found" });
+
+            // Users can update their own license, or admins can update others
+            if (email != currentUserEmail && !await _authService.HasPermissionAsync(currentUserEmail, "UPDATE_USER_LICENSE"))
+            {
+                return StatusCode(403, new { error = "You can only update your own license details or need UPDATE_USER_LICENSE permission" });
+            }
+
+            if (string.IsNullOrEmpty(request.LicenseDetailsJson))
+                return BadRequest(new { message = "License details JSON is required" });
+
+            // Validate JSON format
+            try
+            {
+                System.Text.Json.JsonDocument.Parse(request.LicenseDetailsJson);
+            }
+            catch
+            {
+                return BadRequest(new { message = "Invalid JSON format for license details" });
+            }
+
+            user.license_details_json = request.LicenseDetailsJson;
+            user.updated_at = DateTime.UtcNow;
+
+            try
+            {
+                _context.Entry(user).State = EntityState.Modified;
+                await _context.SaveChangesAsync();
+
+                return Ok(new { 
+                    message = "License details updated successfully", 
+                    userEmail = email,
+                    updatedAt = user.updated_at
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { 
+                    message = "Error updating license details", 
+                    error = ex.Message 
+                });
+            }
+        }
+
+        /// <summary>
+        /// Update user payment details by email
+        /// </summary>
+        [HttpPatch("{email}/update-payment")]
+        public async Task<IActionResult> UpdatePayment(string email, [FromBody] UpdatePaymentRequest request)
+        {
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(currentUserEmail))
+            {
+                return Unauthorized(new { message = "User not authenticated" });
+            }
+
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            if (user == null) 
+                return NotFound(new { message = $"User with email {email} not found" });
+
+            // Users can update their own payment details, or admins can update others
+            if (email != currentUserEmail && !await _authService.HasPermissionAsync(currentUserEmail, "UPDATE_PAYMENT_DETAILS"))
+            {
+                return StatusCode(403, new { error = "You can only update your own payment details or need UPDATE_PAYMENT_DETAILS permission" });
+            }
+
+            if (string.IsNullOrEmpty(request.PaymentDetailsJson))
+                return BadRequest(new { message = "Payment details JSON is required" });
+
+            // Validate JSON format
+            try
+            {
+                System.Text.Json.JsonDocument.Parse(request.PaymentDetailsJson);
+            }
+            catch
+            {
+                return BadRequest(new { message = "Invalid JSON format for payment details" });
+            }
+
+            user.payment_details_json = request.PaymentDetailsJson;
+            user.updated_at = DateTime.UtcNow;
+
+            try
+            {
+                _context.Entry(user).State = EntityState.Modified;
+                await _context.SaveChangesAsync();
+
+                return Ok(new { 
+                    message = "Payment details updated successfully", 
+                    userEmail = email,
+                    updatedAt = user.updated_at
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { 
+                    message = "Error updating payment details", 
+                    error = ex.Message 
+                });
+            }
         }
 
         /// <summary>
@@ -588,72 +799,236 @@ namespace BitRaserApiProject.Controllers
     #region Request Models
 
     /// <summary>
-    /// User filter request model
+    /// User filter request model - All fields optional for flexible filtering
     /// </summary>
+    /// <example>
+    /// {
+    ///   "UserEmail": "test@example.com",
+    ///   "UserName": "John Doe",
+    ///   "Page": 0,
+    ///   "PageSize": 10
+    /// }
+    /// </example>
     public class UserFilterRequest
     {
+        /// <summary>Filter by user email (partial match)</summary>
+        /// <example>test@example.com</example>
         public string? UserEmail { get; set; }
+        
+        /// <summary>Filter by user name (partial match)</summary>
+        /// <example>John Doe</example>
         public string? UserName { get; set; }
+        
+        /// <summary>Filter by phone number (partial match)</summary>
+        /// <example>+1234567890</example>
         public string? PhoneNumber { get; set; }
+        
+        /// <summary>Filter users created from this date</summary>
+        /// <example>2024-01-01T00:00:00Z</example>
         public DateTime? CreatedFrom { get; set; }
+        
+        /// <summary>Filter users created until this date</summary>
+        /// <example>2024-12-31T23:59:59Z</example>
         public DateTime? CreatedTo { get; set; }
+        
+        /// <summary>Filter by license presence</summary>
+        /// <example>true</example>
         public bool? HasLicenses { get; set; }
+        
+        /// <summary>Page number for pagination (0-based)</summary>
+        /// <example>0</example>
         public int Page { get; set; } = 0;
-        public int PageSize { get; set; } = 100;
+        
+        /// <summary>Number of items per page</summary>
+        /// <example>10</example>
+        public int PageSize { get; set; } = 10;
     }
 
     /// <summary>
-    /// User creation request model
+    /// User creation request model - Admin use
     /// </summary>
+    /// <example>
+    /// {
+    ///   "UserEmail": "newuser@example.com",
+    ///   "UserName": "New User",
+    ///   "Password": "SecurePass@123",
+    ///   "PhoneNumber": "+1234567890",
+    ///   "DefaultRole": "User"
+    /// }
+    /// </example>
     public class UserCreateRequest
     {
-        public string UserEmail { get; set; } = string.Empty;
-        public string UserName { get; set; } = string.Empty;
-        public string Password { get; set; } = string.Empty;
+        /// <summary>User's email address (must be unique)</summary>
+        /// <example>newuser@example.com</example>
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.EmailAddress]
+        public string UserEmail { get; set; } = null!;
+        
+        /// <summary>User's full name</summary>
+        /// <example>John Doe</example>
+        [System.ComponentModel.DataAnnotations.Required]
+        public string UserName { get; set; } = null!;
+        
+        /// <summary>User's password (min 8 chars, uppercase, lowercase, number, special char)</summary>
+        /// <example>SecurePass@123</example>
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.MinLength(8)]
+        public string Password { get; set; } = null!;
+        
+        /// <summary>User's phone number (optional)</summary>
+        /// <example>+1234567890</example>
         public string? PhoneNumber { get; set; }
+        
+        /// <summary>Payment details as JSON (optional)</summary>
+        /// <example>{"cardType":"Visa","last4":"1234"}</example>
         public string? PaymentDetailsJson { get; set; }
+        
+        /// <summary>License details as JSON (optional)</summary>
+        /// <example>{"licenseKey":"ABC-123","plan":"premium"}</example>
         public string? LicenseDetailsJson { get; set; }
+        
+        /// <summary>Default role to assign (optional)</summary>
+        /// <example>User</example>
         public string? DefaultRole { get; set; }
     }
 
     /// <summary>
-    /// User registration request model (for public registration)
+    /// User registration request model - Public registration
     /// </summary>
+    /// <example>
+    /// {
+    ///   "UserEmail": "user@example.com",
+    ///   "UserName": "John Doe",
+    ///   "Password": "SecurePass@123",
+    ///   "PhoneNumber": "+1234567890"
+    /// }
+    /// </example>
     public class UserRegistrationRequest
     {
-        public string UserEmail { get; set; } = string.Empty;
-        public string UserName { get; set; } = string.Empty;
-        public string Password { get; set; } = string.Empty;
+        /// <summary>User's email address</summary>
+        /// <example>user@example.com</example>
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.EmailAddress]
+        public string UserEmail { get; set; } = null!;
+        
+        /// <summary>User's full name</summary>
+        /// <example>John Doe</example>
+        [System.ComponentModel.DataAnnotations.Required]
+        public string UserName { get; set; } = null!;
+        
+        /// <summary>Password (min 8 chars with uppercase, lowercase, number, special char)</summary>
+        /// <example>SecurePass@123</example>
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.MinLength(8)]
+        public string Password { get; set; } = null!;
+        
+        /// <summary>Phone number (optional)</summary>
+        /// <example>+1234567890</example>
         public string? PhoneNumber { get; set; }
     }
 
     /// <summary>
-    /// User update request model
+    /// User update request model - Update user profile
     /// </summary>
+    /// <example>
+    /// {
+    ///   "UserEmail": "user@example.com",
+    ///   "UserName": "Updated Name",
+    ///   "PhoneNumber": "+9876543210"
+    /// }
+    /// </example>
     public class UserUpdateRequest
     {
-        public string UserEmail { get; set; } = string.Empty;
+        /// <summary>User email (must match URL parameter)</summary>
+        /// <example>user@example.com</example>
+        [System.ComponentModel.DataAnnotations.Required]
+        public string UserEmail { get; set; } = null!;
+        
+        /// <summary>New user name (optional)</summary>
+        /// <example>Updated Name</example>
         public string? UserName { get; set; }
+        
+        /// <summary>New phone number (optional)</summary>
+        /// <example>+9876543210</example>
         public string? PhoneNumber { get; set; }
+        
+        /// <summary>Payment details JSON (optional)</summary>
+        /// <example>{"cardType":"MasterCard","last4":"5678"}</example>
         public string? PaymentDetailsJson { get; set; }
+        
+        /// <summary>License details JSON (optional)</summary>
+        /// <example>{"licenseKey":"XYZ-789","plan":"enterprise"}</example>
         public string? LicenseDetailsJson { get; set; }
     }
 
     /// <summary>
     /// Change password request model
     /// </summary>
+    /// <example>
+    /// {
+    ///   "CurrentPassword": "OldPass@123",
+    ///   "NewPassword": "NewSecure@456"
+    /// }
+    /// </example>
     public class ChangeUserPasswordRequest
     {
+        /// <summary>Current password (required when changing own password)</summary>
+        /// <example>OldPass@123</example>
         public string? CurrentPassword { get; set; }
-        public string NewPassword { get; set; } = string.Empty;
+        
+        /// <summary>New password (min 8 characters)</summary>
+        /// <example>NewSecure@456</example>
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.MinLength(8)]
+        public string NewPassword { get; set; } = null!;
+    }
+
+    /// <summary>
+    /// Update license details request model
+    /// </summary>
+    /// <example>
+    /// {
+    ///   "LicenseDetailsJson": "{\"licenseKey\":\"ABC-123\",\"plan\":\"premium\",\"expiryDate\":\"2025-12-31\"}"
+    /// }
+    /// </example>
+    public class UpdateLicenseRequest
+    {
+        /// <summary>License details as JSON string</summary>
+        /// <example>{"licenseKey":"ABC-123","plan":"premium","expiryDate":"2025-12-31"}</example>
+        [System.ComponentModel.DataAnnotations.Required]
+        public string LicenseDetailsJson { get; set; } = null!;
+    }
+
+    /// <summary>
+    /// Update payment details request model
+    /// </summary>
+    /// <example>
+    /// {
+    ///   "PaymentDetailsJson": "{\"cardType\":\"Visa\",\"last4\":\"1234\",\"expiryMonth\":12,\"expiryYear\":2026}"
+    /// }
+    /// </example>
+    public class UpdatePaymentRequest
+    {
+        /// <summary>Payment details as JSON string</summary>
+        /// <example>{"cardType":"Visa","last4":"1234","expiryMonth":12,"expiryYear":2026}</example>
+        [System.ComponentModel.DataAnnotations.Required]
+        public string PaymentDetailsJson { get; set; } = null!;
     }
 
     /// <summary>
     /// Assign role request model
     /// </summary>
+    /// <example>
+    /// {
+    ///   "RoleName": "Manager"
+    /// }
+    /// </example>
     public class AssignUserRoleRequest
     {
-        public string RoleName { get; set; } = string.Empty;
+        /// <summary>Name of the role to assign</summary>
+        /// <example>Manager</example>
+        [System.ComponentModel.DataAnnotations.Required]
+        public string RoleName { get; set; } = null!;
     }
 
     #endregion

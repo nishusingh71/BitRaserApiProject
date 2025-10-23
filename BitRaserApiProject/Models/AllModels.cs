@@ -118,15 +118,81 @@ namespace BitRaserApiProject.Models
         [Key]
         public int subuser_id { get; set; } // Primary Key
         public int superuser_id { get; set; } // Reference to users.user_id (superuser)
+        
         [Required, MaxLength(255)]
         public string subuser_email { get; set; } // Email of the subuser
+        
         [Required, MaxLength(255)]
         public string subuser_password { get; set; } // Hashed password
+     
         public string user_email { get; set; } // ID of the parent user
+    
+        // Subuser Details (Enhanced fields from documentation)
+        [MaxLength(100)]
+        public string? subuser_username { get; set; } // Added: Username field
+        
+      [MaxLength(100)]
+        public string? Name { get; set; }
+        
+     [MaxLength(20)]
+        public string? Phone { get; set; }
+        
+        [MaxLength(100)]
+    public string? JobTitle { get; set; }
+     
+        [MaxLength(100)]
+        public string? Department { get; set; }
+   
+  // Role & Permissions
+        [Required, MaxLength(50)]
+      public string Role { get; set; } = "subuser"; // subuser, team_member, limited_admin
+    
+[MaxLength(50)]
+        public string AccessLevel { get; set; } = "limited"; // full, limited, read_only
+        
+        public string? PermissionsJson { get; set; } // JSON string for granular permissions 
+        // Machine & License Access
+     public int? AssignedMachines { get; set; } = 0;
+        public int? MaxMachines { get; set; } = 5;
+        public string? MachineIdsJson { get; set; } // JSON array of accessible machine IDs
+        public string? LicenseIdsJson { get; set; } // JSON array of accessible license IDs   
+        // Group Access
+ public int? GroupId { get; set; }
+        
+     // Status
+   [MaxLength(50)]
+   public string Status { get; set; } = "active"; // active, inactive, suspended
+        
+        public bool IsEmailVerified { get; set; } = false;
+        public bool CanCreateSubusers { get; set; } = false;
+  public bool CanViewReports { get; set; } = true;
+      public bool CanManageMachines { get; set; } = false;
+        public bool CanAssignLicenses { get; set; } = false;
+    
+    // Notifications
+        public bool EmailNotifications { get; set; } = true;
+        public bool SystemAlerts { get; set; } = true;
+        
+      // Session & Security
+[MaxLength(500)]
+    public string? LastLoginIp { get; set; }
+        
+        public DateTime? LastLoginAt { get; set; }
+        public int FailedLoginAttempts { get; set; } = 0;
+        public DateTime? LockedUntil { get; set; }
+        
+        // Audit
+     public int CreatedBy { get; set; }
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? UpdatedAt { get; set; }
+        public int? UpdatedBy { get; set; }
+  
+        [MaxLength(500)]
+      public string? Notes { get; set; }
         
         // Navigation properties for role-based system - ignore in JSON to prevent circular references
-        [JsonIgnore]
-        public ICollection<SubuserRole>? SubuserRoles { get; set; } = new List<SubuserRole>();
+     [JsonIgnore]
+        public ICollection<SubuserRole> SubuserRoles { get; set; } = new List<SubuserRole>();
     }
 
     public class Commands
@@ -137,6 +203,28 @@ namespace BitRaserApiProject.Models
         public DateTime issued_at { get; set; } = DateTime.UtcNow;
         public string command_json { get; set; } // Changed from object to string
         public string command_status { get; set; } // Changed from object to string
+    }
+
+    public class Group
+    {
+        [Key]
+        public int group_id { get; set; }
+        
+        [Required, MaxLength(100)]
+        public string name { get; set; } = string.Empty; // groupname
+        
+        [MaxLength(500)]
+        public string? description { get; set; } // groupdescription
+        
+        public int license_allocation { get; set; } = 0; // groplicenseallocation
+        
+        public string? permissions_json { get; set; } // grouppermission stored as JSON
+   
+      public DateTime created_at { get; set; } = DateTime.UtcNow;
+        public DateTime? updated_at { get; set; }
+        
+        [MaxLength(50)]
+        public string status { get; set; } = "active";
     }
 
     public class User_role_profile
@@ -265,6 +353,9 @@ namespace BitRaserApiProject.Models
         // Navigation properties
         [JsonIgnore]
         public ICollection<RolePermission>? RolePermissions { get; set; } = new List<RolePermission>();
+        
+        [JsonIgnore]
+        public ICollection<PermissionRoute>? PermissionRoutes { get; set; } = new List<PermissionRoute>();
     }
 
     public class RolePermission
@@ -308,6 +399,40 @@ namespace BitRaserApiProject.Models
         
         [JsonIgnore]
         public Role? Role { get; set; }
+    }
+
+    public class Route
+    {
+        [Key]
+        public int RouteId { get; set; }
+        
+        [Required, MaxLength(500)]
+        public string RoutePath { get; set; } = string.Empty;
+        
+        [Required, MaxLength(10)]
+        public string HttpMethod { get; set; } = string.Empty;
+        
+        [MaxLength(200)]
+        public string Description { get; set; } = string.Empty;
+        
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        
+        // Navigation properties
+        [JsonIgnore]
+        public ICollection<PermissionRoute>? PermissionRoutes { get; set; } = new List<PermissionRoute>();
+    }
+
+    public class PermissionRoute
+    {
+        public int PermissionId { get; set; }
+        public int RouteId { get; set; }
+        
+        // Navigation properties
+        [JsonIgnore]
+        public Permission? Permission { get; set; }
+        
+        [JsonIgnore]
+        public Route? Route { get; set; }
     }
 }
 

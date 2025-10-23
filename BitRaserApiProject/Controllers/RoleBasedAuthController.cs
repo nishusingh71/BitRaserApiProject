@@ -8,6 +8,7 @@ using System.Text;
 using BCrypt.Net;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Attributes;
+using BitRaserApiProject.Models;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -72,45 +73,60 @@ namespace BitRaserApiProject.Controllers
                     return BadRequest(new { message = "Email and password are required" });
                 }
 
+                string? userEmail = null;
+                bool isSubuser = false;
+
                 // Try to authenticate as main user first
                 var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.Email);
                 if (user != null && !string.IsNullOrEmpty(user.hash_password) && BCrypt.Net.BCrypt.Verify(request.Password, user.hash_password))
                 {
-                    var token = await GenerateJwtTokenAsync(request.Email, false);
-                    var roles = await _roleService.GetUserRolesAsync(request.Email, false);
-                    var permissions = await _roleService.GetUserPermissionsAsync(request.Email, false);
-
-                    return Ok(new RoleBasedLoginResponse
-                    {
-                        Token = token,
-                        UserType = "user",
-                        Email = request.Email,
-                        Roles = roles,
-                        Permissions = permissions,
-                        ExpiresAt = DateTime.UtcNow.AddHours(8)
-                    });
+                    userEmail = request.Email;
+                    isSubuser = false;
                 }
-
-                // Try to authenticate as subuser
-                var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
-                if (subuser != null && BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
+                else
                 {
-                    var token = await GenerateJwtTokenAsync(request.Email, true);
-                    var roles = await _roleService.GetUserRolesAsync(request.Email, true);
-                    var permissions = await _roleService.GetUserPermissionsAsync(request.Email, true);
-
-                    return Ok(new RoleBasedLoginResponse
+                    // Try to authenticate as subuser
+                    var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+                    if (subuser != null && BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
                     {
-                        Token = token,
-                        UserType = "subuser",
-                        Email = request.Email,
-                        Roles = roles,
-                        Permissions = permissions,
-                        ExpiresAt = DateTime.UtcNow.AddHours(8)
-                    });
+                        userEmail = request.Email;
+                        isSubuser = true;
+                    }
                 }
 
-                return Unauthorized(new { message = "Invalid credentials" });
+                if (userEmail == null)
+                {
+                    return Unauthorized(new { message = "Invalid credentials" });
+                }
+
+                // Create session entry for tracking
+                var session = new Sessions
+                {
+                    user_email = userEmail,
+                    login_time = DateTime.UtcNow,
+                    ip_address = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    device_info = Request.Headers["User-Agent"].ToString(),
+                    session_status = "active"
+                };
+
+                _context.Sessions.Add(session);
+                await _context.SaveChangesAsync();
+
+                var token = await GenerateJwtTokenAsync(userEmail, isSubuser);
+                var roles = await _roleService.GetUserRolesAsync(userEmail, isSubuser);
+                var permissions = await _roleService.GetUserPermissionsAsync(userEmail, isSubuser);
+
+                _logger.LogInformation("User login successful: {Email} ({UserType})", userEmail, isSubuser ? "subuser" : "user");
+
+                return Ok(new RoleBasedLoginResponse
+                {
+                    Token = token,
+                    UserType = isSubuser ? "subuser" : "user",
+                    Email = userEmail,
+                    Roles = roles,
+                    Permissions = permissions,
+                    ExpiresAt = DateTime.UtcNow.AddHours(8)
+                });
             }
             catch (Exception ex)
             {
@@ -417,6 +433,64 @@ namespace BitRaserApiProject.Controllers
             );
 
             return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        /// <summary>
+        /// Simple Logout - Clear JWT token and automatically logout user from system
+        /// </summary>
+        [HttpPost("logout")]
+        [Authorize]
+        public async Task<IActionResult> Logout()
+        {
+            try
+            {
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var userType = User.FindFirst("user_type")?.Value;
+
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    return Unauthorized(new { message = "Invalid token" });
+                }
+
+                var isSubuser = userType == "subuser";
+                var logoutTime = DateTime.UtcNow;
+
+                // End all active sessions for this user
+                var activeSessions = await _context.Sessions
+                    .Where(s => s.user_email == userEmail && s.session_status == "active")
+                    .ToListAsync();
+
+                foreach (var session in activeSessions)
+                {
+                    session.logout_time = logoutTime;
+                    session.session_status = "closed";
+                }
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("User logout: {Email} ({UserType})", userEmail, isSubuser ? "subuser" : "user");
+
+                // Set response headers to help clear token from browser/Swagger
+                Response.Headers["Clear-Site-Data"] = "\"storage\"";
+                Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Logout successful - JWT token cleared, user logged out automatically",
+                    email = userEmail,
+                    userType = isSubuser ? "subuser" : "user",
+                    logoutTime = logoutTime,
+                    // Add Swagger UI clearing instructions
+                    clearToken = true,
+                    swaggerLogout = true
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during logout");
+                return StatusCode(500, new { message = "Logout failed" });
+            }
         }
     }
 }

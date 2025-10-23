@@ -1,0 +1,459 @@
+using BitRaserApiProject.Models;
+using BitRaserApiProject.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
+using System.Text.Json;
+
+namespace BitRaserApiProject.Controllers
+{
+    /// <summary>
+    /// Report Generation Controller - Complete report creation and management
+  /// Matches D-Secure "Generate Report" UI with all customization options
+    /// </summary>
+    [ApiController]
+    [Route("api/[controller]")]
+[Authorize]
+    public class ReportGenerationController : ControllerBase
+    {
+     private readonly ApplicationDbContext _context;
+        private readonly IRoleBasedAuthService _authService;
+        private readonly IUserDataService _userDataService;
+        private readonly PdfService _pdfService;
+        private readonly ILogger<ReportGenerationController> _logger;
+
+    public ReportGenerationController(
+ApplicationDbContext context,
+  IRoleBasedAuthService authService,
+IUserDataService userDataService,
+        PdfService pdfService,
+    ILogger<ReportGenerationController> logger)
+     {
+            _context = context;
+            _authService = authService;
+            _userDataService = userDataService;
+    _pdfService = pdfService;
+      _logger = logger;
+        }
+
+   /// <summary>
+     /// POST /api/ReportGeneration/generate - Generate a new report
+        /// </summary>
+        [HttpPost("generate")]
+        public async Task<ActionResult<GenerateReportResponseDto>> GenerateReport([FromBody] GenerateReportRequestDto request)
+  {
+       try
+            {
+   var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+   if (string.IsNullOrEmpty(userEmail))
+   {
+ return Unauthorized(new { message = "User not authenticated" });
+     }
+
+   var isSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+
+        // Check permissions
+     if (!await _authService.HasPermissionAsync(userEmail, "EXPORT_REPORTS", isSubuser) &&
+              !await _authService.HasPermissionAsync(userEmail, "EXPORT_ALL_REPORTS", isSubuser))
+                {
+              return StatusCode(403, new { message = "Insufficient permissions to generate reports" });
+   }
+
+            // Validate date range
+        if (request.FromDate > request.ToDate)
+      {
+   return BadRequest(new { message = "From date must be before to date" });
+    }
+
+         // Get audit reports data based on filters
+                var query = _context.AuditReports.AsQueryable();
+
+     // Apply date filter
+   query = query.Where(r => r.report_datetime >= request.FromDate && r.report_datetime <= request.ToDate);
+
+      // Apply user filter if specified
+     if (!string.IsNullOrEmpty(request.UserEmail))
+      {
+   query = query.Where(r => r.client_email == request.UserEmail);
+    }
+
+         // Apply erasure method filter
+         if (request.ErasureMethods != null && request.ErasureMethods.Any())
+       {
+            query = query.Where(r => request.ErasureMethods.Contains(r.erasure_method));
+         }
+
+        var auditReports = await query.ToListAsync();
+
+    // Generate report based on format
+        string reportId = Guid.NewGuid().ToString();
+string fileName = $"{request.ReportTitle.Replace(" ", "_")}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.{request.ExportFormat.ToLower()}";
+                string filePath = Path.Combine("Reports", fileName);
+
+       // Ensure Reports directory exists
+                Directory.CreateDirectory("Reports");
+
+      byte[] reportData;
+      long fileSize = 0;
+
+          switch (request.ExportFormat.ToUpper())
+ {
+               case "PDF":
+    reportData = await GeneratePdfReport(request, auditReports);
+          await System.IO.File.WriteAllBytesAsync(filePath, reportData);
+ fileSize = reportData.Length;
+ break;
+
+          case "EXCEL":
+        case "CSV":
+      // TODO: Implement Excel/CSV generation
+   return StatusCode(501, new { message = "Excel/CSV export not yet implemented" });
+
+                    default:
+         return BadRequest(new { message = "Unsupported export format" });
+         }
+
+     // Save report metadata to database
+    var generatedReport = new GeneratedReport
+       {
+         ReportId = reportId,
+          ReportTitle = request.ReportTitle,
+          ReportType = request.ReportType,
+        FromDate = request.FromDate,
+            ToDate = request.ToDate,
+           Format = request.ExportFormat,
+    ConfigurationJson = JsonSerializer.Serialize(request),
+           FilePath = filePath,
+   FileSizeBytes = fileSize,
+    GeneratedBy = userEmail,
+     GeneratedAt = DateTime.UtcNow,
+   Status = "completed",
+        IsScheduled = request.ScheduleReportGeneration,
+  ExpiresAt = DateTime.UtcNow.AddDays(30) // Reports expire after 30 days
+};
+
+    _context.Set<GeneratedReport>().Add(generatedReport);
+           await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Report {ReportId} generated by {Email}", reportId, userEmail);
+
+          return Ok(new GenerateReportResponseDto
+       {
+    Success = true,
+         Message = "Report generated successfully",
+         ReportId = reportId,
+           DownloadUrl = $"/api/ReportGeneration/download/{reportId}",
+    FileName = fileName,
+             FileSizeBytes = fileSize,
+         GeneratedAt = DateTime.UtcNow,
+  Format = request.ExportFormat
+        });
+       }
+        catch (Exception ex)
+      {
+              _logger.LogError(ex, "Error generating report");
+          return StatusCode(500, new { message = "Error generating report", error = ex.Message });
+            }
+}
+
+      /// <summary>
+        /// GET /api/ReportGeneration/download/{reportId} - Download a generated report
+   /// </summary>
+        [HttpGet("download/{reportId}")]
+      public async Task<IActionResult> DownloadReport(string reportId)
+        {
+    try
+            {
+    var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+       if (string.IsNullOrEmpty(userEmail))
+    {
+          return Unauthorized(new { message = "User not authenticated" });
+           }
+
+         var report = await _context.Set<GeneratedReport>()
+    .FirstOrDefaultAsync(r => r.ReportId == reportId);
+
+   if (report == null)
+        {
+          return NotFound(new { message = "Report not found" });
+       }
+
+              // Check if report has expired
+              if (report.ExpiresAt.HasValue && report.ExpiresAt.Value < DateTime.UtcNow)
+   {
+         return BadRequest(new { message = "Report has expired" });
+      }
+
+    // Check if file exists
+      if (string.IsNullOrEmpty(report.FilePath) || !System.IO.File.Exists(report.FilePath))
+                {
+          return NotFound(new { message = "Report file not found" });
+       }
+
+    var fileBytes = await System.IO.File.ReadAllBytesAsync(report.FilePath);
+ var contentType = report.Format.ToUpper() switch
+   {
+          "PDF" => "application/pdf",
+           "EXCEL" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "CSV" => "text/csv",
+      _ => "application/octet-stream"
+                };
+
+        var fileName = Path.GetFileName(report.FilePath);
+         return File(fileBytes, contentType, fileName);
+            }
+catch (Exception ex)
+        {
+                _logger.LogError(ex, "Error downloading report {ReportId}", reportId);
+                return StatusCode(500, new { message = "Error downloading report" });
+ }
+        }
+
+        /// <summary>
+   /// GET /api/ReportGeneration/history - Get report generation history
+        /// </summary>
+     [HttpGet("history")]
+        public async Task<ActionResult<ReportHistoryResponseDto>> GetReportHistory(
+  [FromQuery] int page = 1,
+       [FromQuery] int pageSize = 10)
+        {
+            try
+        {
+       var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userEmail))
+     {
+    return Unauthorized(new { message = "User not authenticated" });
+          }
+
+       var isSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+  bool canViewAll = await _authService.HasPermissionAsync(userEmail, "READ_ALL_REPORTS", isSubuser);
+
+        var query = _context.Set<GeneratedReport>()
+     .Where(r => !r.IsDeleted)
+           .AsQueryable();
+
+       // Filter by user if not admin
+        if (!canViewAll)
+        {
+           query = query.Where(r => r.GeneratedBy == userEmail);
+   }
+
+    var totalCount = await query.CountAsync();
+
+        var reports = await query
+        .OrderByDescending(r => r.GeneratedAt)
+       .Skip((page - 1) * pageSize)
+      .Take(pageSize)
+      .Select(r => new ReportHistoryItemDto
+      {
+ ReportId = r.ReportId,
+       ReportTitle = r.ReportTitle,
+   ReportType = r.ReportType,
+         GeneratedAt = r.GeneratedAt,
+       GeneratedBy = r.GeneratedBy,
+            Format = r.Format,
+   FileSizeBytes = r.FileSizeBytes,
+               Status = r.Status,
+     DownloadUrl = $"/api/ReportGeneration/download/{r.ReportId}"
+     })
+    .ToListAsync();
+
+ return Ok(new ReportHistoryResponseDto
+           {
+         Reports = reports,
+         TotalCount = totalCount,
+          Page = page,
+ PageSize = pageSize
+                });
+       }
+            catch (Exception ex)
+            {
+    _logger.LogError(ex, "Error retrieving report history");
+                return StatusCode(500, new { message = "Error retrieving report history" });
+            }
+    }
+
+        /// <summary>
+        /// GET /api/ReportGeneration/types - Get available report types
+        /// </summary>
+    [HttpGet("types")]
+     public ActionResult<ReportTypesResponseDto> GetReportTypes()
+        {
+    return Ok(new ReportTypesResponseDto());
+        }
+
+   /// <summary>
+      /// GET /api/ReportGeneration/formats - Get available export formats
+        /// </summary>
+        [HttpGet("formats")]
+        public ActionResult<ExportFormatsResponseDto> GetExportFormats()
+    {
+            return Ok(new ExportFormatsResponseDto());
+   }
+
+        /// <summary>
+      /// GET /api/ReportGeneration/statistics - Get report statistics
+/// </summary>
+        [HttpGet("statistics")]
+        public async Task<ActionResult<ReportStatisticsDto>> GetStatistics()
+        {
+   try
+            {
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+      if (string.IsNullOrEmpty(userEmail))
+       {
+        return Unauthorized(new { message = "User not authenticated" });
+ }
+
+       var isSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+bool canViewAll = await _authService.HasPermissionAsync(userEmail, "READ_ALL_REPORT_STATISTICS", isSubuser);
+
+       var query = _context.Set<GeneratedReport>()
+         .Where(r => !r.IsDeleted)
+                .AsQueryable();
+
+        if (!canViewAll)
+     {
+         query = query.Where(r => r.GeneratedBy == userEmail);
+     }
+
+      var now = DateTime.UtcNow;
+       var startOfMonth = new DateTime(now.Year, now.Month, 1);
+    var startOfWeek = now.AddDays(-(int)now.DayOfWeek);
+ var startOfDay = now.Date;
+
+                var statistics = new ReportStatisticsDto
+            {
+                TotalReportsGenerated = await query.CountAsync(),
+            ReportsThisMonth = await query.CountAsync(r => r.GeneratedAt >= startOfMonth),
+ ReportsThisWeek = await query.CountAsync(r => r.GeneratedAt >= startOfWeek),
+         ReportsToday = await query.CountAsync(r => r.GeneratedAt >= startOfDay),
+             TotalStorageUsedBytes = await query.SumAsync(r => (long?)r.FileSizeBytes) ?? 0,
+           ReportsByType = await query
+   .GroupBy(r => r.ReportType)
+           .Select(g => new { Type = g.Key, Count = g.Count() })
+       .ToDictionaryAsync(x => x.Type, x => x.Count),
+       ReportsByFormat = await query
+            .GroupBy(r => r.Format)
+       .Select(g => new { Format = g.Key, Count = g.Count() })
+          .ToDictionaryAsync(x => x.Format, x => x.Count),
+  RecentReports = await query
+ .OrderByDescending(r => r.GeneratedAt)
+    .Take(5)
+  .Select(r => new ReportHistoryItemDto
+          {
+   ReportId = r.ReportId,
+       ReportTitle = r.ReportTitle,
+            ReportType = r.ReportType,
+  GeneratedAt = r.GeneratedAt,
+   GeneratedBy = r.GeneratedBy,
+        Format = r.Format,
+     FileSizeBytes = r.FileSizeBytes,
+      Status = r.Status
+           })
+  .ToListAsync()
+         };
+
+      return Ok(statistics);
+   }
+    catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving report statistics");
+           return StatusCode(500, new { message = "Error retrieving report statistics" });
+            }
+        }
+
+    /// <summary>
+        /// DELETE /api/ReportGeneration/{reportId} - Delete a generated report
+        /// </summary>
+        [HttpDelete("{reportId}")]
+        public async Task<IActionResult> DeleteReport(string reportId)
+        {
+            try
+            {
+    var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+      if (string.IsNullOrEmpty(userEmail))
+            {
+       return Unauthorized(new { message = "User not authenticated" });
+       }
+
+           var report = await _context.Set<GeneratedReport>()
+   .FirstOrDefaultAsync(r => r.ReportId == reportId);
+
+    if (report == null)
+              {
+          return NotFound(new { message = "Report not found" });
+    }
+
+           var isSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+     bool canDeleteAll = await _authService.HasPermissionAsync(userEmail, "DELETE_ALL_REPORTS", isSubuser);
+
+          // Check if user can delete this report
+        if (!canDeleteAll && report.GeneratedBy != userEmail)
+          {
+ return StatusCode(403, new { message = "You can only delete your own reports" });
+   }
+
+          // Soft delete
+      report.IsDeleted = true;
+  await _context.SaveChangesAsync();
+
+            // Optionally delete physical file
+      if (!string.IsNullOrEmpty(report.FilePath) && System.IO.File.Exists(report.FilePath))
+    {
+              try
+  {
+     System.IO.File.Delete(report.FilePath);
+           }
+           catch (Exception fileEx)
+          {
+     _logger.LogWarning(fileEx, "Could not delete report file {FilePath}", report.FilePath);
+           }
+           }
+
+      _logger.LogInformation("Report {ReportId} deleted by {Email}", reportId, userEmail);
+
+      return Ok(new { message = "Report deleted successfully" });
+     }
+            catch (Exception ex)
+            {
+     _logger.LogError(ex, "Error deleting report {ReportId}", reportId);
+        return StatusCode(500, new { message = "Error deleting report" });
+       }
+   }
+
+        #region Private Helper Methods
+
+        private async Task<byte[]> GeneratePdfReport(GenerateReportRequestDto request, List<audit_reports> auditReports)
+        {
+     // Create a basic report request for PDF service
+     var reportRequest = new ReportRequest
+  {
+      ReportTitle = request.ReportTitle,
+         HeaderText = request.HeaderText ?? "Data Erasure Report",
+        TechnicianName = request.ErasurePersonName,
+      TechnicianDept = request.ErasurePersonDepartment,
+       ValidatorName = request.ValidatorPersonName,
+       ValidatorDept = request.ValidatorPersonDepartment,
+ ReportData = new ReportData
+                {
+  ReportId = Guid.NewGuid().ToString(),
+     ReportDate = DateTime.UtcNow.ToString("yyyy-MM-dd"),
+         SoftwareName = "D-Secure BitRaser",
+       ProductVersion = "2.0",
+ ErasureLog = auditReports.Select(r => new ErasureLogEntry
+            {
+     Target = r.report_name,
+          Status = "Completed"
+            }).ToList()
+        }
+       };
+
+            // Generate PDF using existing PdfService
+    return _pdfService.GenerateReport(reportRequest);
+     }
+
+ #endregion
+    }
+}

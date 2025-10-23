@@ -278,7 +278,7 @@ namespace BitRaserApiProject.Services
                     if (existingRoute == null)
                     {
                         // Create new route
-                        var newRoute = new BitRaserApiProject.Route
+                        var newRoute = new Models.Route
                         {
                             RoutePath = routeInfo.RoutePath,
                             HttpMethod = routeInfo.HttpMethod,
@@ -390,7 +390,7 @@ namespace BitRaserApiProject.Services
                 var currentRoutes = discoveryResult.DiscoveredRoutes;
 
                 // Find orphaned routes
-                var orphanedRoutes = new List<BitRaserApiProject.Route>();
+                var orphanedRoutes = new List<Models.Route>();
                 
                 foreach (var dbRoute in dbRoutes)
                 {
