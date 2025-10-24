@@ -71,6 +71,32 @@ namespace BitRaserApiProject.Controllers
                 if (!string.IsNullOrEmpty(filter.PhoneNumber))
                     query = query.Where(u => u.phone_number != null && u.phone_number.Contains(filter.PhoneNumber));
 
+                // NEW FIELD FILTERS
+                if (!string.IsNullOrEmpty(filter.Department))
+                    query = query.Where(u => u.department != null && u.department.Contains(filter.Department));
+
+                if (!string.IsNullOrEmpty(filter.UserGroup))
+                    query = query.Where(u => u.user_group != null && u.user_group.Contains(filter.UserGroup));
+
+                if (!string.IsNullOrEmpty(filter.UserRole))
+                    query = query.Where(u => u.user_role != null && u.user_role.Contains(filter.UserRole));
+
+                if (!string.IsNullOrEmpty(filter.Status))
+                    query = query.Where(u => u.status == filter.Status);
+
+                if (filter.MinLicenseAllocation.HasValue)
+                    query = query.Where(u => u.license_allocation >= filter.MinLicenseAllocation.Value);
+
+                if (filter.MaxLicenseAllocation.HasValue)
+                    query = query.Where(u => u.license_allocation <= filter.MaxLicenseAllocation.Value);
+
+                if (filter.LastLoginFrom.HasValue)
+                    query = query.Where(u => u.last_login >= filter.LastLoginFrom.Value);
+
+                if (filter.LastLoginTo.HasValue)
+                    query = query.Where(u => u.last_login <= filter.LastLoginTo.Value);
+
+                // EXISTING FILTERS
                 if (filter.CreatedFrom.HasValue)
                     query = query.Where(u => u.created_at >= filter.CreatedFrom.Value);
 
@@ -96,6 +122,14 @@ namespace BitRaserApiProject.Controllers
                     userEmail = u.user_email,
                     userName = u.user_name,
                     phoneNumber = u.phone_number,
+                    // NEW FIELDS
+                    department = u.department,
+                    userGroup = u.user_group,
+                    lastLogin = u.last_login,
+                    userRole = u.user_role,
+                    licenseAllocation = u.license_allocation,
+                    status = u.status,
+                    // EXISTING FIELDS
                     createdAt = u.created_at,
                     updatedAt = u.updated_at,
                     roles = u.UserRoles.Select(ur => ur.Role.RoleName).ToList(),
@@ -135,6 +169,14 @@ namespace BitRaserApiProject.Controllers
                 userEmail = user.user_email,
                 userName = user.user_name,
                 phoneNumber = user.phone_number,
+                // NEW FIELDS
+                department = user.department,
+                userGroup = user.user_group,
+                lastLogin = user.last_login,
+                userRole = user.user_role,
+                licenseAllocation = user.license_allocation,
+                status = user.status,
+                // EXISTING FIELDS
                 createdAt = user.created_at,
                 updatedAt = user.updated_at,
                 roles = user.UserRoles.Select(ur => new {
@@ -185,6 +227,14 @@ namespace BitRaserApiProject.Controllers
                 user_password = request.Password,  // Plain text
                 hash_password = BCrypt.Net.BCrypt.HashPassword(request.Password),  // Hashed
                 phone_number = request.PhoneNumber ?? "",
+                // NEW FIELDS - All optional, use provided values or null
+                department = request.Department,
+                user_group = request.UserGroup,
+                last_login = null, // Will be set on first login
+                user_role = request.UserRole,
+                license_allocation = request.LicenseAllocation,
+                status = request.Status ?? "active", // Default to "active" if not provided
+                // EXISTING FIELDS
                 payment_details_json = request.PaymentDetailsJson ?? "{}",
                 license_details_json = request.LicenseDetailsJson ?? "{}",
                 created_at = DateTime.UtcNow,
@@ -203,6 +253,13 @@ namespace BitRaserApiProject.Controllers
             var response = new {
                 userEmail = newUser.user_email,
                 userName = newUser.user_name,
+                // NEW FIELDS
+                department = newUser.department,
+                userGroup = newUser.user_group,
+                userRole = newUser.user_role,
+                licenseAllocation = newUser.license_allocation,
+                status = newUser.status,
+                // EXISTING FIELDS
                 createdAt = newUser.created_at,
                 message = "User created successfully"
             };
@@ -242,6 +299,14 @@ namespace BitRaserApiProject.Controllers
                 user_password = request.Password,  // Plain text
                 hash_password = BCrypt.Net.BCrypt.HashPassword(request.Password),  // Hashed
                 phone_number = request.PhoneNumber ?? "",
+                // NEW FIELDS - Safe defaults for public registration (all optional)
+                department = null, // Can be set later by admin
+                user_group = null, // Can be assigned later by admin
+                last_login = null, // Will be set on first login
+                user_role = null, // Can be assigned later (no default role for public)
+                license_allocation = null, // No licenses allocated initially
+                status = "pending", // Pending verification for public registrations
+                // EXISTING FIELDS
                 payment_details_json = "{}",
                 license_details_json = "{}",
                 created_at = DateTime.UtcNow,
@@ -329,6 +394,23 @@ namespace BitRaserApiProject.Controllers
             if (!string.IsNullOrEmpty(request.PhoneNumber))
                 user.phone_number = request.PhoneNumber;
 
+            // UPDATE NEW FIELDS
+            if (request.Department != null)
+                user.department = request.Department;
+
+            if (request.UserGroup != null)
+                user.user_group = request.UserGroup;
+   
+            if (request.UserRole != null)
+                user.user_role = request.UserRole;
+
+            if (request.LicenseAllocation.HasValue)
+                user.license_allocation = request.LicenseAllocation.Value;
+
+            if (request.Status != null)
+                user.status = request.Status;
+
+            // UPDATE EXISTING FIELDS
             if (!string.IsNullOrEmpty(request.PaymentDetailsJson))
                 user.payment_details_json = request.PaymentDetailsJson;
 
@@ -823,6 +905,38 @@ namespace BitRaserApiProject.Controllers
         /// <example>+1234567890</example>
         public string? PhoneNumber { get; set; }
         
+        /// <summary>Filter by department (partial match)</summary>
+        /// <example>Engineering</example>
+        public string? Department { get; set; }
+   
+        /// <summary>Filter by user group (partial match)</summary>
+        /// <example>Development Team</example>
+        public string? UserGroup { get; set; }
+      
+        /// <summary>Filter by user role (partial match)</summary>
+        /// <example>manager</example>
+        public string? UserRole { get; set; }
+        
+        /// <summary>Filter by status (exact match)</summary>
+        /// <example>active</example>
+        public string? Status { get; set; }
+        
+        /// <summary>Minimum license allocation</summary>
+        /// <example>1</example>
+        public int? MinLicenseAllocation { get; set; }
+   
+        /// <summary>Maximum license allocation</summary>
+        /// <example>100</example>
+        public int? MaxLicenseAllocation { get; set; }
+   
+        /// <summary>Filter users who logged in from this date</summary>
+        /// <example>2024-01-01T00:00:00Z</example>
+        public DateTime? LastLoginFrom { get; set; }
+ 
+        /// <summary>Filter users who logged in until this date</summary>
+        /// <example>2024-12-31T23:59:59Z</example>
+        public DateTime? LastLoginTo { get; set; }
+   
         /// <summary>Filter users created from this date</summary>
         /// <example>2024-01-01T00:00:00Z</example>
         public DateTime? CreatedFrom { get; set; }
@@ -830,7 +944,7 @@ namespace BitRaserApiProject.Controllers
         /// <summary>Filter users created until this date</summary>
         /// <example>2024-12-31T23:59:59Z</example>
         public DateTime? CreatedTo { get; set; }
-        
+
         /// <summary>Filter by license presence</summary>
         /// <example>true</example>
         public bool? HasLicenses { get; set; }
@@ -838,7 +952,7 @@ namespace BitRaserApiProject.Controllers
         /// <summary>Page number for pagination (0-based)</summary>
         /// <example>0</example>
         public int Page { get; set; } = 0;
-        
+    
         /// <summary>Number of items per page</summary>
         /// <example>10</example>
         public int PageSize { get; set; } = 10;
@@ -874,22 +988,46 @@ namespace BitRaserApiProject.Controllers
         [System.ComponentModel.DataAnnotations.Required]
         [System.ComponentModel.DataAnnotations.MinLength(8)]
         public string Password { get; set; } = null!;
-        
+      
         /// <summary>User's phone number (optional)</summary>
-        /// <example>+1234567890</example>
-        public string? PhoneNumber { get; set; }
+    /// <example>+1234567890</example>
+   public string? PhoneNumber { get; set; }
         
+     /// <summary>Department name (optional)</summary>
+        /// <example>Engineering</example>
+ [System.ComponentModel.DataAnnotations.MaxLength(100)]
+        public string? Department { get; set; }
+        
+        /// <summary>User group (optional)</summary>
+   /// <example>Development Team</example>
+        [System.ComponentModel.DataAnnotations.MaxLength(100)]
+        public string? UserGroup { get; set; }
+        
+ /// <summary>User role (optional, defaults to 'user')</summary>
+        /// <example>manager</example>
+        [System.ComponentModel.DataAnnotations.MaxLength(50)]
+   public string? UserRole { get; set; }
+        
+    /// <summary>License allocation (optional, defaults to 0)</summary>
+        /// <example>5</example>
+  public int? LicenseAllocation { get; set; }
+        
+    /// <summary>User status (optional, defaults to 'active')</summary>
+        /// <example>active</example>
+     [System.ComponentModel.DataAnnotations.MaxLength(50)]
+        public string? Status { get; set; }
+    
         /// <summary>Payment details as JSON (optional)</summary>
         /// <example>{"cardType":"Visa","last4":"1234"}</example>
-        public string? PaymentDetailsJson { get; set; }
+   public string? PaymentDetailsJson { get; set; }
         
         /// <summary>License details as JSON (optional)</summary>
         /// <example>{"licenseKey":"ABC-123","plan":"premium"}</example>
-        public string? LicenseDetailsJson { get; set; }
+  public string? LicenseDetailsJson { get; set; }
         
         /// <summary>Default role to assign (optional)</summary>
-        /// <example>User</example>
-        public string? DefaultRole { get; set; }
+ /// <example>User</example>
+  public string? DefaultRole { get; set; }
     }
 
     /// <summary>
@@ -951,15 +1089,39 @@ namespace BitRaserApiProject.Controllers
         /// <summary>New phone number (optional)</summary>
         /// <example>+9876543210</example>
         public string? PhoneNumber { get; set; }
+  
+       /// <summary>Department (optional)</summary>
+        /// <example>IT Operations</example>
+     [System.ComponentModel.DataAnnotations.MaxLength(100)]
+        public string? Department { get; set; }
+        
+     /// <summary>User group (optional)</summary>
+        /// <example>Senior Team</example>
+   [System.ComponentModel.DataAnnotations.MaxLength(100)]
+        public string? UserGroup { get; set; }
+        
+ /// <summary>User role (optional)</summary>
+        /// <example>admin</example>
+  [System.ComponentModel.DataAnnotations.MaxLength(50)]
+     public string? UserRole { get; set; }
+      
+  /// <summary>License allocation (optional)</summary>
+        /// <example>10</example>
+  public int? LicenseAllocation { get; set; }
+        
+   /// <summary>User status (optional)</summary>
+        /// <example>active</example>
+[System.ComponentModel.DataAnnotations.MaxLength(50)]
+        public string? Status { get; set; }
         
         /// <summary>Payment details JSON (optional)</summary>
-        /// <example>{"cardType":"MasterCard","last4":"5678"}</example>
-        public string? PaymentDetailsJson { get; set; }
+      /// <example>{"cardType":"MasterCard","last4":"5678"}</example>
+  public string? PaymentDetailsJson { get; set; }
         
-        /// <summary>License details JSON (optional)</summary>
-        /// <example>{"licenseKey":"XYZ-789","plan":"enterprise"}</example>
-        public string? LicenseDetailsJson { get; set; }
-    }
+      /// <summary>License details JSON (optional)</summary>
+   /// <example>{"licenseKey":"XYZ-789","plan":"enterprise"}</example>
+   public string? LicenseDetailsJson { get; set; }
+ }
 
     /// <summary>
     /// Change password request model
@@ -970,16 +1132,16 @@ namespace BitRaserApiProject.Controllers
     ///   "NewPassword": "NewSecure@456"
     /// }
     /// </example>
-    public class ChangeUserPasswordRequest
+public class ChangeUserPasswordRequest
     {
         /// <summary>Current password (required when changing own password)</summary>
         /// <example>OldPass@123</example>
-        public string? CurrentPassword { get; set; }
-        
+   public string? CurrentPassword { get; set; }
+   
         /// <summary>New password (min 8 characters)</summary>
         /// <example>NewSecure@456</example>
-        [System.ComponentModel.DataAnnotations.Required]
-        [System.ComponentModel.DataAnnotations.MinLength(8)]
+  [System.ComponentModel.DataAnnotations.Required]
+     [System.ComponentModel.DataAnnotations.MinLength(8)]
         public string NewPassword { get; set; } = null!;
     }
 
@@ -993,8 +1155,8 @@ namespace BitRaserApiProject.Controllers
     /// </example>
     public class UpdateLicenseRequest
     {
-        /// <summary>License details as JSON string</summary>
-        /// <example>{"licenseKey":"ABC-123","plan":"premium","expiryDate":"2025-12-31"}</example>
+    /// <summary>License details as JSON string</summary>
+    /// <example>{"licenseKey":"ABC-123","plan":"premium","expiryDate":"2025-12-31"}</example>
         [System.ComponentModel.DataAnnotations.Required]
         public string LicenseDetailsJson { get; set; } = null!;
     }
@@ -1009,9 +1171,9 @@ namespace BitRaserApiProject.Controllers
     /// </example>
     public class UpdatePaymentRequest
     {
-        /// <summary>Payment details as JSON string</summary>
+   /// <summary>Payment details as JSON string</summary>
         /// <example>{"cardType":"Visa","last4":"1234","expiryMonth":12,"expiryYear":2026}</example>
-        [System.ComponentModel.DataAnnotations.Required]
+    [System.ComponentModel.DataAnnotations.Required]
         public string PaymentDetailsJson { get; set; } = null!;
     }
 
@@ -1026,8 +1188,8 @@ namespace BitRaserApiProject.Controllers
     public class AssignUserRoleRequest
     {
         /// <summary>Name of the role to assign</summary>
-        /// <example>Manager</example>
-        [System.ComponentModel.DataAnnotations.Required]
+      /// <example>Manager</example>
+      [System.ComponentModel.DataAnnotations.Required]
         public string RoleName { get; set; } = null!;
     }
 

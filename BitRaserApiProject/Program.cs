@@ -385,7 +385,7 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwagger();
     app.UseSwaggerUI(options =>
     {
-        options.SwaggerEndpoint("/swagger/v1/swagger.json", "BitRaser API Project v2.0");
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "D-Secure API Project v2.0");
         options.RoutePrefix = "swagger";
         options.DocumentTitle = "D-Secure API - Enhanced Documentation";
         options.DefaultModelsExpandDepth(-1);

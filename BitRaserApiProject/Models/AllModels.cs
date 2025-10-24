@@ -71,22 +71,39 @@ namespace BitRaserApiProject.Models
         [Required, MaxLength(255)]
         public string user_password { get; set; } // Plain password
 
-        [JsonIgnore]
+      [JsonIgnore]
         public string? hash_password { get; set; } // Hashed password
 
-        public bool? is_private_cloud { get; set; } = false; // Private cloud flag
+  public bool? is_private_cloud { get; set; } = false; // Private cloud flag
         public bool? private_api { get; set; } = false; // Private API access flag
 
         [MaxLength(20)]
-        public string phone_number { get; set; } // User's phone number
-        public string payment_details_json { get; set; } // JSON storing payment details
-        public string license_details_json { get; set; } // JSON storing license details
+        public string? phone_number { get; set; } // User's phone number
+      
+        // NEW FIELDS - All Optional (Nullable)
+        [MaxLength(100)]
+        public string? department { get; set; } // Department name - OPTIONAL
+        
+     [MaxLength(100)]
+        public string? user_group { get; set; } // User group - OPTIONAL  
+        public DateTime? last_login { get; set; } // Last login timestamp - OPTIONAL
+        
+        [MaxLength(50)]
+        public string? user_role { get; set; } // User role - OPTIONAL 
+        public int? license_allocation { get; set; } // Number of licenses - OPTIONAL
+        
+        [MaxLength(50)]
+        public string? status { get; set; } // User status - OPTIONAL (default handled in controller)
+    
+        // Existing fields
+        public string? payment_details_json { get; set; } // JSON storing payment details
+        public string? license_details_json { get; set; } // JSON storing license details
         
         public DateTime created_at { get; set; } = DateTime.UtcNow; // Account creation date
         public DateTime updated_at { get; set; } = DateTime.UtcNow; // Last update date
         
         // Navigation properties for role-based system - ignore in JSON to prevent circular references
-        [JsonIgnore]
+  [JsonIgnore]
         public ICollection<UserRole>? UserRoles { get; set; } = new List<UserRole>();
     }
 
