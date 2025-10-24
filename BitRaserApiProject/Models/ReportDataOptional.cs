@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
+using System.Text.Json;
 
 namespace BitRaserApiProject.Models;
 
@@ -24,13 +25,13 @@ public class ReportData
     public string? Status { get; set; }
 
     [JsonPropertyName("process_mode")]
-    public string? ProcessMode { get; set; }
+  public string? ProcessMode { get; set; }
 
-    [JsonPropertyName("os")]
+ [JsonPropertyName("os")]
     public string? OS { get; set; }
 
     [JsonPropertyName("os_version")]
-    public string? OSVersion { get; set; }
+  public string? OSVersion { get; set; }
 
     [JsonPropertyName("computer_name")]
     public string? ComputerName { get; set; }
@@ -38,7 +39,7 @@ public class ReportData
     [JsonPropertyName("mac_address")]
     public string? MacAddress { get; set; }
 
-    [JsonPropertyName("manufacturer")]
+  [JsonPropertyName("manufacturer")]
     public string? Manufacturer { get; set; }
 
     [JsonPropertyName("Eraser_Start_Time")]
@@ -62,9 +63,81 @@ public class ReportData
     [JsonPropertyName("erased_files")]
     public int ErasedFiles { get; set; }
 
-    [JsonPropertyName("failed_files")]
+ [JsonPropertyName("failed_files")]
     public int FailedFiles { get; set; }
 
     [JsonPropertyName("erasure_log")]
     public List<ErasureLogEntry>? ErasureLog { get; set; } = new();
+}
+
+public class ErasureLogEntry
+{
+    [JsonPropertyName("target")]
+public string? Target { get; set; }
+
+    [JsonPropertyName("free_space")]
+    public string? Capacity { get; set; }
+
+    // Flexible converter - accepts both string and number
+    [JsonPropertyName("total_sectors")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
+    public string? TotalSectors { get; set; }
+
+    // Flexible converter - accepts both string and number
+    [JsonPropertyName("sectors_erased")]
+    [JsonConverter(typeof(FlexibleStringConverter))]
+    public string? SectorsErased { get; set; }
+
+    [JsonPropertyName("dummy_file_size")]
+    public string? Size { get; set; }
+
+ [JsonPropertyName("status")]
+    public string? Status { get; set; } 
+}
+
+/// <summary>
+/// Custom JSON converter that accepts both string and number types
+/// Converts numbers to strings automatically
+/// </summary>
+public class FlexibleStringConverter : JsonConverter<string>
+{
+  public override string? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        switch (reader.TokenType)
+        {
+            case JsonTokenType.String:
+  return reader.GetString();
+  
+     case JsonTokenType.Number:
+       // Handle both int and long
+      if (reader.TryGetInt64(out long longValue))
+           {
+            return longValue.ToString();
+      }
+   if (reader.TryGetDouble(out double doubleValue))
+           {
+        return doubleValue.ToString("F0"); // No decimal places
+ }
+           return reader.GetString();
+     
+   case JsonTokenType.Null:
+      return null;
+  
+        default:
+    // Fallback - try to get as string
+        return reader.GetString();
+        }
+    }
+
+    public override void Write(Utf8JsonWriter writer, string? value, JsonSerializerOptions options)
+    {
+        if (value == null)
+     {
+         writer.WriteNullValue();
+        }
+      else
+        {
+      writer.WriteStringValue(value);
+   }
+    }
 }

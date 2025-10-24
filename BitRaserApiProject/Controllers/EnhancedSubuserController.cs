@@ -348,8 +348,233 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Change subuser password by email
+        /// PATCH: Flexible update for subuser - Update single or multiple fields
+        /// Can find subuser by parent user email OR by subuser email
+        /// Supports partial updates - only fields provided will be updated
         /// </summary>
+        [HttpPatch("update")]
+        public async Task<IActionResult> PatchSubuser([FromBody] SubuserPatchRequest request)
+        {
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+          if (string.IsNullOrEmpty(currentUserEmail))
+            {
+  return Unauthorized(new { message = "User not authenticated" });
+     }
+
+   var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+
+            // Find subuser by subuser_email OR by parentUserEmail + subuser_email combination
+            subuser? targetSubuser = null;
+
+      if (!string.IsNullOrEmpty(request.subuser_email))
+            {
+ // First try to find by subuser_email directly
+ targetSubuser = await _context.subuser
+          .FirstOrDefaultAsync(s => s.subuser_email == request.subuser_email);
+
+       // If parentUserEmail is also provided, validate it matches
+          if (targetSubuser != null && !string.IsNullOrEmpty(request.parentUserEmail))
+                {
+    if (targetSubuser.user_email != request.parentUserEmail)
+    {
+       return BadRequest(new { 
+  message = "Subuser email and parent user email mismatch",
+              subuserEmail = request.subuser_email,
+     providedParent = request.parentUserEmail,
+     actualParent = targetSubuser.user_email
+         });
+  }
+    }
+            }
+          else if (!string.IsNullOrEmpty(request.parentUserEmail))
+    {
+           // If only parent email provided, we need more context
+      return BadRequest(new { 
+          message = "subuser_email is required for update. Provide subuser_email to identify which subuser to update" 
+          });
+   }
+     else
+   {
+   return BadRequest(new { 
+        message = "Either subuser_email or both subuser_email and parentUserEmail are required" 
+  });
+      }
+
+            if (targetSubuser == null)
+            {
+       return NotFound(new { 
+  message = $"Subuser not found",
+    subuser_email = request.subuser_email
+          });
+        }
+
+ // Check if current user can update this subuser
+    bool canUpdate = targetSubuser.user_email == currentUserEmail ||
+             await _authService.HasPermissionAsync(currentUserEmail, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
+
+       if (!canUpdate)
+       {
+        return StatusCode(403, new { 
+              message = "You can only update your own subusers",
+      currentUser = currentUserEmail,
+      subuserParent = targetSubuser.user_email
+  });
+  }
+
+   var updatedFields = new List<string>();
+
+   // Update subuser_email if provided (email change)
+      if (!string.IsNullOrEmpty(request.new_subuser_email) && 
+        request.new_subuser_email != targetSubuser.subuser_email)
+            {
+    // Check if new email already exists
+          var emailExists = await _context.subuser
+        .AnyAsync(s => s.subuser_email == request.new_subuser_email && s.subuser_id != targetSubuser.subuser_id);
+          
+  if (emailExists)
+       {
+          return Conflict(new { message = $"Email {request.new_subuser_email} is already in use" });
+        }
+
+       targetSubuser.subuser_email = request.new_subuser_email;
+        updatedFields.Add("subuser_email");
+    }
+
+ // Update password if provided
+     if (!string.IsNullOrEmpty(request.subuser_password))
+            {
+    targetSubuser.subuser_password = BCrypt.Net.BCrypt.HashPassword(request.subuser_password);
+       updatedFields.Add("subuser_password");
+  }
+
+            // Update subuser_name if provided
+   if (request.subuser_name != null) // Allow empty string to clear name
+        {
+     targetSubuser.Name = string.IsNullOrEmpty(request.subuser_name) ? null : request.subuser_name;
+                updatedFields.Add("subuser_name");
+   }
+
+       // Update department if provided
+    if (request.department != null)
+         {
+                targetSubuser.Department = string.IsNullOrEmpty(request.department) ? null : request.department;
+        updatedFields.Add("department");
+          }
+
+       // Update role if provided
+          if (request.role != null)
+            {
+    targetSubuser.Role = string.IsNullOrEmpty(request.role) ? "subuser" : request.role;
+  updatedFields.Add("role");
+ }
+
+            // Update phone if provided
+         if (request.phone != null)
+            {
+        targetSubuser.Phone = string.IsNullOrEmpty(request.phone) ? null : request.phone;
+       updatedFields.Add("phone");
+     }
+
+      // Update subuser_group if provided
+            if (request.subuser_group != null)
+{
+ if (string.IsNullOrEmpty(request.subuser_group))
+            {
+          targetSubuser.GroupId = null;
+    }
+  else if (int.TryParse(request.subuser_group, out int groupId))
+           {
+ // Validate group exists
+  var groupExists = await _context.Set<Group>().AnyAsync(g => g.group_id == groupId);
+        if (!groupExists)
+               {
+       return BadRequest(new { message = $"Group with ID {groupId} not found" });
+}
+           targetSubuser.GroupId = groupId;
+        }
+          else
+       {
+         return BadRequest(new { message = $"Invalid group ID format: {request.subuser_group}" });
+ }
+   updatedFields.Add("subuser_group");
+     }
+
+     // Update parentUserEmail if provided (reassign subuser to different parent)
+    if (!string.IsNullOrEmpty(request.new_parentUserEmail) && 
+     request.new_parentUserEmail != targetSubuser.user_email)
+            {
+    // Check permission for reassignment
+            if (!await _authService.HasPermissionAsync(currentUserEmail, "REASSIGN_SUBUSERS", isCurrentUserSubuser))
+                {
+           return StatusCode(403, new { 
+           message = "Insufficient permissions to reassign subuser to different parent" 
+            });
+    }
+
+     // Validate new parent exists
+            var newParent = await _context.Users
+            .FirstOrDefaultAsync(u => u.user_email == request.new_parentUserEmail);
+                
+   if (newParent == null)
+   {
+           return BadRequest(new { message = $"Parent user {request.new_parentUserEmail} not found" });
+        }
+
+   targetSubuser.user_email = request.new_parentUserEmail;
+ targetSubuser.superuser_id = newParent.user_id;
+             updatedFields.Add("parentUserEmail");
+         }
+
+   if (updatedFields.Count == 0)
+            {
+       return BadRequest(new { message = "No fields to update. Please provide at least one field to update" });
+    }
+
+            // Update timestamp
+            targetSubuser.UpdatedAt = DateTime.UtcNow;
+     targetSubuser.UpdatedBy = (await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail))?.user_id;
+
+            try
+    {
+           _context.Entry(targetSubuser).State = EntityState.Modified;
+       await _context.SaveChangesAsync();
+
+        _logger.LogInformation("Subuser {Email} updated by {UpdatedBy}. Fields: {Fields}", 
+           targetSubuser.subuser_email, currentUserEmail, string.Join(", ", updatedFields));
+
+           return Ok(new
+      {
+        message = "Subuser updated successfully",
+           subuser_email = targetSubuser.subuser_email,
+       subuser_name = targetSubuser.Name,
+              department = targetSubuser.Department,
+role = targetSubuser.Role,
+        phone = targetSubuser.Phone,
+    subuser_group = targetSubuser.GroupId?.ToString(),
+     parentUserEmail = targetSubuser.user_email,
+        updatedFields = updatedFields,
+       updatedAt = targetSubuser.UpdatedAt,
+updatedBy = currentUserEmail
+            });
+   }
+    catch (DbUpdateConcurrencyException ex)
+    {
+       _logger.LogError(ex, "Concurrency error updating subuser {Email}", targetSubuser.subuser_email);
+         return StatusCode(409, new { message = "Concurrency error. The subuser was modified by another user. Please retry." });
+            }
+ catch (Exception ex)
+         {
+  _logger.LogError(ex, "Error updating subuser {Email}", targetSubuser.subuser_email);
+ return StatusCode(500, new { 
+        message = "Error updating subuser",
+      error = ex.Message
+         });
+ }
+        }
+
+        /// <summary>
+/// Change subuser password by email
+   /// </summary>
         [HttpPatch("{email}/change-password")]
         public async Task<IActionResult> ChangeSubuserPassword(string email, [FromBody] ChangePasswordRequest request)
         {
@@ -637,9 +862,78 @@ namespace BitRaserApiProject.Controllers
     /// </summary>
     public class SubuserUpdateRequest
     {
-        public string SubuserEmail { get; set; } = string.Empty;
+      public string SubuserEmail { get; set; } = string.Empty;
         public string? NewPassword { get; set; }
-        public string? NewParentUserEmail { get; set; }
+public string? NewParentUserEmail { get; set; }
+    }
+
+    /// <summary>
+    /// Flexible PATCH request model for partial subuser updates
+    /// All fields are optional - only provided fields will be updated
+    /// </summary>
+    public class SubuserPatchRequest
+    {
+   /// <summary>
+        /// Current subuser email - Required to identify which subuser to update
+    /// </summary>
+        [EmailAddress(ErrorMessage = "Invalid email format")]
+        public string? subuser_email { get; set; }
+
+        /// <summary>
+      /// Parent user email - Optional, used for additional validation
+        /// If provided, will verify subuser belongs to this parent
+        /// </summary>
+        [EmailAddress(ErrorMessage = "Invalid parent email format")]
+   public string? parentUserEmail { get; set; }
+
+        /// <summary>
+        /// New subuser email - Optional, use to change subuser's email address
+        /// </summary>
+        [EmailAddress(ErrorMessage = "Invalid new email format")]
+        public string? new_subuser_email { get; set; }
+
+  /// <summary>
+        /// New password - Optional, provide to change password
+        /// </summary>
+        [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
+        public string? subuser_password { get; set; }
+
+      /// <summary>
+        /// Subuser name - Optional
+        /// </summary>
+      [MaxLength(100)]
+        public string? subuser_name { get; set; }
+
+    /// <summary>
+        /// Department - Optional
+   /// </summary>
+        [MaxLength(100)]
+        public string? department { get; set; }
+
+ /// <summary>
+        /// Role - Optional
+        /// </summary>
+   [MaxLength(50)]
+     public string? role { get; set; }
+
+        /// <summary>
+        /// Phone number - Optional
+        /// </summary>
+    [MaxLength(20)]
+  public string? phone { get; set; }
+
+        /// <summary>
+    /// Subuser group (as string, will be converted to int internally) - Optional
+        /// </summary>
+        [MaxLength(100)]
+        public string? subuser_group { get; set; }
+
+        /// <summary>
+        /// New parent user email - Optional, use to reassign subuser to different parent
+        /// Requires REASSIGN_SUBUSERS permission
+      /// </summary>
+        [EmailAddress(ErrorMessage = "Invalid new parent email format")]
+        public string? new_parentUserEmail { get; set; }
     }
 
     /// <summary>
@@ -647,7 +941,7 @@ namespace BitRaserApiProject.Controllers
     /// </summary>
     public class ChangePasswordRequest
     {
-public string NewPassword { get; set; } = string.Empty;
+        public string NewPassword { get; set; } = string.Empty;
     }
 
     /// <summary>

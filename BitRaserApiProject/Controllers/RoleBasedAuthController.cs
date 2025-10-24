@@ -47,6 +47,17 @@ namespace BitRaserApiProject.Controllers
             public IEnumerable<string> Roles { get; set; } = new List<string>();
             public IEnumerable<string> Permissions { get; set; } = new List<string>();
             public DateTime ExpiresAt { get; set; }
+            
+            // Enhanced fields - User/Subuser details
+            public string? UserName { get; set; }
+            public string? UserRole { get; set; }  // Primary role
+            public string? UserGroup { get; set; }
+            public string? Department { get; set; }
+            public DateTime? LoginTime { get; set; }
+            public DateTime? LastLogoutTime { get; set; }
+            public string? Phone { get; set; }
+            public string? ParentUserEmail { get; set; } // For subusers only
+            public int? UserId { get; set; }  // user_id or subuser_id
         }
 
         public class CreateSubuserRequest
@@ -75,6 +86,8 @@ namespace BitRaserApiProject.Controllers
 
                 string? userEmail = null;
                 bool isSubuser = false;
+                users? mainUser = null;
+                subuser? subuserData = null;
 
                 // Try to authenticate as main user first
                 var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.Email);
@@ -82,6 +95,7 @@ namespace BitRaserApiProject.Controllers
                 {
                     userEmail = request.Email;
                     isSubuser = false;
+                    mainUser = user;
                 }
                 else
                 {
@@ -91,6 +105,7 @@ namespace BitRaserApiProject.Controllers
                     {
                         userEmail = request.Email;
                         isSubuser = true;
+                        subuserData = subuser;
                     }
                 }
 
@@ -99,11 +114,18 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { message = "Invalid credentials" });
                 }
 
+                // Get last logout time from previous session
+                var lastSession = await _context.Sessions
+                    .Where(s => s.user_email == userEmail && s.logout_time != null)
+                    .OrderByDescending(s => s.logout_time)
+                    .FirstOrDefaultAsync();
+
                 // Create session entry for tracking
+                var loginTime = DateTime.UtcNow;
                 var session = new Sessions
                 {
                     user_email = userEmail,
-                    login_time = DateTime.UtcNow,
+                    login_time = loginTime,
                     ip_address = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                     device_info = Request.Headers["User-Agent"].ToString(),
                     session_status = "active"
@@ -118,15 +140,61 @@ namespace BitRaserApiProject.Controllers
 
                 _logger.LogInformation("User login successful: {Email} ({UserType})", userEmail, isSubuser ? "subuser" : "user");
 
-                return Ok(new RoleBasedLoginResponse
+                // Build enhanced response
+                var response = new RoleBasedLoginResponse
                 {
                     Token = token,
                     UserType = isSubuser ? "subuser" : "user",
                     Email = userEmail,
                     Roles = roles,
                     Permissions = permissions,
-                    ExpiresAt = DateTime.UtcNow.AddHours(8)
-                });
+                    ExpiresAt = DateTime.UtcNow.AddHours(8),
+                    LoginTime = loginTime,
+                    LastLogoutTime = lastSession?.logout_time
+                };
+
+                // Add user-specific details
+                if (isSubuser && subuserData != null)
+                {
+                    response.UserName = subuserData.Name;
+                    response.UserRole = subuserData.Role ?? roles.FirstOrDefault();
+                    response.Department = subuserData.Department;
+                    response.Phone = subuserData.Phone;
+                    response.ParentUserEmail = subuserData.user_email;
+                    response.UserId = subuserData.subuser_id;
+                
+                    // Get group name if GroupId exists
+                    if (subuserData.GroupId.HasValue)
+                    {
+                        var group = await _context.Set<Group>().FindAsync(subuserData.GroupId.Value);
+                        response.UserGroup = group?.name;  // Changed from group_name to name
+                    }
+                }
+                else if (mainUser != null)
+                {
+                    response.UserName = mainUser.user_name;
+                    response.UserRole = mainUser.user_role ?? roles.FirstOrDefault();
+                    response.Department = mainUser.department;
+                    response.Phone = mainUser.phone_number;
+                    response.UserId = mainUser.user_id;
+                    
+                    // Get group name if user_group exists
+                    if (!string.IsNullOrEmpty(mainUser.user_group))
+                    {
+                        // Try to parse as int to get group from Groups table
+                        if (int.TryParse(mainUser.user_group, out int groupId))
+                        {
+                            var group = await _context.Set<Group>().FindAsync(groupId);
+                            response.UserGroup = group?.name ?? mainUser.user_group;  // Changed from group_name to name
+                        }
+                        else
+                        {
+                            response.UserGroup = mainUser.user_group;
+                        }
+                    }
+                }
+
+                return Ok(response);
             }
             catch (Exception ex)
             {

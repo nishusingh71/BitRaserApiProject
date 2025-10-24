@@ -1,0 +1,25 @@
+{
+  "reportId": "EraseVolume-20250513173140",
+  "reportDate": "2025-05-13 17:31:40",
+  "software": "D-SecureErase 1.0.0.0",
+  "digitalIdentifier": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
+  "os": "Windows 11 10.0.26100",
+  "computer": "Dhruv",
+  "mac": "00-0C-29-94-F0-BE",
+  "manufacturer": "Dell Inc.",
+  "startTime": "2025-05-13 17:29:50",
+  "endTime": "2025-05-13 17:31:40",
+  "method": "Zero Fill (Single-pass)",
+  "verification": "Level 3",
+  "erasedBy": "Dhruv (R&D)",
+  "validatedBy": "Shubhi (HR)",
+  "log": [
+    {
+      "volume": "F:",
+      "capacity": "32.00 GB",
+      "totalSectors": "67100664",
+      "sectorsErased": "34355544064",
+      "status": "Completed"
+    }
+  ]
+}

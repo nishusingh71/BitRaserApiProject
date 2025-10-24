@@ -2,6 +2,7 @@
 using System.Text.Json.Serialization;
 using System;
 using System.Collections.Generic;
+
 namespace BitRaserApiProject.Models
 {
     public class machines
@@ -451,14 +452,17 @@ namespace BitRaserApiProject.Models
         [JsonIgnore]
         public Route? Route { get; set; }
     }
-}
+} // End of namespace BitRaserApiProject.Models
 
+// ReportRequest class (used for PDF generation)
+// Note: ReportData and ErasureLogEntry are defined in ReportDataOptional.cs
+// Note: FlexibleStringConverter is defined in ReportDataOptional.cs
 public class ReportRequest
 {
     [Required]
-    public ReportData ReportData { get; set; } = new();
+public BitRaserApiProject.Models.ReportData ReportData { get; set; } = new();
 
-    public string? ReportTitle { get; set; }
+ public string? ReportTitle { get; set; }
     public string? HeaderText { get; set; }
 
     public byte[]? HeaderLeftLogo { get; set; }
@@ -472,94 +476,4 @@ public class ReportRequest
 
     public byte[]? TechnicianSignature { get; set; }
     public byte[]? ValidatorSignature { get; set; }
-}
-
-public class ReportData
-{
-    [JsonPropertyName("report_id")]
-    public string? ReportId { get; set; }
-
-    [JsonPropertyName("datetime")]
-    public string? ReportDate { get; set; } 
-
-    [JsonPropertyName("software_name")]
-    public string? SoftwareName { get; set; }
-
-    [JsonPropertyName("product_version")]
-    public string? ProductVersion { get; set; }
-
-    [JsonPropertyName("digital_signature")]
-    public string? DigitalSignature { get; set; }
-
-    [JsonPropertyName("status")]
-    public string? Status { get; set; }
-
-    [JsonPropertyName("process_mode")]
-    public string? ProcessMode { get; set; }
-
-    [JsonPropertyName("os")]
-    public string? OS { get; set; }
-
-    [JsonPropertyName("os_version")]
-    public string? OSVersion { get; set; }
-
-    [JsonPropertyName("computer_name")]
-    public string? ComputerName { get; set; }
-
-    [JsonPropertyName("mac_address")]
-    public string? MacAddress { get; set; }
-
-    [JsonPropertyName("manufacturer")]
-    public string? Manufacturer { get; set; }
-
-    [JsonPropertyName("Eraser_Start_Time")]
-    public string? EraserStartTime { get; set; } 
-
-    [JsonPropertyName("Eraser_End_Time")]
-    public string? EraserEndTime { get; set; } 
-
-    [JsonPropertyName("eraser_method")]
-    public string? EraserMethod { get; set; }
-
-    [JsonPropertyName("validation_method")]
-    public string? ValidationMethod { get; set; } 
-
-    [JsonPropertyName("Erasure_Type")]
-    public string? ErasureType { get; set; }
-
-    [JsonPropertyName("total_files")]
-    public int TotalFiles { get; set; }
-
-    [JsonPropertyName("erased_files")]
-    public int ErasedFiles { get; set; }
-
-    [JsonPropertyName("failed_files")]
-    public int FailedFiles { get; set; }
-
-    [JsonPropertyName("erasure_log")]
-    public List<ErasureLogEntry>? ErasureLog { get; set; } = new();
-}
-
-public class ErasureLogEntry
-{
-    // JSON: "target"
-    [JsonPropertyName("target")]
-    public string? Target { get; set; }
-
-    // JSON: "free_space"
-    [JsonPropertyName("free_space")]
-    public string? Capacity { get; set; }
-
-    [JsonPropertyName("total_sectors")]
-    public string? TotalSectors { get; set; }
-
-    [JsonPropertyName("sectors_erased")]
-    public string? SectorsErased { get; set; }
-
-    // JSON: "dummy_file_size" → map to File Size column
-    [JsonPropertyName("dummy_file_size")]
-    public string? Size { get; set; }
-
-    [JsonPropertyName("status")]
-    public string? Status { get; set; } 
 }
