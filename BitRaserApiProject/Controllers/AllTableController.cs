@@ -1137,23 +1137,207 @@ namespace BitRaserApiProject.Controllers
     public class PdfController : ControllerBase
     {
         private readonly PdfService _pdfService;
+        private readonly ApplicationDbContext _context;
+     private readonly ILogger<PdfController> _logger;
 
-        public PdfController(PdfService pdfService)
+        public PdfController(PdfService pdfService, ApplicationDbContext context, ILogger<PdfController> logger)
         {
-            _pdfService = pdfService;
+     _pdfService = pdfService;
+ _context = context;
+            _logger = logger;
         }
 
         /// <summary>
-        /// Generate PDF report
-        /// </summary>
+     /// Generate PDF report from ReportRequest
+      /// </summary>
         [HttpPost("generate-report")]
         public IActionResult GenerateReport([FromBody] ReportRequest request)
         {
-            var pdfBytes = _pdfService.GenerateReport(request);
-            return File(pdfBytes, "application/pdf", $"{request.ReportData?.ReportId ?? "report"}.pdf");
+   var pdfBytes = _pdfService.GenerateReport(request);
+       return File(pdfBytes, "application/pdf", $"{request.ReportData?.ReportId ?? "report"}.pdf");
+        }
+
+      /// <summary>
+        /// Generate PDF report from audit_reports by ID - Parses JSON data correctly
+        /// </summary>
+        [HttpGet("generate-from-audit/{reportId}")]
+        public async Task<IActionResult> GenerateFromAuditReport(int reportId)
+     {
+   try
+      {
+          // Get the audit report from database
+     var auditReport = await _context.AuditReports.FindAsync(reportId);
+     if (auditReport == null)
+  return NotFound(new { message = $"Audit report {reportId} not found" });
+
+          ReportData reportData;
+
+        // Parse the JSON data from report_details_json
+  if (!string.IsNullOrEmpty(auditReport.report_details_json) && auditReport.report_details_json != "{}")
+      {
+           try
+        {
+    reportData = System.Text.Json.JsonSerializer.Deserialize<ReportData>(
+  auditReport.report_details_json,
+         new System.Text.Json.JsonSerializerOptions
+        {
+     PropertyNameCaseInsensitive = true
+          }) ?? new ReportData();
+             
+           _logger.LogInformation("Successfully parsed JSON for report {ReportId}", reportId);
+     }
+       catch (System.Text.Json.JsonException ex)
+  {
+    _logger.LogError(ex, "Failed to parse JSON for report {ReportId}", reportId);
+            reportData = new ReportData();
+             }
+   }
+                else
+       {
+   reportData = new ReportData();
+ }
+
+        // Override with database values if JSON doesn't have them
+                if (string.IsNullOrEmpty(reportData.ReportId))
+          reportData.ReportId = auditReport.report_id.ToString();
+        
+         if (string.IsNullOrEmpty(reportData.ReportDate))
+    reportData.ReportDate = auditReport.report_datetime.ToString("yyyy-MM-dd HH:mm:ss");
+       
+     if (string.IsNullOrEmpty(reportData.EraserMethod))
+   reportData.EraserMethod = auditReport.erasure_method;
+
+       // Create the report request
+    var reportRequest = new ReportRequest
+            {
+   ReportData = reportData,
+          ReportTitle = auditReport.report_name ?? "Data Erasure Report",
+        HeaderText = "D-Secure Audit Report",
+     TechnicianName = "System",
+        TechnicianDept = "IT Department",
+     ValidatorName = "System Validator",
+     ValidatorDept = "Quality Assurance"
+                };
+
+   // Generate PDF
+          var pdfBytes = _pdfService.GenerateReport(reportRequest);
+        
+           return File(pdfBytes, "application/pdf", $"report_{auditReport.report_id}.pdf");
+   }
+            catch (Exception ex)
+            {
+            _logger.LogError(ex, "Error generating PDF for audit report {ReportId}", reportId);
+             return StatusCode(500, new { message = "Error generating PDF", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+    /// Generate PDF report from audit_reports by ID with custom options
+        /// </summary>
+     [HttpPost("generate-from-audit/{reportId}")]
+        public async Task<IActionResult> GenerateFromAuditReportWithOptions(
+    int reportId,
+            [FromBody] PdfGenerationOptions? options)
+    {
+            try
+            {
+     // Get the audit report from database
+   var auditReport = await _context.AuditReports.FindAsync(reportId);
+           if (auditReport == null)
+     return NotFound(new { message = $"Audit report {reportId} not found" });
+
+ ReportData reportData;
+
+     // Parse the JSON data from report_details_json
+        if (!string.IsNullOrEmpty(auditReport.report_details_json) && auditReport.report_details_json != "{}")
+  {
+            try
+          {
+          reportData = System.Text.Json.JsonSerializer.Deserialize<ReportData>(
+ auditReport.report_details_json,
+             new System.Text.Json.JsonSerializerOptions
+       {
+             PropertyNameCaseInsensitive = true
+       }) ?? new ReportData();
+         
+_logger.LogInformation("Successfully parsed JSON for report {ReportId}", reportId);
+            }
+    catch (System.Text.Json.JsonException ex)
+         {
+     _logger.LogError(ex, "Failed to parse JSON for report {ReportId}", reportId);
+             reportData = new ReportData();
+                    }
+                }
+             else
+{
+         reportData = new ReportData();
+    }
+
+   // Override with database values if JSON doesn't have them
+      if (string.IsNullOrEmpty(reportData.ReportId))
+      reportData.ReportId = auditReport.report_id.ToString();
+   
+  if (string.IsNullOrEmpty(reportData.ReportDate))
+      reportData.ReportDate = auditReport.report_datetime.ToString("yyyy-MM-dd HH:mm:ss");
+      
+    if (string.IsNullOrEmpty(reportData.EraserMethod))
+            reportData.EraserMethod = auditReport.erasure_method;
+
+          // Create the report request with custom options
+         var reportRequest = new ReportRequest
+                {
+                    ReportData = reportData,
+        ReportTitle = options?.ReportTitle ?? auditReport.report_name ?? "Data Erasure Report",
+           HeaderText = options?.HeaderText ?? "D-Secure Audit Report",
+             TechnicianName = options?.TechnicianName ?? "System",
+         TechnicianDept = options?.TechnicianDept ?? "IT Department",
+            ValidatorName = options?.ValidatorName ?? "System Validator",
+            ValidatorDept = options?.ValidatorDept ?? "Quality Assurance",
+        HeaderLeftLogo = options?.HeaderLeftLogo,
+             HeaderRightLogo = options?.HeaderRightLogo,
+       WatermarkImage = options?.WatermarkImage,
+        TechnicianSignature = options?.TechnicianSignature,
+    ValidatorSignature = options?.ValidatorSignature
+    };
+
+        // Generate PDF
+            var pdfBytes = _pdfService.GenerateReport(reportRequest);
+      
+       return File(pdfBytes, "application/pdf", $"report_{auditReport.report_id}.pdf");
+            }
+            catch (Exception ex)
+            {
+         _logger.LogError(ex, "Error generating PDF for audit report {ReportId}", reportId);
+       return StatusCode(500, new { message = "Error generating PDF", error = ex.Message });
+            }
         }
     }
+
+    /// <summary>
+  /// PDF generation options
+    /// </summary>
+    public class PdfGenerationOptions
+    {
+        public string? ReportTitle { get; set; }
+        public string? HeaderText { get; set; }
+        public string? TechnicianName { get; set; }
+      public string? TechnicianDept { get; set; }
+  public string? ValidatorName { get; set; }
+ public string? ValidatorDept { get; set; }
+        public byte[]? HeaderLeftLogo { get; set; }
+    public byte[]? HeaderRightLogo { get; set; }
+        public byte[]? WatermarkImage { get; set; }
+     public byte[]? TechnicianSignature { get; set; }
+        public byte[]? ValidatorSignature { get; set; }
+    }
 }
+
+
+
+
+
+
+
 
 
 
