@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace BitRaserApiProject.Models
 {
     /// <summary>
-    /// System Settings Models - Based on D-Secure System Settings UI
+    /// System Settings Models - Based on BitRaser System Settings UI
     /// Includes General, Security, Notifications, and License settings
     /// </summary>
 

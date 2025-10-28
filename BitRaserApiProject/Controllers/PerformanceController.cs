@@ -9,7 +9,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Performance Metrics Controller - System performance monitoring
-    /// Based on D-Secure Performance Dashboard UI (Screenshot 1)
+    /// Based on BitRaser Performance Dashboard UI (Screenshot 1)
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]

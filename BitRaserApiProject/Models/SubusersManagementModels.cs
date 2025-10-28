@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace BitRaserApiProject.Models
 {
     /// <summary>
-    /// Subusers Management Models - Based on D-Secure Manage Subusers UI
+    /// Subusers Management Models - Based on BitRaser Manage Subusers UI
     /// Screenshot 2: Manage Subusers page with role, status, department filters
     /// </summary>
 

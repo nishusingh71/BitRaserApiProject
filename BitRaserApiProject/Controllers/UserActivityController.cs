@@ -6,10 +6,14 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using BCrypt.Net;
 
+// Use DTOs namespace explicitly
+using DTO = BitRaserApiProject.Models.DTOs;
+
 namespace BitRaserApiProject.Controllers
 {
     /// <summary>
-    /// User Activity Tracking Controller - Monitor user login/logout activity
+    /// Enhanced User Activity Tracking Controller - Hierarchical monitoring with real-time status
+    /// Supports Users, Subusers, and Manager hierarchy with email-based filtering
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
@@ -21,626 +25,599 @@ namespace BitRaserApiProject.Controllers
         private readonly IUserDataService _userDataService;
         private readonly ILogger<UserActivityController> _logger;
 
- public UserActivityController(
-   ApplicationDbContext context,
+        public UserActivityController(
+            ApplicationDbContext context,
             IRoleBasedAuthService authService,
             IUserDataService userDataService,
             ILogger<UserActivityController> logger)
         {
-       _context = context;
-       _authService = authService;
-  _userDataService = userDataService;
-      _logger = logger;
-  }
+          _context = context;
+          _authService = authService;
+     _userDataService = userDataService;
+          _logger = logger;
+     }
 
-      /// <summary>
-      /// Get cloud users activity - Login/Logout tracking
+        /// <summary>
+        /// Get user activity by email with login/logout time and status
+        /// Supports hierarchical access - managers can see their team's activity
         /// </summary>
-[HttpGet("cloud-users")]
-      public async Task<ActionResult<CloudUsersActivityDto>> GetCloudUsersActivity(
-          [FromQuery] int page = 1,
-     [FromQuery] int pageSize = 20)
-   {
-      try
-   {
- var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
- if (string.IsNullOrEmpty(userEmail))
-           {
-  return Unauthorized(new { message = "User not authenticated" });
-                }
-
-      var isSubuser = await _userDataService.SubuserExistsAsync(userEmail);
-
-      // Check permissions
-              if (!await _authService.HasPermissionAsync(userEmail, "VIEW_USER_ACTIVITY", isSubuser))
-           {
-        return StatusCode(403, new { message = "Insufficient permissions to view user activity" });
-              }
-
-     // Get sessions with user activity
-         var query = _context.Sessions
-       .OrderByDescending(s => s.login_time);
-
-       var totalCount = await query.CountAsync();
-                var sessions = await query
-      .Skip((page - 1) * pageSize)
-        .Take(pageSize)
-         .Select(s => new UserActivityItemDto
-       {
-              UserEmail = s.user_email,
-  LoginTime = s.login_time,
-      LogoutTime = s.logout_time,
-         Status = s.session_status == "active" ? "active" : "offline",
-       IpAddress = s.ip_address,
-      DeviceInfo = s.device_info
-      })
-      .ToListAsync();
-
-      return Ok(new CloudUsersActivityDto
-   {
-  Title = "Cloud Users Activity",
-    Description = "Monitor user login and logout activity",
-             Activities = sessions,
-          TotalCount = totalCount,
-          Page = page,
-          PageSize = pageSize,
-     TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
-    });
-     }
-     catch (Exception ex)
-      {
-                _logger.LogError(ex, "Error getting cloud users activity");
-   return StatusCode(500, new { message = "Error retrieving user activity", error = ex.Message });
-         }
-        }
-
-        /// <summary>
-        /// Get user login history
-    /// </summary>
-        [HttpGet("login-history/{email}")]
-    public async Task<ActionResult<List<UserActivityItemDto>>> GetUserLoginHistory(string email)
-   {
-      try
-            {
-    var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
- if (string.IsNullOrEmpty(currentUserEmail))
-          {
-        return Unauthorized(new { message = "User not authenticated" });
-       }
-
-                var isSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
-
-     // Users can view their own activity or admins can view all
-          if (email != currentUserEmail && 
-       !await _authService.HasPermissionAsync(currentUserEmail, "VIEW_ALL_USER_ACTIVITY", isSubuser))
-                {
-      return StatusCode(403, new { message = "You can only view your own activity" });
-          }
-
-                var history = await _context.Sessions
-         .Where(s => s.user_email == email)
-   .OrderByDescending(s => s.login_time)
-      .Take(50)
-      .Select(s => new UserActivityItemDto
- {
-      UserEmail = s.user_email,
-       LoginTime = s.login_time,
-     LogoutTime = s.logout_time,
-          Status = s.session_status == "active" ? "active" : "offline",
-  IpAddress = s.ip_address,
-       DeviceInfo = s.device_info
- })
-                .ToListAsync();
-
-   return Ok(history);
-            }
-         catch (Exception ex)
-      {
-  _logger.LogError(ex, "Error getting user login history for {Email}", email);
-   return StatusCode(500, new { message = "Error retrieving login history" });
-            }
-     }
-
- /// <summary>
-/// Get active users count
-      /// </summary>
-        [HttpGet("active-count")]
-        public async Task<ActionResult<ActiveUsersCountDto>> GetActiveUsersCount()
- {
-            try
-  {
-  var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                if (string.IsNullOrEmpty(userEmail))
-       {
-     return Unauthorized(new { message = "User not authenticated" });
- }
-
-         var activeCount = await _context.Sessions
-             .CountAsync(s => s.session_status == "active");
-
-        var totalUsers = await _context.Users.CountAsync();
-
-         return Ok(new ActiveUsersCountDto
-           {
-           ActiveCount = activeCount,
- TotalUsers = totalUsers,
-      OfflineCount = totalUsers - activeCount,
-            LastUpdated = DateTime.UtcNow
-    });
-       }
-         catch (Exception ex)
-            {
-       _logger.LogError(ex, "Error getting active users count");
-        return StatusCode(500, new { message = "Error retrieving active users count" });
-      }
-        }
-
-        /// <summary>
-/// Get erasure reports for Reports tab
-     /// </summary>
-        [HttpGet("erasure-reports")]
-    public async Task<ActionResult<ErasureReportsDto>> GetErasureReports(
-     [FromQuery] int page = 1,
+        [HttpGet("by-email/{email}")]
+        public async Task<ActionResult<DTO.UserActivityResponse>> GetUserActivityByEmail(
+       string email,
+ [FromQuery] DateTime? startDate = null,
+            [FromQuery] DateTime? endDate = null,
+     [FromQuery] string status = "all",
+   [FromQuery] int page = 1,
             [FromQuery] int pageSize = 20)
         {
-       try
-        {
-       var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                if (string.IsNullOrEmpty(userEmail))
-     {
-          return Unauthorized(new { message = "User not authenticated" });
-      }
-
-var isSubuser = await _userDataService.SubuserExistsAsync(userEmail);
-
-                // Check permissions
-       if (!await _authService.HasPermissionAsync(userEmail, "VIEW_REPORTS", isSubuser))
-     {
-           return StatusCode(403, new { message = "Insufficient permissions to view reports" });
- }
-
-             var query = _context.AuditReports.OrderByDescending(r => r.report_datetime);
-
-          var totalCount = await query.CountAsync();
-     var reports = await query
-         .Skip((page - 1) * pageSize)
- .Take(pageSize)
-        .Select(r => new ErasureReportItemDto
+            try
+      {
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
            {
-ReportId = r.report_id.ToString(),
-     Type = r.erasure_method,
-    Devices = GetDeviceCountFromJson(r.report_details_json),
-       Status = r.synced ? "completed" : "running",
-        Date = r.report_datetime,
-  Method = GetMethodFromType(r.erasure_method)
-     })
-        .ToListAsync();
+     return Unauthorized(new { message = "User not authenticated" });
+       }
 
-     return Ok(new ErasureReportsDto
+          var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+
+         // Check permissions - either viewing own activity or has permission to view others
+                if (email != currentUserEmail)
+  {
+    // Check if current user can view this user's activity
+       if (!await CanViewUserActivity(currentUserEmail, email, isCurrentUserSubuser))
+ {
+        return StatusCode(403, new { message = "You don't have permission to view this user's activity" });
+               }
+    }
+
+           // Set date range defaults
+  startDate ??= DateTime.UtcNow.AddDays(-30);
+     endDate ??= DateTime.UtcNow;
+
+             // Get sessions for the user
+                var query = _context.Sessions
+       .Where(s => s.user_email == email && 
+     s.login_time >= startDate && 
+s.login_time <= endDate);
+
+           // Apply status filter
+                if (status.ToLower() != "all")
+                {
+         query = query.Where(s => s.session_status == status.ToLower());
+       }
+
+         var totalCount = await query.CountAsync();
+
+      var sessions = await query
+  .OrderByDescending(s => s.login_time)
+         .Skip((page - 1) * pageSize)
+     .Take(pageSize)
+ .ToListAsync();
+
+   // Determine user type and get name
+var userName = await GetUserName(email);
+                var userType = await _userDataService.SubuserExistsAsync(email) ? "subuser" : "user";
+
+           var activities = sessions.Select(s => new DTO.UserActivityDto
          {
-          Title = "Erasure Reports",
-       Description = "View and manage erasure reports",
-       Reports = reports,
-          TotalCount = totalCount,
-     Page = page,
-             PageSize = pageSize,
-        TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize)
-    });
-  }
+       Id = s.session_id.ToString(),
+      UserEmail = s.user_email,
+         UserName = userName,
+      UserType = userType,
+       LoginTime = s.login_time,
+  LogoutTime = s.logout_time,
+          Status = DetermineSessionStatus(s),
+        IpAddress = s.ip_address ?? "Unknown",
+     DeviceInfo = s.device_info ?? "Unknown Device",
+ SessionDuration = CalculateSessionDuration(s),
+ SessionId = s.session_id,
+          Timestamp = s.login_time
+      }).ToList();
+
+    // Calculate summary
+    var summary = await CalculateActivitySummary(email, startDate.Value, endDate.Value);
+
+      return Ok(new DTO.UserActivityResponse
+         {
+         Activities = activities,
+     TotalCount = totalCount,
+         Page = page,
+         PageSize = pageSize,
+                TotalPages = (int)Math.Ceiling(totalCount / (double)pageSize),
+         Summary = summary
+      });
+            }
             catch (Exception ex)
-            {
-_logger.LogError(ex, "Error getting erasure reports");
-     return StatusCode(500, new { message = "Error retrieving erasure reports", error = ex.Message });
-      }
+  {
+      _logger.LogError(ex, "Error getting user activity for {Email}", email);
+     return StatusCode(500, new { message = "Error retrieving user activity", error = ex.Message });
         }
+    }
 
         /// <summary>
-        /// Create new user (Add User functionality)
+      /// Get hierarchical activity - manager can see all their users and subusers
+     /// Shows complete team activity with online/offline status
         /// </summary>
-      [HttpPost("create-user")]
-        public async Task<ActionResult<CreateUserResponseDto>> CreateNewUser([FromBody] CreateNewUserDto request)
+        [HttpPost("hierarchical")]
+        public async Task<ActionResult<DTO.HierarchicalActivityResponse>> GetHierarchicalActivity(
+            [FromBody] DTO.HierarchicalActivityRequest request)
         {
-   try
+        try
             {
-   var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-  if (string.IsNullOrEmpty(currentUserEmail))
-          {
-       return Unauthorized(new { message = "User not authenticated" });
-}
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+   if (string.IsNullOrEmpty(currentUserEmail))
+           {
+         return Unauthorized(new { message = "User not authenticated" });
+  }
 
       var isSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
 
-       // Check permissions
-      if (!await _authService.HasPermissionAsync(currentUserEmail, "CREATE_USER", isSubuser))
+      // Check permission to view hierarchical data
+                if (!await _authService.HasPermissionAsync(currentUserEmail, "VIEW_HIERARCHY", isSubuser) &&
+ !await _authService.HasPermissionAsync(currentUserEmail, "VIEW_ORGANIZATION_HIERARCHY", isSubuser))
+      {
+        return StatusCode(403, new { message = "Insufficient permissions to view hierarchical activity" });
+           }
+
+             request.StartDate ??= DateTime.UtcNow.AddDays(-7);
+     request.EndDate ??= DateTime.UtcNow;
+
+     var directUsers = new List<DTO.UserActivityDto>();
+   var subusers = new List<DTO.UserActivityDto>();
+  var managedUsers = new List<DTO.UserActivityDto>();
+
+        // Get all users if has permission
+  if (await _authService.HasPermissionAsync(currentUserEmail, "READ_ALL_USERS", isSubuser))
        {
-          return StatusCode(403, new { message = "Insufficient permissions to create users" });
-             }
+     directUsers = await GetUsersActivity(request.StartDate.Value, request.EndDate.Value, request.StatusFilter);
+   }
+     else
+       {
+   // Get only managed users
+       managedUsers = await GetManagedUsersActivity(currentUserEmail, request.StartDate.Value, request.EndDate.Value, request.StatusFilter);
+     }
 
-       // Validate input
-     if (string.IsNullOrEmpty(request.FullName) || 
-string.IsNullOrEmpty(request.EmailAddress) || 
-            string.IsNullOrEmpty(request.Password))
-             {
-return BadRequest(new { message = "Full name, email, and password are required" });
-         }
-
-                // Check if user already exists
-          if (await _context.Users.AnyAsync(u => u.user_email == request.EmailAddress))
-         {
-      return Conflict(new { message = "User with this email already exists" });
+        // Get subusers if requested
+   if (request.IncludeSubusers)
+       {
+   if (await _authService.HasPermissionAsync(currentUserEmail, "READ_ALL_SUBUSERS", isSubuser))
+ {
+         subusers = await GetSubusersActivity(request.StartDate.Value, request.EndDate.Value, request.StatusFilter);
+   }
+     else if (await _authService.HasPermissionAsync(currentUserEmail, "READ_USER_SUBUSERS", isSubuser))
+        {
+          subusers = await GetUserSubusersActivity(currentUserEmail, request.StartDate.Value, request.EndDate.Value, request.StatusFilter);
+                    }
                 }
 
-   // Validate password match
-           if (request.Password != request.ConfirmPassword)
-         {
-  return BadRequest(new { message = "Passwords do not match" });
-       }
+   var allActivities = directUsers.Concat(subusers).Concat(managedUsers).ToList();
 
-     // Create new user
-     var newUser = new users
-         {
-  user_name = request.FullName,
-        user_email = request.EmailAddress,
-         user_password = request.Password,
-          hash_password = BCrypt.Net.BCrypt.HashPassword(request.Password),
-         phone_number = string.Empty,
-         payment_details_json = "{}",
-    license_details_json = $"{{\"licenseAllocation\": {request.LicenseAllocation}}}",
-   created_at = DateTime.UtcNow,
-         updated_at = DateTime.UtcNow,
-            private_api = request.AccountStatus == "Active"
-};
+         // Apply pagination
+        var totalCount = allActivities.Count;
+         var paginatedActivities = allActivities
+           .OrderByDescending(a => a.LoginTime)
+       .Skip((request.Page - 1) * request.PageSize)
+        .Take(request.PageSize)
+           .ToList();
 
-                _context.Users.Add(newUser);
-           await _context.SaveChangesAsync();
+    // Calculate statistics
+        var statistics = CalculateHierarchicalStatistics(directUsers, subusers, managedUsers);
 
-       // Assign role
- var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == request.UserRole);
-   if (role != null)
-     {
-              var userRole = new UserRole
-    {
-        UserId = newUser.user_id,
-              RoleId = role.RoleId,
-   AssignedAt = DateTime.UtcNow,
- AssignedByEmail = currentUserEmail
-  };
-        _context.UserRoles.Add(userRole);
-             await _context.SaveChangesAsync();
-     }
-
-              // Assign to group (using roles as groups)
-   // Group assignment can be extended based on requirements
-
-                _logger.LogInformation("User {Email} created by {Creator}", request.EmailAddress, currentUserEmail);
-
-      return Ok(new CreateUserResponseDto
-    {
- Success = true,
-  Message = "User created successfully",
-        UserId = newUser.user_id.ToString(),
-         UserEmail = newUser.user_email,
-        CreatedAt = newUser.created_at
-      });
-     }
- catch (Exception ex)
-       {
-       _logger.LogError(ex, "Error creating new user");
-         return StatusCode(500, new { message = "Error creating user", error = ex.Message });
-            }
-        }
-
-    #region Private Helper Methods
-
-        private int GetDeviceCountFromJson(string reportDetailsJson)
-        {
-       try
+           return Ok(new DTO.HierarchicalActivityResponse
    {
-      if (string.IsNullOrEmpty(reportDetailsJson)) return 1;
-       
-       // Simple count based on JSON structure
-       var deviceCount = reportDetailsJson.Split("device", StringSplitOptions.RemoveEmptyEntries).Length - 1;
-         return deviceCount > 0 ? deviceCount : 1;
-      }
-            catch
-            {
-       return 1;
-         }
+          ManagerEmail = currentUserEmail,
+    DirectUsers = paginatedActivities.Where(a => a.UserType == "user").ToList(),
+          Subusers = paginatedActivities.Where(a => a.UserType == "subuser").ToList(),
+           ManagedUsers = managedUsers,
+    Statistics = statistics,
+   TotalCount = totalCount,
+   Page = request.Page,
+            PageSize = request.PageSize,
+         TotalPages = (int)Math.Ceiling(totalCount / (double)request.PageSize)
+     });
         }
-
-        private string GetMethodFromType(string erasureMethod)
-        {
-  if (string.IsNullOrEmpty(erasureMethod)) return "Unknown";
-
-            return erasureMethod.ToLower() switch
-            {
-            var m when m.Contains("drive") => "NIST 800-88 Purge",
-var m when m.Contains("mobile") => "Hardware Scan",
-   var m when m.Contains("network") => "DoD 5220.22-M",
-    var m when m.Contains("file") => "Secure Delete",
-      _ => "Standard Erase"
-     };
-        }
-
-        #endregion
-
-     /// <summary>
-        /// Get available roles for Add User dropdown
-        /// </summary>
-        [HttpGet("available-roles")]
-        public async Task<ActionResult<AvailableRolesDto>> GetAvailableRoles()
-        {
-         try
-            {
-     var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-       if (string.IsNullOrEmpty(userEmail))
-                {
-   return Unauthorized(new { message = "User not authenticated" });
-       }
-
-    var roles = await _context.Roles
-        .OrderBy(r => r.HierarchyLevel)
-             .Select(r => new RoleOptionDto
-          {
-        Value = r.RoleName,
-         Label = r.RoleName,
- Description = r.Description
-     })
-  .ToListAsync();
-
- return Ok(new AvailableRolesDto { Roles = roles });
-            }
-            catch (Exception ex)
-            {
- _logger.LogError(ex, "Error getting available roles");
-     return StatusCode(500, new { message = "Error retrieving roles" });
-            }
-        }
-
-        /// <summary>
-      /// Get available groups for Add User dropdown
-      /// </summary>
-     [HttpGet("available-groups")]
-     public async Task<ActionResult<AvailableGroupsDto>> GetAvailableGroups()
-        {
-     try
-  {
-      var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-          if (string.IsNullOrEmpty(userEmail))
-      {
-    return Unauthorized(new { message = "User not authenticated" });
-            }
-
-     // Using roles as groups
-     var groups = await _context.Roles
-  .Select(r => new GroupOptionDto
-        {
-   Value = r.RoleName,
-       Label = $"{r.RoleName} Group",
-     MemberCount = _context.UserRoles.Count(ur => ur.RoleId == r.RoleId)
- })
-          .ToListAsync();
-
-                return Ok(new AvailableGroupsDto { Groups = groups });
-          }
-            catch (Exception ex)
-      {
-    _logger.LogError(ex, "Error getting available groups");
-     return StatusCode(500, new { message = "Error retrieving groups" });
-   }
-   }
-
-      /// <summary>
-  /// Get user activity analytics
-   /// </summary>
-        [HttpGet("analytics")]
-        public async Task<ActionResult<UserActivityAnalyticsDto>> GetActivityAnalytics([FromQuery] int days = 7)
-        {
-            try
-   {
-     var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-  if (string.IsNullOrEmpty(userEmail))
-                {
- return Unauthorized(new { message = "User not authenticated" });
-    }
-
-         var startDate = DateTime.UtcNow.AddDays(-days);
-
-            var totalLogins = await _context.Sessions
-     .CountAsync(s => s.login_time >= startDate);
-
-    var uniqueUsers = await _context.Sessions
-       .Where(s => s.login_time >= startDate)
-         .Select(s => s.user_email)
-             .Distinct()
-        .CountAsync();
-
-    var currentlyActive = await _context.Sessions
-  .CountAsync(s => s.session_status == "active");
-
-             // Calculate average session duration
-   var sessionsWithDuration = await _context.Sessions
-   .Where(s => s.login_time >= startDate && s.logout_time != null)
-     .Select(s => new { 
-         Duration = (s.logout_time!.Value - s.login_time).TotalMinutes 
-       })
-    .ToListAsync();
-
-     var avgDuration = sessionsWithDuration.Any() 
-? sessionsWithDuration.Average(s => s.Duration) 
-        : 0;
-
-         // Daily activity
-    var dailyActivity = await _context.Sessions
-      .Where(s => s.login_time >= startDate)
-         .GroupBy(s => s.login_time.Date)
-          .Select(g => new DailyActivityDto
-        {
-    Date = g.Key,
-              LoginCount = g.Count(),
-         UniqueUsers = g.Select(s => s.user_email).Distinct().Count()
-         })
-          .OrderBy(d => d.Date)
-         .ToListAsync();
-
-       return Ok(new UserActivityAnalyticsDto
-        {
-   TotalLogins = totalLogins,
-  UniqueUsers = uniqueUsers,
-       CurrentlyActive = currentlyActive,
- AverageSessionDuration = Math.Round(avgDuration, 2),
-  DailyActivity = dailyActivity,
-       HourlyActivity = new List<HourlyActivityDto>()
- });
-         }
-  catch (Exception ex)
-     {
-        _logger.LogError(ex, "Error getting activity analytics");
-       return StatusCode(500, new { message = "Error retrieving analytics" });
-   }
-        }
-
-      /// <summary>
-        /// Get erasure report analytics
-        /// </summary>
-    [HttpGet("report-analytics")]
-  public async Task<ActionResult<ErasureReportAnalyticsDto>> GetReportAnalytics()
-        {
-     try
-      {
-   var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-   if (string.IsNullOrEmpty(userEmail))
-       {
-     return Unauthorized(new { message = "User not authenticated" });
-    }
-
-       var totalReports = await _context.AuditReports.CountAsync();
-   var completedReports = await _context.AuditReports.CountAsync(r => r.synced);
-          var runningReports = await _context.AuditReports.CountAsync(r => !r.synced);
-
-      var typeBreakdown = await _context.AuditReports
-         .GroupBy(r => r.erasure_method)
-       .Select(g => new ReportTypeStatsDto
-      {
-         Type = g.Key,
-      Count = g.Count(),
-     DeviceCount = g.Sum(r => GetDeviceCountFromJson(r.report_details_json))
-       })
-         .ToListAsync();
-
-       return Ok(new ErasureReportAnalyticsDto
-     {
-       TotalReports = totalReports,
-           CompletedReports = completedReports,
-          RunningReports = runningReports,
-     FailedReports = 0,
-       TotalDevicesErased = typeBreakdown.Sum(t => t.DeviceCount),
-     TypeBreakdown = typeBreakdown,
-     MethodBreakdown = new List<MethodStatsDto>()
-   });
-    }
-         catch (Exception ex)
-     {
-  _logger.LogError(ex, "Error getting report analytics");
- return StatusCode(500, new { message = "Error retrieving report analytics" });
-    }
-     }
-
- /// <summary>
- /// Update user status (Activate/Deactivate)
-        /// </summary>
-  [HttpPatch("update-status")]
-        public async Task<IActionResult> UpdateUserStatus([FromBody] UpdateUserStatusDto request)
-     {
-try
-  {
-  var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-  if (string.IsNullOrEmpty(currentUserEmail))
-        {
-    return Unauthorized(new { message = "User not authenticated" });
-        }
-
-       var isSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
-
-  if (!await _authService.HasPermissionAsync(currentUserEmail, "UPDATE_USER_STATUS", isSubuser))
-     {
-      return StatusCode(403, new { message = "Insufficient permissions" });
-   }
-
-     var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.UserEmail);
-  if (user == null)
-         {
-    return NotFound(new { message = "User not found" });
-    }
-
-      user.private_api = request.Status == "Active";
- user.updated_at = DateTime.UtcNow;
-
-    await _context.SaveChangesAsync();
-
-     _logger.LogInformation("User {Email} status updated to {Status} by {Admin}", 
-       request.UserEmail, request.Status, currentUserEmail);
-
-     return Ok(new { 
-     message = "User status updated successfully",
-       userEmail = request.UserEmail,
-       status = request.Status
-             });
-       }
         catch (Exception ex)
+ {
+           _logger.LogError(ex, "Error getting hierarchical activity");
+       return StatusCode(500, new { message = "Error retrieving hierarchical activity", error = ex.Message });
+       }
+  }
+
+        /// <summary>
+   /// Get current online/offline status of all users
+        /// Real-time dashboard for monitoring user presence
+        /// </summary>
+        [HttpGet("live-status")]
+ public async Task<ActionResult<DTO.LiveActivityDashboardDto>> GetLiveStatus()
+        {
+          try
+   {
+    var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+     if (string.IsNullOrEmpty(currentUserEmail))
+     {
+      return Unauthorized(new { message = "User not authenticated" });
+      }
+
+     var isSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+
+// Check permission
+        if (!await _authService.HasPermissionAsync(currentUserEmail, "VIEW_USER_ACTIVITY", isSubuser) &&
+          !await _authService.HasPermissionAsync(currentUserEmail, "READ_ALL_SESSION_STATISTICS", isSubuser))
+                {
+            return StatusCode(403, new { message = "Insufficient permissions" });
+        }
+
+    // Get active sessions (online users)
+     var activeSessions = await _context.Sessions
+      .Where(s => s.session_status == "active")
+        .OrderByDescending(s => s.login_time)
+        .Take(50)
+            .ToListAsync();
+
+    // Get recent logins (last 1 hour)
+     var recentLogins = await _context.Sessions
+       .Where(s => s.login_time >= DateTime.UtcNow.AddHours(-1))
+        .OrderByDescending(s => s.login_time)
+  .Take(20)
+         .ToListAsync();
+
+          // Get recent logouts (last 1 hour)
+ var recentLogouts = await _context.Sessions
+         .Where(s => s.logout_time != null && s.logout_time >= DateTime.UtcNow.AddHours(-1))
+          .OrderByDescending(s => s.logout_time)
+         .Take(20)
+   .ToListAsync();
+
+    // Convert to DTOs
+      var onlineUsers = await ConvertSessionsToActivityDtos(activeSessions);
+         var recentLoginDtos = await ConvertSessionsToActivityDtos(recentLogins);
+ var recentLogoutDtos = await ConvertSessionsToActivityDtos(recentLogouts);
+
+// Calculate statistics
+                var totalOnlineUsers = onlineUsers.Count(a => a.UserType == "user");
+          var totalOnlineSubusers = onlineUsers.Count(a => a.UserType == "subuser");
+
+      var statistics = new DTO.ActivityStatistics
        {
-         _logger.LogError(ex, "Error updating user status");
-      return StatusCode(500, new { message = "Error updating user status" });
- }
+          OnlineUsers = totalOnlineUsers,
+         OnlineSubusers = totalOnlineSubusers,
+   TotalUsers = await _context.Users.CountAsync(),
+  TotalSubusers = await _context.subuser.CountAsync(),
+            OfflineUsers = await _context.Users.CountAsync() - totalOnlineUsers,
+   OfflineSubusers = await _context.subuser.CountAsync() - totalOnlineSubusers,
+        OnlinePercentage = Math.Round((totalOnlineUsers + totalOnlineSubusers) / 
+        (double)(await _context.Users.CountAsync() + await _context.subuser.CountAsync()) * 100, 2),
+   LastUpdated = DateTime.UtcNow
+                };
+
+            return Ok(new DTO.LiveActivityDashboardDto
+         {
+   TotalOnlineUsers = totalOnlineUsers,
+    TotalOnlineSubusers = totalOnlineSubusers,
+  RecentLogins = recentLoginDtos,
+             RecentLogouts = recentLogoutDtos,
+CurrentlyActive = onlineUsers,
+     Statistics = statistics,
+         LastRefreshed = DateTime.UtcNow
+        });
+      }
+   catch (Exception ex)
+   {
+           _logger.LogError(ex, "Error getting live status");
+     return StatusCode(500, new { message = "Error retrieving live status", error = ex.Message });
+            }
         }
 
         /// <summary>
-        /// Bulk update user status
-        /// </summary>
-  [HttpPatch("bulk-update-status")]
-        public async Task<IActionResult> BulkUpdateUserStatus([FromBody] BulkUpdateUserStatusDto request)
-  {
-      try
-          {
-      var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
- if (string.IsNullOrEmpty(currentUserEmail))
+        /// Get user activity analytics with detailed breakdown
+/// </summary>
+        [HttpGet("analytics/{email}")]
+        public async Task<ActionResult<DTO.ActivityAnalyticsDto>> GetUserAnalytics(
+        string email,
+            [FromQuery] int days = 30)
+   {
+ try
     {
-         return Unauthorized(new { message = "User not authenticated" });
-     }
+  var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+         {
+            return Unauthorized(new { message = "User not authenticated" });
+        }
 
            var isSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
 
-     if (!await _authService.HasPermissionAsync(currentUserEmail, "BULK_UPDATE_USERS", isSubuser))
-     {
-      return StatusCode(403, new { message = "Insufficient permissions" });
-  }
+        // Check permissions
+        if (email != currentUserEmail && !await CanViewUserActivity(currentUserEmail, email, isSubuser))
+                {
+        return StatusCode(403, new { message = "Insufficient permissions" });
+ }
 
-      var users = await _context.Users
-     .Where(u => request.UserEmails.Contains(u.user_email))
-       .ToListAsync();
+                var startDate = DateTime.UtcNow.AddDays(-days);
 
- foreach (var user in users)
-          {
-       user.private_api = request.Status == "Active";
-          user.updated_at = DateTime.UtcNow;
+       var sessions = await _context.Sessions
+        .Where(s => s.user_email == email && s.login_time >= startDate)
+        .ToListAsync();
+
+                var analytics = new DTO.ActivityAnalyticsDto
+   {
+     UserEmail = email,
+       TotalLogins = sessions.Count,
+    TotalLogouts = sessions.Count(s => s.logout_time != null),
+   FirstLogin = sessions.Min(s => (DateTime?)s.login_time),
+         LastLogin = sessions.Max(s => (DateTime?)s.login_time),
+       TotalActiveTime = TimeSpan.FromMinutes(sessions
+       .Where(s => s.logout_time != null)
+  .Sum(s => (s.logout_time!.Value - s.login_time).TotalMinutes)),
+        AverageSessionDuration = sessions.Any(s => s.logout_time != null)
+   ? TimeSpan.FromMinutes(sessions
+          .Where(s => s.logout_time != null)
+            .Average(s => (s.logout_time!.Value - s.login_time).TotalMinutes))
+      : TimeSpan.Zero,
+      DailyActivity = sessions
+  .GroupBy(s => s.login_time.Date)
+         .Select(g => new DTO.DailyActivityDto
+             {
+       Date = g.Key,
+   LoginCount = g.Count(),
+    UniqueUsers = 1,
+    TotalActiveTime = TimeSpan.FromMinutes(g
+      .Where(s => s.logout_time != null)
+     .Sum(s => (s.logout_time!.Value - s.login_time).TotalMinutes))
+         })
+       .OrderBy(d => d.Date)
+   .ToList(),
+          HourlyActivity = sessions
+       .GroupBy(s => s.login_time.Hour)
+       .Select(g => new DTO.HourlyActivityDto
+  {
+         Hour = g.Key,
+   LoginCount = g.Count(),
+               ActiveUsers = 1
+         })
+               .OrderBy(h => h.Hour)
+      .ToList(),
+     DeviceBreakdown = sessions
+         .Where(s => !string.IsNullOrEmpty(s.device_info))
+    .GroupBy(s => ExtractDeviceType(s.device_info!))
+             .Select(g => new DTO.DeviceUsageDto
+   {
+           DeviceType = g.Key,
+           Count = g.Count(),
+       Percentage = Math.Round((g.Count() / (double)sessions.Count) * 100, 2)
+    })
+          .ToList()
+                };
+
+           return Ok(analytics);
+            }
+            catch (Exception ex)
+            {
+            _logger.LogError(ex, "Error getting user analytics for {Email}", email);
+      return StatusCode(500, new { message = "Error retrieving analytics", error = ex.Message });
+            }
+        }
+
+        #region Private Helper Methods
+
+        private async Task<bool> CanViewUserActivity(string currentUserEmail, string targetUserEmail, bool isCurrentUserSubuser)
+        {
+            // SuperAdmin and Admin can view all
+  if (await _authService.HasPermissionAsync(currentUserEmail, "VIEW_USER_ACTIVITY", isCurrentUserSubuser) ||
+ await _authService.HasPermissionAsync(currentUserEmail, "READ_ALL_SESSION_STATISTICS", isCurrentUserSubuser))
+    {
+        return true;
      }
 
-    await _context.SaveChangesAsync();
+  // Check if target user is a subuser of current user
+        if (!isCurrentUserSubuser)
+            {
+                var isSubuser = await _context.subuser.AnyAsync(s => 
+       s.subuser_email == targetUserEmail && s.user_email == currentUserEmail);
+          if (isSubuser) return true;
+            }
 
-     _logger.LogInformation("Bulk status update: {Count} users updated to {Status} by {Admin}", 
-      users.Count, request.Status, currentUserEmail);
+            return false;
+ }
 
-    return Ok(new { 
-   message = $"Successfully updated {users.Count} users",
-    updatedCount = users.Count,
-  status = request.Status
-   });
-      }
-      catch (Exception ex)
-    {
-       _logger.LogError(ex, "Error bulk updating user status");
-       return StatusCode(500, new { message = "Error bulk updating user status" });
+    private string DetermineSessionStatus(Sessions session)
+  {
+         if (session.session_status == "active")
+            {
+           return "online";
+         }
+            return "offline";
     }
+
+        private TimeSpan? CalculateSessionDuration(Sessions session)
+        {
+  if (session.logout_time.HasValue)
+{
+          return session.logout_time.Value - session.login_time;
+  }
+          else if (session.session_status == "active")
+  {
+         return DateTime.UtcNow - session.login_time;
+      }
+return null;
         }
+
+   private async Task<DTO.UserActivitySummary> CalculateActivitySummary(string email, DateTime startDate, DateTime endDate)
+        {
+          var sessions = await _context.Sessions
+       .Where(s => s.user_email == email && s.login_time >= startDate && s.login_time <= endDate)
+         .ToListAsync();
+
+    var completedSessions = sessions.Where(s => s.logout_time.HasValue).ToList();
+     var avgDuration = completedSessions.Any()
+    ? TimeSpan.FromMinutes(completedSessions.Average(s => (s.logout_time!.Value - s.login_time).TotalMinutes))
+     : TimeSpan.Zero;
+
+        var lastSession = sessions.OrderByDescending(s => s.login_time).FirstOrDefault();
+    var currentStatus = lastSession?.session_status == "active" ? "online" : "offline";
+
+            return new DTO.UserActivitySummary
+          {
+                TotalSessions = sessions.Count,
+     ActiveSessions = sessions.Count(s => s.session_status == "active"),
+      OfflineSessions = sessions.Count(s => s.session_status != "active"),
+      AverageSessionDuration = avgDuration,
+                LastLogin = sessions.Max(s => (DateTime?)s.login_time),
+     LastLogout = sessions.Where(s => s.logout_time.HasValue).Max(s => (DateTime?)s.logout_time),
+    CurrentStatus = currentStatus
+    };
+        }
+
+        private async Task<string> GetUserName(string email)
+      {
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+     if (user != null) return user.user_name;
+
+    var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+    return subuser?.Name ?? subuser?.subuser_username ?? email;
+        }
+
+        private async Task<List<DTO.UserActivityDto>> GetUsersActivity(DateTime startDate, DateTime endDate, string statusFilter)
+  {
+            var query = _context.Sessions
+       .Where(s => s.login_time >= startDate && s.login_time <= endDate);
+
+            if (!string.IsNullOrEmpty(statusFilter) && statusFilter.ToLower() != "all")
+        {
+    query = query.Where(s => s.session_status == statusFilter.ToLower());
+        }
+
+     var sessions = await query.OrderByDescending(s => s.login_time).Take(100).ToListAsync();
+         return await ConvertSessionsToActivityDtos(sessions);
+        }
+
+      private async Task<List<DTO.UserActivityDto>> GetSubusersActivity(DateTime startDate, DateTime endDate, string statusFilter)
+        {
+     var subuserEmails = await _context.subuser.Select(s => s.subuser_email).ToListAsync();
+            
+    var query = _context.Sessions
+            .Where(s => subuserEmails.Contains(s.user_email) && 
+   s.login_time >= startDate && 
+   s.login_time <= endDate);
+
+  if (!string.IsNullOrEmpty(statusFilter) && statusFilter.ToLower() != "all")
+       {
+      query = query.Where(s => s.session_status == statusFilter.ToLower());
+     }
+
+            var sessions = await query.OrderByDescending(s => s.login_time).Take(100).ToListAsync();
+   return await ConvertSessionsToActivityDtos(sessions);
+  }
+
+        private async Task<List<DTO.UserActivityDto>> GetUserSubusersActivity(string userEmail, DateTime startDate, DateTime endDate, string statusFilter)
+        {
+        var subuserEmails = await _context.subuser
+     .Where(s => s.user_email == userEmail)
+  .Select(s => s.subuser_email)
+       .ToListAsync();
+            
+            var query = _context.Sessions
+        .Where(s => subuserEmails.Contains(s.user_email) && 
+             s.login_time >= startDate && 
+        s.login_time <= endDate);
+
+            if (!string.IsNullOrEmpty(statusFilter) && statusFilter.ToLower() != "all")
+         {
+     query = query.Where(s => s.session_status == statusFilter.ToLower());
+            }
+
+   var sessions = await query.OrderByDescending(s => s.login_time).ToListAsync();
+       return await ConvertSessionsToActivityDtos(sessions);
+     }
+
+        private async Task<List<DTO.UserActivityDto>> GetManagedUsersActivity(string managerEmail, DateTime startDate, DateTime endDate, string statusFilter)
+        {
+          // This would depend on your hierarchy implementation
+     // For now, returning empty list - can be extended
+            return new List<DTO.UserActivityDto>();
+}
+
+        private async Task<List<DTO.UserActivityDto>> ConvertSessionsToActivityDtos(List<Sessions> sessions)
+  {
+            var activities = new List<DTO.UserActivityDto>();
+
+foreach (var session in sessions)
+            {
+           var userName = await GetUserName(session.user_email);
+  var userType = await _userDataService.SubuserExistsAsync(session.user_email) ? "subuser" : "user";
+
+           activities.Add(new DTO.UserActivityDto
+             {
+            Id = session.session_id.ToString(),
+           UserEmail = session.user_email,
+       UserName = userName,
+              UserType = userType,
+    LoginTime = session.login_time,
+                    LogoutTime = session.logout_time,
+         Status = DetermineSessionStatus(session),
+        IpAddress = session.ip_address ?? "Unknown",
+     DeviceInfo = session.device_info ?? "Unknown Device",
+         SessionDuration = CalculateSessionDuration(session),
+                    SessionId = session.session_id,
+ Timestamp = session.login_time
+    });
+     }
+
+            return activities;
+        }
+
+        private DTO.ActivityStatistics CalculateHierarchicalStatistics(
+  List<DTO.UserActivityDto> users, 
+         List<DTO.UserActivityDto> subusers, 
+    List<DTO.UserActivityDto> managed)
+  {
+ var allActivities = users.Concat(subusers).Concat(managed).ToList();
+
+            var totalUsers = users.Count;
+    var onlineUsers = users.Count(a => a.Status == "online");
+  var totalSubusers = subusers.Count;
+        var onlineSubusers = subusers.Count(a => a.Status == "online");
+
+      var allSessionDurations = allActivities
+          .Where(a => a.SessionDuration.HasValue)
+     .Select(a => a.SessionDuration!.Value)
+  .ToList();
+
+     var avgDuration = allSessionDurations.Any()
+          ? TimeSpan.FromMinutes(allSessionDurations.Average(d => d.TotalMinutes))
+     : TimeSpan.Zero;
+
+            var totalCount = totalUsers + totalSubusers;
+          var onlineCount = onlineUsers + onlineSubusers;
+
+            return new DTO.ActivityStatistics
+        {
+        TotalUsers = totalUsers,
+          OnlineUsers = onlineUsers,
+       OfflineUsers = totalUsers - onlineUsers,
+     TotalSubusers = totalSubusers,
+    OnlineSubusers = onlineSubusers,
+           OfflineSubusers = totalSubusers - onlineSubusers,
+          OnlinePercentage = totalCount > 0 ? Math.Round((onlineCount / (double)totalCount) * 100, 2) : 0,
+   AverageSessionDuration = avgDuration,
+   LastUpdated = DateTime.UtcNow
+    };
+        }
+
+        private string ExtractDeviceType(string deviceInfo)
+      {
+         if (string.IsNullOrEmpty(deviceInfo)) return "Unknown";
+
+         deviceInfo = deviceInfo.ToLower();
+            if (deviceInfo.Contains("mobile") || deviceInfo.Contains("android") || deviceInfo.Contains("ios")) 
+                return "Mobile";
+     if (deviceInfo.Contains("windows")) return "Windows";
+            if (deviceInfo.Contains("mac") || deviceInfo.Contains("darwin")) return "Mac";
+            if (deviceInfo.Contains("linux")) return "Linux";
+       if (deviceInfo.Contains("tablet") || deviceInfo.Contains("ipad")) return "Tablet";
+     
+     return "Desktop";
+     }
+
+        #endregion
     }
 }

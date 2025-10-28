@@ -9,7 +9,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Subusers Management Controller - Complete subuser management
-    /// Based on D-Secure Manage Subusers UI (Screenshot 2)
+    /// Based on BitRaser Manage Subusers UI (Screenshot 2)
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
@@ -91,7 +91,7 @@ if (string.IsNullOrEmpty(userEmail))
     // Apply status filter
      if (!string.IsNullOrEmpty(filters.Status) && filters.Status != "All Statuses")
   {
-    query = query.Where(s => s.Status.ToLower() == filters.Status.ToLower());
+    query = query.Where(s => s.status.ToLower() == filters.Status.ToLower());
   }
 
      // Apply department filter
@@ -109,22 +109,22 @@ if (string.IsNullOrEmpty(userEmail))
        // Apply pagination
        var subusers = await query
       .Skip((filters.Page - 1) * filters.PageSize)
-    .Take(filters.PageSize)
+  .Take(filters.PageSize)
     .Select(s => new SubuserManagementItemDto
       {
-        SubuserId = s.subuser_id,
+   SubuserId = s.subuser_id,
    Email = s.subuser_email,
    Role = s.Role,
-            Status = s.Status,
+Status = s.status,
       Department = s.Department ?? "N/A",
-  LastLogin = s.LastLoginAt,
+  LastLogin = s.last_login,
        CanView = true,
 CanEdit = true,
       CanManagePermissions = true,
       CanReset = true,
-     CanDeactivate = s.Status == "active",
+     CanDeactivate = s.status == "active",
  CanDelete = true
-       })
+   })
   .ToListAsync();
 
 return Ok(new SubusersManagementListDto
@@ -169,8 +169,8 @@ Page = filters.Page,
      return NotFound(new { message = "Subuser not found" });
       }
 
- subuser.Status = "inactive";
-  subuser.LastLoginAt = DateTime.UtcNow;
+ subuser.status = "inactive";
+  subuser.last_login = DateTime.UtcNow;
 
      await _context.SaveChangesAsync();
 
@@ -342,10 +342,10 @@ downloadUrl = $"/api/SubusersManagement/download/{fileName}",
 
      var stats = new SubusersStatisticsDto
    {
-       TotalSubusers = await query.CountAsync(),
-   ActiveSubusers = await query.CountAsync(s => s.Status == "active"),
-       InactiveSubusers = await query.CountAsync(s => s.Status == "inactive"),
-  PendingSubusers = await query.CountAsync(s => s.Status == "pending"),
+    TotalSubusers = await query.CountAsync(),
+   ActiveSubusers = await query.CountAsync(s => s.status == "active"),
+       InactiveSubusers = await query.CountAsync(s => s.status == "inactive"),
+  PendingSubusers = await query.CountAsync(s => s.status == "pending"),
       SubusersByRole = await query
     .GroupBy(s => s.Role)
        .Select(g => new { Role = g.Key, Count = g.Count() })
@@ -380,9 +380,9 @@ private IQueryable<subuser> ApplySorting(IQueryable<subuser> query, string? sort
        {
        "Email" => ascending ? query.OrderBy(s => s.subuser_email) : query.OrderByDescending(s => s.subuser_email),
    "Role" => ascending ? query.OrderBy(s => s.Role) : query.OrderByDescending(s => s.Role),
-  "Status" => ascending ? query.OrderBy(s => s.Status) : query.OrderByDescending(s => s.Status),
+  "Status" => ascending ? query.OrderBy(s => s.status) : query.OrderByDescending(s => s.status),
  "Department" => ascending ? query.OrderBy(s => s.Department) : query.OrderByDescending(s => s.Department),
-       "Last Login" => ascending ? query.OrderBy(s => s.LastLoginAt) : query.OrderByDescending(s => s.LastLoginAt),
+       "Last Login" => ascending ? query.OrderBy(s => s.last_login) : query.OrderByDescending(s => s.last_login),
 _ => query.OrderBy(s => s.subuser_email)
      };
  }

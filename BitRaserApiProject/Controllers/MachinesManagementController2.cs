@@ -9,7 +9,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Machines Management Controller - Complete machine management
-    /// Based on D-Secure Machines UI (Screenshot 3)
+    /// Based on BitRaser Machines UI (Screenshot 3)
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]

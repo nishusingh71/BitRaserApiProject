@@ -279,23 +279,23 @@ namespace BitRaserApiProject
 
             modelBuilder.Entity<subuser>()
                 .Property(s => s.MachineIdsJson)
-                .HasColumnType("json");
+        .HasColumnType("json");
 
             modelBuilder.Entity<subuser>()
-                .Property(s => s.LicenseIdsJson)
-                .HasColumnType("json");
+       .Property(s => s.LicenseIdsJson)
+              .HasColumnType("json");
 
             modelBuilder.Entity<subuser>()
-                .Property(s => s.Status)
-                .HasMaxLength(50);
+        .Property(s => s.status)
+         .HasMaxLength(50);
 
             modelBuilder.Entity<subuser>()
-                .Property(s => s.LastLoginIp)
+              .Property(s => s.LastLoginIp)
                 .HasMaxLength(500);
 
-            modelBuilder.Entity<subuser>()
-                .Property(s => s.Notes)
-                .HasMaxLength(500);
+   modelBuilder.Entity<subuser>()
+          .Property(s => s.Notes)
+          .HasMaxLength(500);
 
             // Group table
             modelBuilder.Entity<Group>()

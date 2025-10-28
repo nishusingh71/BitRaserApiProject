@@ -70,45 +70,45 @@ _context = context;
        query = query.Where(s => s.Name != null && s.Name.Contains(name));
 
        if (!string.IsNullOrEmpty(status))
-             query = query.Where(s => s.Status.Contains(status));
+       query = query.Where(s => s.status != null && s.status.Contains(status));
 
   if (!string.IsNullOrEmpty(role))
      query = query.Where(s => s.Role.Contains(role));
 
-          var subusers = await query
+    var subusers = await query
  .OrderByDescending(s => s.CreatedAt)
       .Skip(page * pageSize)
         .Take(pageSize)
-                .ToListAsync();
+           .ToListAsync();
 
      var subuserDetails = subusers.Select(s => new {
-       s.subuser_id,
-           s.subuser_email,
+   s.subuser_id,
+ s.subuser_email,
   s.user_email, // Parent user email
     name = s.Name ?? "N/A",
-      phone = s.Phone ?? "N/A",
+phone = s.Phone ?? "N/A",
       jobTitle = s.JobTitle ?? "N/A",
-              department = s.Department ?? "N/A",
+           department = s.Department ?? "N/A",
       role = s.Role,
         accessLevel = s.AccessLevel,
-    status = s.Status,
-         isEmailVerified = s.IsEmailVerified,
-              assignedMachines = s.AssignedMachines ?? 0,
-           maxMachines = s.MaxMachines ?? 5,
-        // Roles from SubuserRoles relationship
+    status = s.status,
+isEmailVerified = s.IsEmailVerified,
+      assignedMachines = s.AssignedMachines ?? 0,
+maxMachines = s.MaxMachines ?? 5,
+     // Roles from SubuserRoles relationship
           roles = s.SubuserRoles.Select(sr => new {
-           roleId = sr.RoleId,
-            roleName = sr.Role.RoleName,
-   description = sr.Role.Description,
+   roleId = sr.RoleId,
+   roleName = sr.Role.RoleName,
+description = sr.Role.Description,
   hierarchyLevel = sr.Role.HierarchyLevel,
  assignedAt = sr.AssignedAt,
         assignedBy = sr.AssignedByEmail
-              }).ToList(),
-           createdAt = s.CreatedAt,
+}).ToList(),
+createdAt = s.CreatedAt,
         updatedAt = s.UpdatedAt,
-      lastLoginAt = s.LastLoginAt,
-                lastLoginIp = s.LastLoginIp
-         }).ToList();
+      lastLoginAt = s.last_login,
+    lastLoginIp = s.LastLoginIp
+       }).ToList();
 
             return Ok(subuserDetails);
         }
@@ -143,15 +143,15 @@ bool canView = subuser.user_email == currentUserEmail ||
 
      var subuserDetails = new {
 subuser.subuser_id,
-         subuser.subuser_email,
-                subuser.user_email,
+  subuser.subuser_email,
+          subuser.user_email,
       name = subuser.Name ?? "N/A",
          phone = subuser.Phone ?? "N/A",
 jobTitle = subuser.JobTitle ?? "N/A",
-      department = subuser.Department ?? "N/A",
+   department = subuser.Department ?? "N/A",
     role = subuser.Role,
             accessLevel = subuser.AccessLevel,
-       status = subuser.Status,
+       status = subuser.status,
        isEmailVerified = subuser.IsEmailVerified,
       // Detailed roles information
     roles = subuser.SubuserRoles.Select(sr => new {
@@ -160,38 +160,38 @@ jobTitle = subuser.JobTitle ?? "N/A",
 description = sr.Role.Description,
  hierarchyLevel = sr.Role.HierarchyLevel,
  assignedAt = sr.AssignedAt,
-              assignedBy = sr.AssignedByEmail
+    assignedBy = sr.AssignedByEmail
   }).ToList(),
-            // Permissions from roles
+      // Permissions from roles
    permissions = subuser.SubuserRoles
-       .SelectMany(sr => sr.Role.RolePermissions)
+    .SelectMany(sr => sr.Role.RolePermissions)
         .Select(rp => rp.Permission.PermissionName)
   .Distinct()
-                .ToList(),
+        .ToList(),
   // Machine and license info
-       assignedMachines = subuser.AssignedMachines ?? 0,
-            maxMachines = subuser.MaxMachines ?? 5,
+   assignedMachines = subuser.AssignedMachines ?? 0,
+          maxMachines = subuser.MaxMachines ?? 5,
   groupId = subuser.GroupId,
-       // Permissions flags
-        canCreateSubusers = subuser.CanCreateSubusers,
-        canViewReports = subuser.CanViewReports,
-          canManageMachines = subuser.CanManageMachines,
-      canAssignLicenses = subuser.CanAssignLicenses,
+// Permissions flags
+    canCreateSubusers = subuser.CanCreateSubusers,
+     canViewReports = subuser.CanViewReports,
+      canManageMachines = subuser.CanManageMachines,
+   canAssignLicenses = subuser.CanAssignLicenses,
 // Notifications
 emailNotifications = subuser.EmailNotifications,
-     systemAlerts = subuser.SystemAlerts,
+  systemAlerts = subuser.SystemAlerts,
      // Security info
-          lastLoginAt = subuser.LastLoginAt,
-          lastLoginIp = subuser.LastLoginIp,
-                failedLoginAttempts = subuser.FailedLoginAttempts,
-                lockedUntil = subuser.LockedUntil,
-       // Audit info
-            createdAt = subuser.CreatedAt,
-    createdBy = subuser.CreatedBy,
+     lastLoginAt = subuser.last_login,
+       lastLoginIp = subuser.LastLoginIp,
+  failedLoginAttempts = subuser.FailedLoginAttempts,
+    lockedUntil = subuser.LockedUntil,
+  // Audit info
+   createdAt = subuser.CreatedAt,
+   createdBy = subuser.CreatedBy,
    updatedAt = subuser.UpdatedAt,
-           updatedBy = subuser.UpdatedBy,
-         notes = subuser.Notes
-            };
+   updatedBy = subuser.UpdatedBy,
+ notes = subuser.Notes
+  };
 
         return Ok(subuserDetails);
       }
@@ -223,26 +223,26 @@ emailNotifications = subuser.EmailNotifications,
 
             var subuserDetails = subusers.Select(s => new {
     s.subuser_id,
-       s.subuser_email,
+  s.subuser_email,
     name = s.Name ?? "N/A",
-         phone = s.Phone ?? "N/A",
-    jobTitle = s.JobTitle ?? "N/A",
+    phone = s.Phone ?? "N/A",
+jobTitle = s.JobTitle ?? "N/A",
       department = s.Department ?? "N/A",
-       role = s.Role,
-        accessLevel = s.AccessLevel,
-         status = s.Status,
+    role = s.Role,
+  accessLevel = s.AccessLevel,
+       status = s.status,
  // Roles information
-                roles = s.SubuserRoles.Select(sr => new {
-          roleId = sr.RoleId,
-             roleName = sr.Role.RoleName,
+       roles = s.SubuserRoles.Select(sr => new {
+  roleId = sr.RoleId,
+    roleName = sr.Role.RoleName,
    hierarchyLevel = sr.Role.HierarchyLevel
-   }).ToList(),
+ }).ToList(),
    assignedMachines = s.AssignedMachines ?? 0,
-                maxMachines = s.MaxMachines ?? 5,
+  maxMachines = s.MaxMachines ?? 5,
        isEmailVerified = s.IsEmailVerified,
-                lastLoginAt = s.LastLoginAt,
-                createdAt = s.CreatedAt
-            }).ToList();
+ lastLoginAt = s.last_login,
+   createdAt = s.CreatedAt
+          }).ToList();
 
    return Ok(subuserDetails);
         }
@@ -273,29 +273,29 @@ emailNotifications = subuser.EmailNotifications,
             // Create subuser with name
  var newSubuser = new subuser
             {
-                subuser_email = request.Email,
+  subuser_email = request.Email,
   subuser_password = BCrypt.Net.BCrypt.HashPassword(request.Password),
       user_email = currentUserEmail!,
-        superuser_id = parentUser.user_id,
-             Name = request.Name,
-         Phone = request.Phone ?? "",
-        JobTitle = request.JobTitle ?? "",
+   superuser_id = parentUser.user_id,
+      Name = request.Name,
+  Phone = request.Phone ?? "",
+   JobTitle = request.JobTitle ?? "",
     Department = request.Department ?? "",
-      Role = request.Role ?? "subuser",
-    AccessLevel = request.AccessLevel ?? "limited",
-         Status = "active",
-                IsEmailVerified = false,
-        MaxMachines = request.MaxMachines ?? 5,
-          GroupId = request.GroupId,
-           CanCreateSubusers = request.CanCreateSubusers ?? false,
-     CanViewReports = request.CanViewReports ?? true,
-                CanManageMachines = request.CanManageMachines ?? false,
-      CanAssignLicenses = request.CanAssignLicenses ?? false,
-          EmailNotifications = request.EmailNotifications ?? true,
+  Role = request.Role ?? "subuser",
+ AccessLevel = request.AccessLevel ?? "limited",
+  status = "active",
+    IsEmailVerified = false,
+     MaxMachines = request.MaxMachines ?? 5,
+   GroupId = request.GroupId,
+      CanCreateSubusers = request.CanCreateSubusers ?? false,
+ CanViewReports = request.CanViewReports ?? true,
+        CanManageMachines = request.CanManageMachines ?? false,
+    CanAssignLicenses = request.CanAssignLicenses ?? false,
+      EmailNotifications = request.EmailNotifications ?? true,
      SystemAlerts = request.SystemAlerts ?? true,
-         CreatedBy = parentUser.user_id,
+       CreatedBy = parentUser.user_id,
        CreatedAt = DateTime.UtcNow,
-           Notes = request.Notes
+      Notes = request.Notes
     };
 
    _context.subuser.Add(newSubuser);
@@ -358,14 +358,14 @@ emailNotifications = subuser.EmailNotifications,
      if (!string.IsNullOrEmpty(request.Phone))
         subuser.Phone = request.Phone;
 
-            if (!string.IsNullOrEmpty(request.JobTitle))
+      if (!string.IsNullOrEmpty(request.JobTitle))
     subuser.JobTitle = request.JobTitle;
 
     if (!string.IsNullOrEmpty(request.Department))
-         subuser.Department = request.Department;
+     subuser.Department = request.Department;
 
-     if (!string.IsNullOrEmpty(request.Status))
-    subuser.Status = request.Status;
+ if (!string.IsNullOrEmpty(request.Status))
+    subuser.status = request.Status;
 
   if (!string.IsNullOrEmpty(request.AccessLevel))
      subuser.AccessLevel = request.AccessLevel;
@@ -500,15 +500,15 @@ if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSER_
        query = query.Where(s => s.user_email == parentEmail);
 
             var stats = new {
-                TotalSubusers = await query.CountAsync(),
-  ActiveSubusers = await query.CountAsync(s => s.Status == "active"),
-                InactiveSubusers = await query.CountAsync(s => s.Status == "inactive"),
-     SuspendedSubusers = await query.CountAsync(s => s.Status == "suspended"),
+     TotalSubusers = await query.CountAsync(),
+  ActiveSubusers = await query.CountAsync(s => s.status == "active"),
+     InactiveSubusers = await query.CountAsync(s => s.status == "inactive"),
+ SuspendedSubusers = await query.CountAsync(s => s.status == "suspended"),
            VerifiedEmails = await query.CountAsync(s => s.IsEmailVerified),
-        UnverifiedEmails = await query.CountAsync(s => !s.IsEmailVerified),
-                SubusersCreatedToday = await query.CountAsync(s => s.CreatedAt.Date == DateTime.UtcNow.Date),
-       SubusersCreatedThisWeek = await query.CountAsync(s => s.CreatedAt >= DateTime.UtcNow.AddDays(-7)),
-                SubusersCreatedThisMonth = await query.CountAsync(s => s.CreatedAt.Month == DateTime.UtcNow.Month),
+   UnverifiedEmails = await query.CountAsync(s => !s.IsEmailVerified),
+    SubusersCreatedToday = await query.CountAsync(s => s.CreatedAt.Date == DateTime.UtcNow.Date),
+SubusersCreatedThisWeek = await query.CountAsync(s => s.CreatedAt >= DateTime.UtcNow.AddDays(-7)),
+    SubusersCreatedThisMonth = await query.CountAsync(s => s.CreatedAt.Month == DateTime.UtcNow.Month),
      // Role distribution
        RoleDistribution = await query
             .SelectMany(s => s.SubuserRoles)

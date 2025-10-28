@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace BitRaserApiProject.Models
 {
     /// <summary>
-    /// User Activity & Reports DTOs - Based on D-Secure Dashboard Screenshots
+    /// User Activity & Reports DTOs - Based on BitRaser Dashboard Screenshots
     /// </summary>
 
     #region User Activity DTOs

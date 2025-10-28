@@ -10,7 +10,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Report Generation Controller - Complete report creation and management
-    /// Matches D-Secure "Generate Report" UI with all customization options
+    /// Matches BitRaser "Generate Report" UI with all customization options
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
@@ -522,7 +522,7 @@ _logger.LogError(ex, "Failed to parse report_details_json: {JsonContent}",
   reportData.Status = reportData.Status ?? (auditReport.synced ? "Completed" : "Pending");
 
         // 4. Set defaults for missing fields
-        reportData.SoftwareName = reportData.SoftwareName ?? "D-SecureErase";
+        reportData.SoftwareName = reportData.SoftwareName ?? "DSecureErase";
      reportData.ProductVersion = reportData.ProductVersion ?? "1.0.0.0";
         reportData.DigitalSignature = reportData.DigitalSignature ?? Guid.NewGuid().ToString("N");
         reportData.ProcessMode = reportData.ProcessMode ?? "Standard Erasure";
@@ -586,7 +586,7 @@ reportData.ErasureLog = new List<ErasureLogEntry>
            var pdfRequest = new ReportRequest
       {
  ReportData = reportData,
-ReportTitle = request.ReportTitle ?? auditReport.report_name ?? "D-SecureErase Report",
+ReportTitle = request.ReportTitle ?? auditReport.report_name ?? "DSecureErase Report",
         HeaderText = request.HeaderText ?? $"Digital Identifier: {reportData.DigitalSignature}",
       TechnicianName = technicianName,
          TechnicianDept = technicianDept,
@@ -638,7 +638,7 @@ ReportTitle = request.ReportTitle ?? auditReport.report_name ?? "D-SecureErase R
           {
           ReportId = Guid.NewGuid().ToString(),
       ReportDate = DateTime.UtcNow.ToString("yyyy-MM-dd"),
-        SoftwareName = "D-Secure BitRaser",
+        SoftwareName = "DSecure",
       ProductVersion = "2.0",
              ErasureLog = auditReports.Select(r => new ErasureLogEntry
        {

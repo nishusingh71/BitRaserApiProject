@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace BitRaserApiProject.Models
 {
     /// <summary>
-    /// System Logs Models - Based on D-Secure System Logs UI
+    /// System Logs Models - Based on BitRaser System Logs UI
     /// Screenshot 1: System Logs page with level, category, date filters and search
     /// </summary>
 

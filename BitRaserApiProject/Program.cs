@@ -65,7 +65,7 @@ var jwtIssuer = Environment.GetEnvironmentVariable("Jwt__Issuer")
 
 var jwtAudience = Environment.GetEnvironmentVariable("Jwt__Audience")
     ?? builder.Configuration["Jwt:Audience"]
-    ?? "BitRaserAPIUsers";
+    ?? "DSecureAPIUsers";
 
 // Configure CORS with comprehensive settings - FIXED FOR VERCEL
 builder.Services.AddCors(options =>
@@ -406,9 +406,9 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     app.UseSwagger();
     app.UseSwaggerUI(options =>
     {
-        options.SwaggerEndpoint("/swagger/v1/swagger.json", "D-Secure API Project v2.0");
+        options.SwaggerEndpoint("/swagger/v1/swagger.json", "DSecure API Project v2.0");
         options.RoutePrefix = "swagger";
-        options.DocumentTitle = "D-Secure API - Enhanced Documentation";
+        options.DocumentTitle = "DSecure API - Enhanced Documentation";
         options.DefaultModelsExpandDepth(-1);
         options.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
         options.EnableTryItOutByDefault();
@@ -535,11 +535,12 @@ app.MapControllers();
 
 // Startup completion message with enhanced information
 var appLogger = app.Services.GetRequiredService<ILogger<Program>>();
-appLogger.LogInformation("🎉 BitRaser API Project (Enhanced) started successfully!");
+appLogger.LogInformation("🎉 DSecure API Project (Enhanced) started successfully!");
 appLogger.LogInformation("📖 Swagger UI available at: http://localhost:{Port}/swagger", port);
 appLogger.LogInformation("🔗 Base URL: http://localhost:{Port}", port);
 appLogger.LogInformation("🌍 Environment: {Environment}", app.Environment.EnvironmentName);
 appLogger.LogInformation("🌐 CORS enabled for: https://dsecure-frontend.vercel.app");
+app.Logger.LogInformation("CORS enabled for: https://dsecuretech.com");
 
 try
 {

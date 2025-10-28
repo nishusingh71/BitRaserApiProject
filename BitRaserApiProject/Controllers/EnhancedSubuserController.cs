@@ -213,13 +213,19 @@ namespace BitRaserApiProject.Controllers
 
             // Check if subuser already exists
             var existingSubuser = await _context.subuser
-                .FirstOrDefaultAsync(s => s.subuser_email == request.subuser_email);
+                .Where(s => s.subuser_email == request.subuser_email)
+                .Select(s => new { s.subuser_email })  // Only select email field to avoid non-existent column errors
+                .FirstOrDefaultAsync();
+                
             if (existingSubuser != null)
                 return Conflict($"Subuser with email {request.subuser_email} already exists");
 
             // Check if email is already used as a main user
             var existingUser = await _context.Users
-                .FirstOrDefaultAsync(u => u.user_email == request.subuser_email);
+                .Where(u => u.user_email == request.subuser_email)
+                .Select(u => new { u.user_email })  // Only select email field
+                .FirstOrDefaultAsync();
+         
             if (existingUser != null)
                 return Conflict($"Email {request.subuser_email} is already used as a main user account");
 
@@ -240,20 +246,20 @@ namespace BitRaserApiProject.Controllers
           return BadRequest($"Parent user with email {parentUserEmail} not found");
 
             // Create subuser with all fields
-       var newSubuser = new subuser
-         {
+  var newSubuser = new subuser
+       {
        subuser_email = request.subuser_email,
     subuser_password = BCrypt.Net.BCrypt.HashPassword(request.subuser_password),
     user_email = parentUserEmail,
-                superuser_id = parentUser.user_id,
-     Name = request.subuser_name ?? request.subuser_email.Split('@')[0], // Use email prefix if name not provided
+              superuser_id = parentUser.user_id,
+   Name = request.subuser_name ?? request.subuser_email.Split('@')[0], // Use email prefix if name not provided
         Department = request.department, // Optional
-       Role = request.role ?? "subuser", // Default to "subuser" if not provided
+ Role = request.role ?? "subuser", // Default to "subuser" if not provided
   Phone = request.phone, // Optional
         GroupId = !string.IsNullOrEmpty(request.subuser_group) && int.TryParse(request.subuser_group, out int groupId) ? groupId : (int?)null, // Convert string to int?
-      Status = "active",
+      status = "active",  // Use lowercase field to avoid duplicate column error
  IsEmailVerified = false,
-         CreatedAt = DateTime.UtcNow,
+    CreatedAt = DateTime.UtcNow,
          CreatedBy = parentUser.user_id
   };
 
@@ -277,11 +283,11 @@ namespace BitRaserApiProject.Controllers
          department = newSubuser.Department,
       role = newSubuser.Role,
        phone = newSubuser.Phone,
-          subuserGroup = newSubuser.GroupId?.ToString(), // Convert back to string for response
+  subuserGroup = newSubuser.GroupId?.ToString(), // Convert back to string for response
        parentUserEmail = newSubuser.user_email,
        subuserID = newSubuser.subuser_id,
-   status = newSubuser.Status,
-         createdAt = newSubuser.CreatedAt,
+   status = newSubuser.status,  // Use lowercase field
+      createdAt = newSubuser.CreatedAt,
     message = "Subuser created successfully"
    };
 

@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace BitRaserApiProject.Models
 {
     /// <summary>
-    /// License Audit Report Models - Based on D-Secure License Audit Report Modal UI
+    /// License Audit Report Models - Based on BitRaser License Audit Report Modal UI
     /// Screenshot 3: License Audit Report modal with utilization overview and product breakdown
     /// </summary>
 

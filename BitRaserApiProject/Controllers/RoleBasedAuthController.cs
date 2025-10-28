@@ -5,6 +5,7 @@ using Microsoft.IdentityModel.Tokens;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using System.ComponentModel.DataAnnotations;
 using BCrypt.Net;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Attributes;
@@ -74,6 +75,13 @@ namespace BitRaserApiProject.Controllers
             public int RoleId { get; set; }
         }
 
+        public class UpdateUserRolesRequest
+        {
+            public string Email { get; set; } = string.Empty;
+            public bool IsSubuser { get; set; } = false;
+            public List<string> RoleNames { get; set; } = new List<string>();
+        }
+
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] RoleBasedLoginRequest request)
         {
@@ -114,11 +122,26 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { message = "Invalid credentials" });
                 }
 
-                // Get last logout time from previous session
-                var lastSession = await _context.Sessions
-                    .Where(s => s.user_email == userEmail && s.logout_time != null)
-                    .OrderByDescending(s => s.logout_time)
-                    .FirstOrDefaultAsync();
+                // Get last logout time from users/subusers table or sessions
+                DateTime? lastLogoutTime = null;
+                if (isSubuser && subuserData != null)
+                {
+                    lastLogoutTime = subuserData.last_logout;
+                }
+                else if (mainUser != null)
+                {
+                    lastLogoutTime = mainUser.last_logout;
+                }
+        
+                // Fallback to sessions table if not in user table
+                if (!lastLogoutTime.HasValue)
+                {
+                    var lastSession = await _context.Sessions
+                        .Where(s => s.user_email == userEmail && s.logout_time != null)
+                        .OrderByDescending(s => s.logout_time)
+                        .FirstOrDefaultAsync();
+                    lastLogoutTime = lastSession?.logout_time;
+                }
 
                 // Create session entry for tracking
                 var loginTime = DateTime.UtcNow;
@@ -132,6 +155,20 @@ namespace BitRaserApiProject.Controllers
                 };
 
                 _context.Sessions.Add(session);
+
+                // Update last_login in users or subusers table
+                if (isSubuser && subuserData != null)
+                {
+                    subuserData.last_login = loginTime;
+                    subuserData.LastLoginIp = session.ip_address;
+                    _context.Entry(subuserData).State = EntityState.Modified;
+                }
+                else if (mainUser != null)
+                {
+                    mainUser.last_login = loginTime;
+                    _context.Entry(mainUser).State = EntityState.Modified;
+                }
+
                 await _context.SaveChangesAsync();
 
                 var token = await GenerateJwtTokenAsync(userEmail, isSubuser);
@@ -150,7 +187,7 @@ namespace BitRaserApiProject.Controllers
                     Permissions = permissions,
                     ExpiresAt = DateTime.UtcNow.AddHours(8),
                     LoginTime = loginTime,
-                    LastLogoutTime = lastSession?.logout_time
+                    LastLogoutTime = lastLogoutTime
                 };
 
                 // Add user-specific details
@@ -505,60 +542,336 @@ namespace BitRaserApiProject.Controllers
 
         /// <summary>
         /// Simple Logout - Clear JWT token and automatically logout user from system
+        /// Updates last_logout timestamp in database
         /// </summary>
         [HttpPost("logout")]
         [Authorize]
         public async Task<IActionResult> Logout()
         {
+       try
+       {
+         var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+     var userType = User.FindFirst("user_type")?.Value;
+
+      if (string.IsNullOrEmpty(userEmail))
+    {
+         return Unauthorized(new { message = "Invalid token" });
+       }
+
+      var isSubuser = userType == "subuser";
+   var logoutTime = DateTime.UtcNow;
+
+      // End all active sessions for this user
+     var activeSessions = await _context.Sessions
+     .Where(s => s.user_email == userEmail && s.session_status == "active")
+        .ToListAsync();
+
+            foreach (var session in activeSessions)
+     {
+   session.logout_time = logoutTime;
+         session.session_status = "closed";
+       }
+
+        // Update last_logout in users or subusers table
+     if (isSubuser)
+  {
+    var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+   if (subuser != null)
+       {
+  subuser.last_logout = logoutTime;
+ _context.Entry(subuser).State = EntityState.Modified;
+        }
+       }
+ else
+  {
+    var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+      if (user != null)
+{
+ user.last_logout = logoutTime;
+        _context.Entry(user).State = EntityState.Modified;
+      }
+  }
+
+     await _context.SaveChangesAsync();
+
+_logger.LogInformation("User logout: {Email} ({UserType})", userEmail, isSubuser ? "subuser" : "user");
+
+      // Set response headers to help clear token from browser/Swagger
+      Response.Headers["Clear-Site-Data"] = "\"storage\"";
+      Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+
+     return Ok(new
+            {
+     success = true,
+  message = "Logout successful - JWT token cleared, user logged out automatically",
+      email = userEmail,
+ userType = isSubuser ? "subuser" : "user",
+       logoutTime = logoutTime,
+  sessionsEnded = activeSessions.Count,
+       // Add Swagger UI clearing instructions
+    clearToken = true,
+    swaggerLogout = true
+    });
+     }
+    catch (Exception ex)
+  {
+         _logger.LogError(ex, "Error during logout");
+      return StatusCode(500, new { message = "Logout failed" });
+ }
+        }
+
+        /// <summary>
+        /// Update user roles - Replace existing roles with new ones
+        /// Supports both main users and subusers
+        /// </summary>
+        [HttpPatch("update-roles")]
+        [RequirePermission("UserManagement")]
+        public async Task<IActionResult> UpdateUserRoles([FromBody] UpdateUserRolesRequest request)
+        {
             try
             {
-                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var userType = User.FindFirst("user_type")?.Value;
+                var assignerEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(assignerEmail))
+                    return Unauthorized(new { message = "Authentication required" });
 
-                if (string.IsNullOrEmpty(userEmail))
+                // Validate email
+                if (string.IsNullOrEmpty(request.Email))
+                    return BadRequest(new { message = "Email is required" });
+
+                // Validate at least one role is provided
+                if (request.RoleNames == null || !request.RoleNames.Any())
+                    return BadRequest(new { message = "At least one role must be specified" });
+
+                // Get assigner hierarchy level
+                var assignerLevel = await _roleService.GetUserHierarchyLevelAsync(assignerEmail, false);
+
+                int? targetUserId = null;
+                int? targetSubuserId = null;
+
+                // Find target user/subuser and get current hierarchy level
+                if (request.IsSubuser)
                 {
-                    return Unauthorized(new { message = "Invalid token" });
+                    var subuser = await _context.subuser
+                        .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+      
+                    if (subuser == null)
+                        return NotFound(new { message = "Subuser not found" });
+
+                    // Check if assigner can manage this subuser
+                    var canManage = await _roleService.CanManageUserAsync(assignerEmail, subuser.subuser_email, true);
+                    if (!canManage)
+                        return StatusCode(403, new { message = "You cannot manage this subuser" });
+
+                    targetSubuserId = subuser.subuser_id;
+                }
+                else
+                {
+                    var user = await _context.Users
+                        .FirstOrDefaultAsync(u => u.user_email == request.Email);
+        
+                    if (user == null)
+                        return NotFound(new { message = "User not found" });
+
+                    // Check if assigner can manage this user
+                    var canManage = await _roleService.CanManageUserAsync(assignerEmail, user.user_email, false);
+                    if (!canManage)
+                        return StatusCode(403, new { message = "You cannot manage this user" });
+
+                    targetUserId = user.user_id;
                 }
 
-                var isSubuser = userType == "subuser";
-                var logoutTime = DateTime.UtcNow;
-
-                // End all active sessions for this user
-                var activeSessions = await _context.Sessions
-                    .Where(s => s.user_email == userEmail && s.session_status == "active")
-                    .ToListAsync();
-
-                foreach (var session in activeSessions)
+                // Validate and get role IDs from role names
+                var rolesToAssign = new List<Role>();
+                foreach (var roleName in request.RoleNames)
                 {
-                    session.logout_time = logoutTime;
-                    session.session_status = "closed";
+                    var role = await _context.Roles
+                        .FirstOrDefaultAsync(r => r.RoleName == roleName);
+
+                    if (role == null)
+                        return BadRequest(new { message = $"Role '{roleName}' not found" });
+
+                    // Check if assigner can assign this role (must have higher privilege)
+                    if (assignerLevel >= role.HierarchyLevel)
+                        return StatusCode(403, new { message = $"You cannot assign role '{roleName}' - insufficient privileges" });
+
+                    rolesToAssign.Add(role);
                 }
 
-                await _context.SaveChangesAsync();
-
-                _logger.LogInformation("User logout: {Email} ({UserType})", userEmail, isSubuser ? "subuser" : "user");
-
-                // Set response headers to help clear token from browser/Swagger
-                Response.Headers["Clear-Site-Data"] = "\"storage\"";
-                Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
-
-                return Ok(new
+                // Remove all existing roles for the user
+                if (request.IsSubuser && targetSubuserId.HasValue)
                 {
-                    success = true,
-                    message = "Logout successful - JWT token cleared, user logged out automatically",
-                    email = userEmail,
-                    userType = isSubuser ? "subuser" : "user",
-                    logoutTime = logoutTime,
-                    // Add Swagger UI clearing instructions
-                    clearToken = true,
-                    swaggerLogout = true
-                });
+                    var existingRoles = await _context.SubuserRoles
+                .Where(sr => sr.SubuserId == targetSubuserId.Value)
+        .ToListAsync();
+          
+        _context.SubuserRoles.RemoveRange(existingRoles);
+    }
+        else if (targetUserId.HasValue)
+             {
+          var existingRoles = await _context.UserRoles
+         .Where(ur => ur.UserId == targetUserId.Value)
+            .ToListAsync();
+        
+  _context.UserRoles.RemoveRange(existingRoles);
             }
-            catch (Exception ex)
+
+       // Assign new roles
+        foreach (var role in rolesToAssign)
+ {
+           if (request.IsSubuser && targetSubuserId.HasValue)
+         {
+        var subuserRole = new SubuserRole
+     {
+      SubuserId = targetSubuserId.Value,
+         RoleId = role.RoleId,
+    AssignedByEmail = assignerEmail,
+    AssignedAt = DateTime.UtcNow
+             };
+_context.SubuserRoles.Add(subuserRole);
+     }
+     else if (targetUserId.HasValue)
+       {
+     var userRole = new UserRole
+{
+          UserId = targetUserId.Value,
+      RoleId = role.RoleId,
+ AssignedByEmail = assignerEmail,
+   AssignedAt = DateTime.UtcNow
+ };
+    _context.UserRoles.Add(userRole);
+   }
+            }
+
+      await _context.SaveChangesAsync();
+
+        // Get updated roles and permissions
+  var updatedRoles = await _roleService.GetUserRolesAsync(request.Email, request.IsSubuser);
+  var updatedPermissions = await _roleService.GetUserPermissionsAsync(request.Email, request.IsSubuser);
+
+         _logger.LogInformation("Roles updated for {UserType} {Email} by {Assigner}. New roles: {Roles}", 
+      request.IsSubuser ? "subuser" : "user", 
+       request.Email, 
+        assignerEmail,
+       string.Join(", ", updatedRoles));
+
+     return Ok(new
+       {
+ success = true,
+     message = "Roles updated successfully",
+    email = request.Email,
+      userType = request.IsSubuser ? "subuser" : "user",
+     roles = updatedRoles,
+      permissions = updatedPermissions,
+      updatedBy = assignerEmail,
+    updatedAt = DateTime.UtcNow
+         });
+  }
+    catch (Exception ex)
+        {
+    _logger.LogError(ex, "Error updating roles for {Email}", request.Email);
+         return StatusCode(500, new { message = "An error occurred while updating roles", error = ex.Message });
+         }
+ }
+
+        /// <summary>
+        /// Update timezone for user or subuser
+     /// User can update their own timezone, admins can update any user's timezone
+        /// </summary>
+        [HttpPatch("update-timezone")]
+        [Authorize]
+    public async Task<IActionResult> UpdateTimezone([FromBody] UpdateTimezoneRequest request)
+        {
+    try
             {
-                _logger.LogError(ex, "Error during logout");
-                return StatusCode(500, new { message = "Logout failed" });
-            }
+         var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+      return Unauthorized(new { message = "Authentication required" });
+
+  // If no email provided, update current user's timezone
+        var targetEmail = string.IsNullOrEmpty(request.Email) ? currentUserEmail : request.Email;
+      var isCurrentUser = targetEmail == currentUserEmail;
+
+    // Validate timezone format (basic validation)
+      if (string.IsNullOrWhiteSpace(request.Timezone))
+           return BadRequest(new { message = "Timezone is required" });
+
+        // If updating someone else's timezone, check permissions
+          if (!isCurrentUser)
+  {
+          var currentIsSubuser = await _context.subuser.AnyAsync(s => s.subuser_email == currentUserEmail);
+   var hasPermission = await _roleService.HasPermissionAsync(currentUserEmail, "UPDATE_USER", currentIsSubuser);
+        
+              if (!hasPermission)
+         return StatusCode(403, new { message = "You don't have permission to update other users' timezones" });
+         }
+
+       // Check if target is subuser or user
+         var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == targetEmail);
+        if (subuser != null)
+    {
+    subuser.timezone = request.Timezone;
+      subuser.UpdatedAt = DateTime.UtcNow;
+  _context.Entry(subuser).State = EntityState.Modified;
+          await _context.SaveChangesAsync();
+
+  _logger.LogInformation("Timezone updated for subuser {Email} to {Timezone}", targetEmail, request.Timezone);
+
+ return Ok(new
+{
+   success = true,
+   message = "Timezone updated successfully",
+          email = targetEmail,
+  userType = "subuser",
+     timezone = request.Timezone,
+  updatedBy = currentUserEmail,
+   updatedAt = DateTime.UtcNow
+     });
+   }
+
+                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == targetEmail);
+    if (user != null)
+            {
+                 user.timezone = request.Timezone;
+        user.updated_at = DateTime.UtcNow;
+     _context.Entry(user).State = EntityState.Modified;
+   await _context.SaveChangesAsync();
+
+         _logger.LogInformation("Timezone updated for user {Email} to {Timezone}", targetEmail, request.Timezone);
+
+          return Ok(new
+           {
+   success = true,
+        message = "Timezone updated successfully",
+      email = targetEmail,
+  userType = "user",
+                timezone = request.Timezone,
+     updatedBy = currentUserEmail,
+      updatedAt = DateTime.UtcNow
+    });
+     }
+
+     return NotFound(new { message = "User or subuser not found" });
         }
+      catch (Exception ex)
+            {
+       _logger.LogError(ex, "Error updating timezone for {Email}", request.Email);
+    return StatusCode(500, new { message = "An error occurred while updating timezone", error = ex.Message });
+}
+    }
+
+        public class UpdateTimezoneRequest
+        {
+   /// <summary>
+ /// Email of user/subuser to update. If not provided, updates current user's timezone
+      /// </summary>
+  public string? Email { get; set; }
+
+ /// <summary>
+      /// Timezone string (e.g., "Asia/Kolkata", "America/New_York", "Europe/London")
+ /// </summary>
+       [Required(ErrorMessage = "Timezone is required")]
+    [MaxLength(100)]
+            public string Timezone { get; set; } = string.Empty;
+}
     }
 }

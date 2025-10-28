@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace BitRaserApiProject.Models
 {
   /// <summary>
-    /// Audit Reports Models - Based on D-Secure Audit Reports UI
+    /// Audit Reports Models - Based on BitRaser Audit Reports UI
     /// Screenshot 2: Audit Reports page with filters, search, and data table
     /// </summary>
 

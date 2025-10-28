@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace BitRaserApiProject.Models
 {
     /// <summary>
-    /// Machines Management Models - Based on D-Secure Machines UI
+    /// Machines Management Models - Based on BitRaser Machines UI
     /// Screenshot 3: Machines page with erase option, license, status filters
     /// </summary>
 

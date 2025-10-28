@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace BitRaserApiProject.Models
 {
     /// <summary>
-    /// Enhanced Dashboard DTOs - Based on D-Secure Admin Dashboard Design
+    /// Enhanced Dashboard DTOs - Based on BitRaser Admin Dashboard Design
     /// </summary>
 
     // Enhanced Dashboard Overview Response

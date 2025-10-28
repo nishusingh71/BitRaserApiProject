@@ -9,7 +9,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// License Audit Controller - Comprehensive license audit and optimization
-    /// Based on D-Secure License Audit Report Modal UI (Screenshot 3)
+    /// Based on BitRaser License Audit Report Modal UI (Screenshot 3)
     /// </summary>
     [ApiController]
 [Route("api/[controller]")]

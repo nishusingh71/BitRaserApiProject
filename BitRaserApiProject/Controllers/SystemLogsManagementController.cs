@@ -9,7 +9,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// System Logs Management Controller - Complete logs management
-    /// Based on D-Secure System Logs UI (Screenshot 1)
+    /// Based on BitRaser System Logs UI (Screenshot 1)
     /// </summary>
   [ApiController]
     [Route("api/[controller]")]

@@ -9,7 +9,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// License Management Controller - Bulk assignment and license operations
-    /// Based on D-Secure License Management UI
+    /// Based on BitRaser License Management UI
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]

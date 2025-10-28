@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace BitRaserApiProject.Models
 {
     /// <summary>
- /// Request model for generating D-SecureErase PDF reports
+ /// Request model for generating BitRaserErase PDF reports
  /// </summary>
     public class DSecureEraseReportRequest
     {
@@ -14,7 +14,7 @@ namespace BitRaserApiProject.Models
      public string ReportDate { get; set; } = string.Empty;
 
 [Required]
-      public string Software { get; set; } = "D-SecureErase 1.0.0.0";
+      public string Software { get; set; } = "BitRaserErase 1.0.0.0";
 
      public string? DigitalIdentifier { get; set; }
 
@@ -83,7 +83,7 @@ namespace BitRaserApiProject.Models
       public string ReportDate { get; set; } = string.Empty;
 
         [Required]
-        public string Software { get; set; } = "D-SecureErase 1.0.0.0";
+        public string Software { get; set; } = "BitRaserErase 1.0.0.0";
 
         public string? DigitalIdentifier { get; set; }
 

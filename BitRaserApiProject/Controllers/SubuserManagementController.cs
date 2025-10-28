@@ -72,7 +72,7 @@ namespace BitRaserApiProject.Controllers
 
                 // Apply filters
                 if (!string.IsNullOrEmpty(status))
-                    query = query.Where(s => s.Status == status);
+                    query = query.Where(s => s.status == status);
 
                 if (!string.IsNullOrEmpty(role))
                     query = query.Where(s => s.Role == role);
@@ -129,13 +129,13 @@ namespace BitRaserApiProject.Controllers
                         MaxMachines = subuser.MaxMachines,
                         GroupId = subuser.GroupId,
                         GroupName = group?.name,
-                        Status = subuser.Status,
+                        Status = subuser.status,
                         IsEmailVerified = subuser.IsEmailVerified,
                         CanCreateSubusers = subuser.CanCreateSubusers,
                         CanViewReports = subuser.CanViewReports,
                         CanManageMachines = subuser.CanManageMachines,
                         CanAssignLicenses = subuser.CanAssignLicenses,
-                        LastLoginAt = subuser.LastLoginAt,
+                        LastLoginAt = subuser.last_login,
                         CreatedAt = subuser.CreatedAt,
                         UpdatedAt = subuser.UpdatedAt,
                         Notes = subuser.Notes
@@ -203,13 +203,13 @@ namespace BitRaserApiProject.Controllers
                     MaxMachines = subuser.MaxMachines,
                     GroupId = subuser.GroupId,
                     GroupName = group?.name,
-                    Status = subuser.Status,
+                    Status = subuser.status,
                     IsEmailVerified = subuser.IsEmailVerified,
                     CanCreateSubusers = subuser.CanCreateSubusers,
                     CanViewReports = subuser.CanViewReports,
                     CanManageMachines = subuser.CanManageMachines,
                     CanAssignLicenses = subuser.CanAssignLicenses,
-                    LastLoginAt = subuser.LastLoginAt,
+                    LastLoginAt = subuser.last_login,
                     CreatedAt = subuser.CreatedAt,
                     UpdatedAt = subuser.UpdatedAt,
                     Notes = subuser.Notes
@@ -260,7 +260,7 @@ namespace BitRaserApiProject.Controllers
                     AccessLevel = dto.AccessLevel ?? "limited", // Default to "limited"
                     MaxMachines = dto.MaxMachines ?? 5, // Default to 5
                     GroupId = dto.GroupId, // Optional
-                    Status = "active",
+                    status = "active",
                     IsEmailVerified = false,
                     CanCreateSubusers = dto.CanCreateSubusers ?? false, // Default to false
                     CanViewReports = dto.CanViewReports ?? true, // Default to true
@@ -296,7 +296,7 @@ namespace BitRaserApiProject.Controllers
                         MaxMachines = subuser.MaxMachines,
                         GroupId = subuser.GroupId,
                         GroupName = group?.name,
-                        Status = subuser.Status,
+                        Status = subuser.status,
                         IsEmailVerified = subuser.IsEmailVerified,
                         CanCreateSubusers = subuser.CanCreateSubusers,
                         CanViewReports = subuser.CanViewReports,
@@ -351,7 +351,7 @@ namespace BitRaserApiProject.Controllers
                 if (dto.AccessLevel != null) subuser.AccessLevel = dto.AccessLevel;
                 if (dto.MaxMachines.HasValue) subuser.MaxMachines = dto.MaxMachines.Value;
                 if (dto.GroupId.HasValue) subuser.GroupId = dto.GroupId.Value;
-                if (dto.Status != null) subuser.Status = dto.Status;
+                if (dto.Status != null) subuser.status = dto.Status;
                 if (dto.CanCreateSubusers.HasValue) subuser.CanCreateSubusers = dto.CanCreateSubusers.Value;
                 if (dto.CanViewReports.HasValue) subuser.CanViewReports = dto.CanViewReports.Value;
                 if (dto.CanManageMachines.HasValue) subuser.CanManageMachines = dto.CanManageMachines.Value;
@@ -412,7 +412,7 @@ namespace BitRaserApiProject.Controllers
                 if (dto.AccessLevel != null) subuser.AccessLevel = dto.AccessLevel;
                 if (dto.MaxMachines.HasValue) subuser.MaxMachines = dto.MaxMachines.Value;
                 if (dto.GroupId.HasValue) subuser.GroupId = dto.GroupId.Value;
-                if (dto.Status != null) subuser.Status = dto.Status;
+                if (dto.Status != null) subuser.status = dto.Status;
                 if (dto.CanCreateSubusers.HasValue) subuser.CanCreateSubusers = dto.CanCreateSubusers.Value;
                 if (dto.CanViewReports.HasValue) subuser.CanViewReports = dto.CanViewReports.Value;
                 if (dto.CanManageMachines.HasValue) subuser.CanManageMachines = dto.CanManageMachines.Value;
@@ -593,9 +593,9 @@ namespace BitRaserApiProject.Controllers
                 var stats = new SubuserStatsDto
                 {
                     TotalSubusers = await query.CountAsync(),
-                    ActiveSubusers = await query.CountAsync(s => s.Status == "active"),
-                    InactiveSubusers = await query.CountAsync(s => s.Status == "inactive"),
-                    SuspendedSubusers = await query.CountAsync(s => s.Status == "suspended"),
+                    ActiveSubusers = await query.CountAsync(s => s.status == "active"),
+                    InactiveSubusers = await query.CountAsync(s => s.status == "inactive"),
+                    SuspendedSubusers = await query.CountAsync(s => s.status == "suspended"),
                     VerifiedSubusers = await query.CountAsync(s => s.IsEmailVerified),
                     UnverifiedSubusers = await query.CountAsync(s => !s.IsEmailVerified),
                     SubusersByRole = await query
@@ -681,13 +681,13 @@ namespace BitRaserApiProject.Controllers
                 MaxMachines = subuser.MaxMachines,
            GroupId = subuser.GroupId,
           GroupName = group?.name,
-          Status = subuser.Status,
+          Status = subuser.status,
            IsEmailVerified = subuser.IsEmailVerified,
            CanCreateSubusers = subuser.CanCreateSubusers,
              CanViewReports = subuser.CanViewReports,
         CanManageMachines = subuser.CanManageMachines,
    CanAssignLicenses = subuser.CanAssignLicenses,
-        LastLoginAt = subuser.LastLoginAt,
+        LastLoginAt = subuser.last_login,
            CreatedAt = subuser.CreatedAt,
   UpdatedAt = subuser.UpdatedAt,
    Notes = subuser.Notes
@@ -738,7 +738,7 @@ namespace BitRaserApiProject.Controllers
       if (dto.AccessLevel != null) subuser.AccessLevel = dto.AccessLevel;
     if (dto.MaxMachines.HasValue) subuser.MaxMachines = dto.MaxMachines.Value;
       if (dto.GroupId.HasValue) subuser.GroupId = dto.GroupId.Value;
-           if (dto.Status != null) subuser.Status = dto.Status;
+           if (dto.Status != null) subuser.status = dto.Status;
                 if (dto.CanCreateSubusers.HasValue) subuser.CanCreateSubusers = dto.CanCreateSubusers.Value;
            if (dto.CanViewReports.HasValue) subuser.CanViewReports = dto.CanViewReports.Value;
   if (dto.CanManageMachines.HasValue) subuser.CanManageMachines = dto.CanManageMachines.Value;
@@ -799,7 +799,7 @@ namespace BitRaserApiProject.Controllers
           if (dto.AccessLevel != null) subuser.AccessLevel = dto.AccessLevel;
      if (dto.MaxMachines.HasValue) subuser.MaxMachines = dto.MaxMachines.Value;
    if (dto.GroupId.HasValue) subuser.GroupId = dto.GroupId.Value;
-        if (dto.Status != null) subuser.Status = dto.Status;
+        if (dto.Status != null) subuser.status = dto.Status;
     if (dto.CanCreateSubusers.HasValue) subuser.CanCreateSubusers = dto.CanCreateSubusers.Value;
        if (dto.CanViewReports.HasValue) subuser.CanViewReports = dto.CanViewReports.Value;
       if (dto.CanManageMachines.HasValue) subuser.CanManageMachines = dto.CanManageMachines.Value;

@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace BitRaserApiProject.Models
 {
     /// <summary>
-  /// Group Management DTOs - Based on D-Secure Manage Groups Design
+  /// Group Management DTOs - Based on BitRaser Manage Groups Design
     /// Complete models matching the UI screenshots exactly
     /// </summary>
 

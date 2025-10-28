@@ -8,7 +8,7 @@ using System.Security.Claims;
 namespace BitRaserApiProject.Controllers
 {
     /// <summary>
-    /// Group Management Controller - Complete CRUD for Groups (D-Secure Design)
+    /// Group Management Controller - Complete CRUD for Groups (BitRaser Design)
     /// Features: Create, Edit, Delete Groups | Assign Permissions | Manage License Allocation
  /// </summary>
  [ApiController]
@@ -538,7 +538,7 @@ await _context.SubuserRoles.CountAsync(sr => sr.RoleId == groupId);
    UserEmail = sr.Subuser!.subuser_email,
                 UserName = sr.Subuser.Name ?? sr.Subuser.subuser_email,
              JoinedDate = sr.AssignedAt,
-    Status = sr.Subuser.Status,
+    Status = sr.Subuser.status,
  UserType = "subuser"
      })
    .ToListAsync();

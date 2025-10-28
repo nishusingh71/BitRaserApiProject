@@ -584,7 +584,7 @@ namespace BitRaserApiProject.Controllers
             {
                 ReportId = $"SUMMARY_{DateTime.UtcNow:yyyyMMddHHmmss}",
                 ReportDate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
-                SoftwareName = "BitRaser API",
+                SoftwareName = "DSecure API",
                 ProductVersion = "v1.0",
                 Status = "Completed",
                 ProcessMode = "Summary Export",
@@ -601,7 +601,7 @@ namespace BitRaserApiProject.Controllers
             {
                 ReportData = reportData,
                 ReportTitle = $"Audit Reports Summary ({reports.Count} reports)",
-                HeaderText = "BitRaser API - Audit Reports Export",
+                HeaderText = "DSecure API - Audit Reports Export",
                 TechnicianName = "System",
                 TechnicianDept = "API Service",
                 ValidatorName = "System",
@@ -618,7 +618,7 @@ namespace BitRaserApiProject.Controllers
             {
                 ReportId = $"SUMMARY_{DateTime.UtcNow:yyyyMMddHHmmss}",
                 ReportDate = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"),
-                SoftwareName = "BitRaser API",
+                SoftwareName = "DSecure API",
                 ProductVersion = "v1.0",
                 Status = "Completed",
                 ProcessMode = "Summary Export",
@@ -635,7 +635,7 @@ namespace BitRaserApiProject.Controllers
             {
                 ReportData = reportData,
                 ReportTitle = request.ReportTitle ?? $"Audit Reports Summary ({reports.Count} reports)",
-                HeaderText = request.HeaderText ?? "BitRaser API - Audit Reports Export",
+                HeaderText = request.HeaderText ?? "DSecure API - Audit Reports Export",
                 TechnicianName = request.TechnicianName ?? "System",
                 TechnicianDept = request.TechnicianDept ?? "API Service",
                 ValidatorName = request.ValidatorName ?? "System",
@@ -708,14 +708,14 @@ namespace BitRaserApiProject.Controllers
             reportData.ReportDate = report.report_datetime.ToString("yyyy-MM-dd HH:mm:ss");
             reportData.EraserMethod = report.erasure_method;
             reportData.Status = report.synced ? "Completed" : "Pending";
-            reportData.SoftwareName = "BitRaser API";
+            reportData.SoftwareName = "DSecure API";
             reportData.ProductVersion = "v1.0";
 
             var reportRequest = new ReportRequest
             {
                 ReportData = reportData,
                 ReportTitle = report.report_name,
-                HeaderText = options?.HeaderText ?? "BitRaser API - Audit Report",
+                HeaderText = options?.HeaderText ?? "DSecure API - Audit Report",
                 TechnicianName = options?.TechnicianName ?? "System",
                 TechnicianDept = options?.TechnicianDept ?? "API Service",
                 ValidatorName = options?.ValidatorName ?? "System",
@@ -752,14 +752,14 @@ namespace BitRaserApiProject.Controllers
             reportData.ReportDate = report.report_datetime.ToString("yyyy-MM-dd HH:mm:ss");
             reportData.EraserMethod = report.erasure_method;
             reportData.Status = report.synced ? "Completed" : "Pending";
-            reportData.SoftwareName = "BitRaser API";
+            reportData.SoftwareName = "DSecure API";
             reportData.ProductVersion = "v1.0";
 
             var reportRequest = new ReportRequest
             {
                 ReportData = reportData,
                 ReportTitle = request.ReportTitle ?? report.report_name,
-                HeaderText = request.HeaderText ?? "BitRaser API - Audit Report",
+                HeaderText = request.HeaderText ?? "DSecure API - Audit Report",
                 TechnicianName = request.TechnicianName ?? "System",
                 TechnicianDept = request.TechnicianDept ?? "API Service",
                 ValidatorName = request.ValidatorName ?? "System",

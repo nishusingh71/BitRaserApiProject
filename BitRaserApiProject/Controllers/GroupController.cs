@@ -359,7 +359,7 @@ if (group == null)
       SubuserEmail = s.subuser_email,
 Name = s.Name ?? s.subuser_email,
             Role = s.Role,
-       Status = s.Status,
+       Status = s.status,
             JoinedAt = s.CreatedAt
       })
              .ToListAsync();
@@ -404,7 +404,7 @@ Name = s.Name ?? s.subuser_email,
       SubuserEmail = s.subuser_email,
         Name = s.Name ?? s.subuser_email,
         Role = s.Role,
-  Status = s.Status,
+  Status = s.status,
        JoinedAt = s.CreatedAt
  })
      .FirstOrDefaultAsync();

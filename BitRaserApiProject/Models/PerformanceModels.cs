@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace BitRaserApiProject.Models
 {
     /// <summary>
-    /// Performance Metrics Models - Based on D-Secure Performance Dashboard UI
+    /// Performance Metrics Models - Based on BitRaser Performance Dashboard UI
     /// Screenshot 1: Performance page with Monthly Growth, Avg Duration, Uptime, and Throughput
     /// </summary>
 

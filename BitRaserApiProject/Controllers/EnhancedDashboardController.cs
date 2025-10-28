@@ -9,7 +9,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Enhanced Admin Dashboard Controller - Complete Dashboard Management
-    /// Based on D-Secure Admin Dashboard Design
+    /// Based on BitRaser Admin Dashboard Design
     /// </summary>
  [ApiController]
     [Route("api/[controller]")]

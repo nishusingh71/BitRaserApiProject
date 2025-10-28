@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace BitRaserApiProject.Models
 {
     /// <summary>
-    /// Report Generation Models - Based on D-Secure Generate Report UI
+    /// Report Generation Models - Based on BitRaser Generate Report UI
     /// Complete report configuration and generation
     /// </summary>
 

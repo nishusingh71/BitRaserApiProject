@@ -116,7 +116,7 @@ using var stream = new MemoryStream(imageBytes);
      col.Item()
                    .AlignCenter()
       .PaddingTop(5)
-       .Text(request.ReportTitle ?? "D-SecureErase Report")
+       .Text(request.ReportTitle ?? "BitRaserErase Report")
      .FontSize(16)
   .Bold();
       });

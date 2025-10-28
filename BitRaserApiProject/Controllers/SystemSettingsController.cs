@@ -10,7 +10,7 @@ namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// System Settings Controller - Complete system configuration management
-    /// Matches D-Secure System Settings UI (General, Security, Notifications, License)
+    /// Matches BitRaser System Settings UI (General, Security, Notifications, License)
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
