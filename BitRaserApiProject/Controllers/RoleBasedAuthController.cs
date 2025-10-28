@@ -195,7 +195,8 @@ namespace BitRaserApiProject.Controllers
                 if (isSubuser && subuserData != null)
                 {
                     response.UserName = subuserData.Name;
-                    response.UserRole = subuserData.Role ?? roles.FirstOrDefault();
+                    // Priority: RBAC roles > subuser.Role field
+                    response.UserRole = roles.FirstOrDefault() ?? subuserData.Role ?? "User";
                     response.Department = subuserData.Department;
                     response.Phone = subuserData.Phone;
                     response.Timezone = subuserData.timezone;
@@ -206,13 +207,14 @@ namespace BitRaserApiProject.Controllers
                     if (subuserData.GroupId.HasValue)
                     {
                         var group = await _context.Set<Group>().FindAsync(subuserData.GroupId.Value);
-                        response.UserGroup = group?.name;  // Changed from group_name to name
+                        response.UserGroup = group?.name;
                     }
                 }
                 else if (mainUser != null)
                 {
                     response.UserName = mainUser.user_name;
-                    response.UserRole = mainUser.user_role ?? roles.FirstOrDefault();
+                    // ✅ Priority: RBAC roles from UserRoles table > user.user_role field > default "User"
+                    response.UserRole = roles.FirstOrDefault() ?? mainUser.user_role ?? "User";
                     response.Department = mainUser.department;
                     response.Phone = mainUser.phone_number;
                     response.Timezone = mainUser.timezone;
@@ -225,7 +227,7 @@ namespace BitRaserApiProject.Controllers
                         if (int.TryParse(mainUser.user_group, out int groupId))
                         {
                             var group = await _context.Set<Group>().FindAsync(groupId);
-                            response.UserGroup = group?.name ?? mainUser.user_group;  // Changed from group_name to name
+                            response.UserGroup = group?.name ?? mainUser.user_group;
                         }
                         else
                         {

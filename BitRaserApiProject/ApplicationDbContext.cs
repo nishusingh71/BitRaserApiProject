@@ -257,25 +257,17 @@ namespace BitRaserApiProject
                 .HasMaxLength(20);
 
             modelBuilder.Entity<subuser>()
-                .Property(s => s.JobTitle)
-                .HasMaxLength(100);
-
-            modelBuilder.Entity<subuser>()
                 .Property(s => s.Department)
                 .HasMaxLength(100);
 
             modelBuilder.Entity<subuser>()
-                .Property(s => s.Role)
-                .HasMaxLength(50)
-                .IsRequired();
+            .Property(s => s.Role)
+         .HasMaxLength(50)
+         .IsRequired();
 
-            modelBuilder.Entity<subuser>()
-                .Property(s => s.AccessLevel)
-                .HasMaxLength(50);
-
-            modelBuilder.Entity<subuser>()
-                .Property(s => s.PermissionsJson)
-                .HasColumnType("json");
+          modelBuilder.Entity<subuser>()
+             .Property(s => s.PermissionsJson)
+         .HasColumnType("json");
 
             modelBuilder.Entity<subuser>()
                 .Property(s => s.MachineIdsJson)

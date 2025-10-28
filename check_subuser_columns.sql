@@ -1,0 +1,10 @@
+-- Check actual column names in subuser table
+SHOW COLUMNS FROM subuser;
+
+-- Check specifically for AccessLevel column
+SELECT COLUMN_NAME, DATA_TYPE, IS_NULLABLE, COLUMN_DEFAULT, COLUMN_COMMENT
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'subuser'
+  AND (COLUMN_NAME LIKE '%access%' OR COLUMN_NAME LIKE '%Access%')
+ORDER BY ORDINAL_POSITION;

@@ -18,10 +18,8 @@ namespace BitRaserApiProject.Models.DTOs
         public string Name { get; set; } = string.Empty;
         public string Email { get; set; } = string.Empty;
         public string? Phone { get; set; }
-        public string? JobTitle { get; set; }
         public string? Department { get; set; }
         public string Role { get; set; } = string.Empty;
-        public string AccessLevel { get; set; } = string.Empty;
         public int? AssignedMachines { get; set; }
         public int? MaxMachines { get; set; }
         public int? GroupId { get; set; } // Added
@@ -56,16 +54,10 @@ namespace BitRaserApiProject.Models.DTOs
         public string? Phone { get; set; } // Optional
         
         [MaxLength(100)]
-      public string? JobTitle { get; set; } // Optional
-        
-        [MaxLength(100)]
         public string? Department { get; set; } // Optional
      
    [MaxLength(50)]
         public string? Role { get; set; } // Optional - will default to "subuser"
-  
-        [MaxLength(50)]
-        public string? AccessLevel { get; set; } // Optional - will default to "limited"
   
         public int? MaxMachines { get; set; } // Optional - will default to 5
  public int? GroupId { get; set; } // Optional
@@ -87,36 +79,30 @@ namespace BitRaserApiProject.Models.DTOs
         
 [MaxLength(100)]
         public string? Name { get; set; }
-        
-        [MaxLength(20)]
-        public string? Phone { get; set; }
-        
-   [MaxLength(100)]
-        public string? JobTitle { get; set; }
-        
-        [MaxLength(100)]
+      
+     [MaxLength(20)]
+    public string? Phone { get; set; }
+     
+     [MaxLength(100)]
         public string? Department { get; set; }
-        
-        [MaxLength(50)]
+   
+   [MaxLength(50)]
         public string? Role { get; set; }
       
-        [MaxLength(50)]
-   public string? AccessLevel { get; set; }
-        
         public int? MaxMachines { get; set; }
  public int? GroupId { get; set; }
         
         [MaxLength(50)]
     public string? Status { get; set; }
         
-        public bool? CanCreateSubusers { get; set; }
-        public bool? CanViewReports { get; set; }
-        public bool? CanManageMachines { get; set; }
-        public bool? CanAssignLicenses { get; set; }
-        public bool? EmailNotifications { get; set; }
-        public bool? SystemAlerts { get; set; }
+      public bool? CanCreateSubusers { get; set; }
+   public bool? CanViewReports { get; set; }
+  public bool? CanManageMachines { get; set; }
+   public bool? CanAssignLicenses { get; set; }
+   public bool? EmailNotifications { get; set; }
+     public bool? SystemAlerts { get; set; }
   
-        [MaxLength(500)]
+   [MaxLength(500)]
   public string? Notes { get; set; }
     }
 
@@ -159,7 +145,6 @@ namespace BitRaserApiProject.Models.DTOs
         public int VerifiedSubusers { get; set; }
         public int UnverifiedSubusers { get; set; }
         public Dictionary<string, int> SubusersByRole { get; set; } = new();
-        public Dictionary<string, int> SubusersByAccessLevel { get; set; } = new();
         public Dictionary<string, int> SubusersByDepartment { get; set; } = new();
         public List<TopParentUserDto> TopParentUsersWithSubusers { get; set; } = new();
     }

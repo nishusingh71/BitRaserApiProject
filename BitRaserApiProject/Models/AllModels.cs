@@ -154,29 +154,23 @@ namespace BitRaserApiProject.Models
         public string user_email { get; set; } // ID of the parent user
     
  // Subuser Details (Enhanced fields from documentation)
-        [MaxLength(100)]
+  [MaxLength(100)]
  public string? subuser_username { get; set; } // Added: Username field
-        
+    
       [MaxLength(100)]
-        public string? Name { get; set; }
+   public string? Name { get; set; }
       
      [MaxLength(20)]
-        public string? Phone { get; set; }
-        
-   [MaxLength(100)]
-    public string? JobTitle { get; set; }
+      public string? Phone { get; set; }
  
    [MaxLength(100)]
 public string? Department { get; set; }
    
   // Role & Permissions
    [Required, MaxLength(50)]
-      public string Role { get; set; } = "subuser"; // subuser, team_member, limited_admin
-    
-[MaxLength(50)]
-        public string AccessLevel { get; set; } = "limited"; // full, limited, read_only
+  public string Role { get; set; } = "subuser"; // subuser, team_member, limited_admin
         
-        public string? PermissionsJson { get; set; } // JSON string for granular permissions 
+  public string? PermissionsJson { get; set; } // JSON string for granular permissions 
      
  // Machine & License Access
      public int? AssignedMachines { get; set; } = 0;
