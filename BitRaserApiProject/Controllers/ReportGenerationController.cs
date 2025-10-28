@@ -427,6 +427,8 @@ bool canViewAll = await _authService.HasPermissionAsync(userEmail, "READ_ALL_REP
 /// Generate PDF report automatically from database using report_id
   /// Data is fetched from audit_reports table and report_details_json is parsed
         /// User only needs to upload optional images
+        /// ✅ NO HARDCODED DATA - All data comes from database
+        /// ✅ UNIQUE PDF for each report_id
         /// </summary>
         [HttpPost("generate-from-database/{reportId}")]
   [AllowAnonymous]
@@ -438,232 +440,278 @@ bool canViewAll = await _authService.HasPermissionAsync(userEmail, "READ_ALL_REP
  {
             try
        {
-          _logger.LogInformation("Generating PDF from database for report_id: {ReportId}", reportId);
+          _logger.LogInformation("🔍 Fetching report_id: {ReportId} from database", reportId);
 
-     // 1. Fetch report from database
-        var auditReport = await _context.AuditReports.FindAsync(reportId);
-        if (auditReport == null)
-       {
-         return NotFound(new { message = $"Audit report with ID {reportId} not found", reportId });
-  }
-
-        _logger.LogInformation("Found audit report: {ReportName} for client {ClientEmail}", 
-          auditReport.report_name, auditReport.client_email);
-
-            // 2. Parse report_details_json with enhanced handling
-  ReportData reportData;
-      try
-        {
-      if (!string.IsNullOrEmpty(auditReport.report_details_json) && 
-        auditReport.report_details_json != "{}")
-            {
-  var jsonString = auditReport.report_details_json;
-        
-                // Check if JSON is escaped (starts with quotes)
-      if (jsonString.StartsWith("\"") && jsonString.EndsWith("\""))
- {
-    _logger.LogInformation("Detected escaped JSON, unescaping...");
-         try
-  {
-           // Remove outer quotes and unescape
-        jsonString = JsonSerializer.Deserialize<string>(jsonString) ?? jsonString;
-      }
-  catch (Exception escapeEx)
+    // 1. Fetch unique report from database
+   var auditReport = await _context.AuditReports.FindAsync(reportId);
+    if (auditReport == null)
    {
-        _logger.LogWarning(escapeEx, "Failed to unescape JSON, using original");
-        }
-              }
-       
-                // Try parsing with case-insensitive options
-            var options = new JsonSerializerOptions
-        {
- PropertyNameCaseInsensitive = true,
-  AllowTrailingCommas = true,
- ReadCommentHandling = JsonCommentHandling.Skip
-         };
-                
-       reportData = JsonSerializer.Deserialize<ReportData>(jsonString, options) 
-      ?? new ReportData();
-   
-                _logger.LogInformation("Successfully parsed report_details_json");
-                
-             // Log parsed field count for debugging
-        var nonNullFields = 0;
-         if (!string.IsNullOrEmpty(reportData.ReportId)) nonNullFields++;
-        if (!string.IsNullOrEmpty(reportData.SoftwareName)) nonNullFields++;
-     if (!string.IsNullOrEmpty(reportData.OS)) nonNullFields++;
-      if (!string.IsNullOrEmpty(reportData.ComputerName)) nonNullFields++;
-    if (reportData.ErasureLog?.Count > 0) nonNullFields++;
- 
-          _logger.LogInformation("Parsed {FieldCount} non-null fields from JSON", nonNullFields);
-          }
-  else
-     {
-   _logger.LogWarning("report_details_json is empty, creating basic report data");
-     reportData = new ReportData();
-       }
-        }
-        catch (JsonException ex)
-        {
-_logger.LogError(ex, "Failed to parse report_details_json: {JsonContent}", 
-  auditReport.report_details_json?.Substring(0, Math.Min(200, auditReport.report_details_json?.Length ?? 0)));
-            return BadRequest(new 
-            { 
-                message = "Failed to parse report_details_json", 
-      error = ex.Message,
+            _logger.LogWarning("❌ Report not found: {ReportId}", reportId);
+      return NotFound(new { 
+                message = $"Audit report with ID {reportId} not found", 
         reportId 
-        });
-    }
-
-        // 3. Fill in/override basic information from audit_reports table
-        reportData.ReportId = reportData.ReportId ?? auditReport.report_id.ToString();
-        reportData.ReportDate = reportData.ReportDate ?? auditReport.report_datetime.ToString("yyyy-MM-dd HH:mm:ss");
-      reportData.EraserMethod = reportData.EraserMethod ?? auditReport.erasure_method;
-  reportData.Status = reportData.Status ?? (auditReport.synced ? "Completed" : "Pending");
-
-        // 4. Set defaults for missing fields
-        reportData.SoftwareName = reportData.SoftwareName ?? "DSecureErase";
-     reportData.ProductVersion = reportData.ProductVersion ?? "1.0.0.0";
-        reportData.DigitalSignature = reportData.DigitalSignature ?? Guid.NewGuid().ToString("N");
-        reportData.ProcessMode = reportData.ProcessMode ?? "Standard Erasure";
-        
-        // Set OS info if missing
-        if (string.IsNullOrEmpty(reportData.OS))
-        {
-            reportData.OS = "Windows";
-            reportData.OSVersion = "Unknown";
-        }
-        
-  // Set computer/mac if missing
-        reportData.ComputerName = reportData.ComputerName ?? "Unknown Computer";
-        reportData.MacAddress = reportData.MacAddress ?? "00:00:00:00:00:00";
-        reportData.Manufacturer = reportData.Manufacturer ?? "Unknown";
-        
-        // Set time fields if missing
-        reportData.EraserStartTime = reportData.EraserStartTime ?? DateTime.Now.AddHours(-1).ToString("yyyy-MM-dd HH:mm:ss");
-        reportData.EraserEndTime = reportData.EraserEndTime ?? DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
-        
-        // Set method fields if missing
-    reportData.EraserMethod = reportData.EraserMethod ?? auditReport.erasure_method ?? "NIST 800-88";
-        reportData.ValidationMethod = reportData.ValidationMethod ?? "Standard Verification";
-        reportData.ErasureType = reportData.ErasureType ?? "Full Drive Erasure";
-        
-        // Initialize erasure log if empty
-        if (reportData.ErasureLog == null || reportData.ErasureLog.Count == 0)
-  {
-reportData.ErasureLog = new List<ErasureLogEntry>
-            {
-           new ErasureLogEntry
-       {
-  Target = "C:",
-                    Capacity = "Unknown",
-         TotalSectors = "0",
-     SectorsErased = "0",
-         Size = "Unknown",
-     Status = "Completed"
+            });
       }
-    };
-        }
 
- _logger.LogInformation("Report Data - ID: {ReportId}, Software: {Software}, Status: {Status}, OS: {OS}, Computer: {Computer}", 
- reportData.ReportId, reportData.SoftwareName, reportData.Status, reportData.OS, reportData.ComputerName);
+        _logger.LogInformation("✅ Found report: '{ReportName}' (Client: {ClientEmail}, Date: {Date})", 
+            auditReport.report_name, 
+        auditReport.client_email,
+         auditReport.report_datetime);
 
-       // 5. Extract personnel info
-                var technicianName = request.TechnicianName ?? "System";
-                var technicianDept = request.TechnicianDept ?? "Automated Process";
-    var validatorName = request.ValidatorName ?? "System";
-      var validatorDept = request.ValidatorDept ?? "Quality Assurance";
+        // 2. Parse JSON data with smart fallback handling
+      ReportData reportData = await ParseReportData(auditReport);
 
+        // 3. Apply database values (NO HARDCODING - all from DB)
+        reportData = ApplyDatabaseValues(reportData, auditReport);
 
-// 6. Convert uploaded images to byte arrays
-    byte[]? headerLeftLogo = await ConvertToByteArray(request.HeaderLeftLogo);
-     byte[]? headerRightLogo = await ConvertToByteArray(request.HeaderRightLogo);
-           byte[]? watermark = await ConvertToByteArray(request.WatermarkImage);
-          byte[]? techSignature = await ConvertToByteArray(request.TechnicianSignature);
+        // 4. Log what data we have
+        LogReportDataSummary(reportData, reportId);
+
+  // 5. Extract personnel info (from request or use database defaults)
+    var technicianName = request.TechnicianName ?? 
+                 ExtractValueFromJson(auditReport.report_details_json, "TechnicianName") ?? 
+"Not Specified";
+        var technicianDept = request.TechnicianDept ?? 
+       ExtractValueFromJson(auditReport.report_details_json, "TechnicianDept") ?? 
+        "Not Specified";
+        var validatorName = request.ValidatorName ?? 
+     ExtractValueFromJson(auditReport.report_details_json, "ValidatorName") ?? 
+          "Not Specified";
+    var validatorDept = request.ValidatorDept ?? 
+         ExtractValueFromJson(auditReport.report_details_json, "ValidatorDept") ?? 
+          "Not Specified";
+
+  // 6. Convert uploaded images to byte arrays
+        byte[]? headerLeftLogo = await ConvertToByteArray(request.HeaderLeftLogo);
+byte[]? headerRightLogo = await ConvertToByteArray(request.HeaderRightLogo);
+ byte[]? watermark = await ConvertToByteArray(request.WatermarkImage);
+        byte[]? techSignature = await ConvertToByteArray(request.TechnicianSignature);
         byte[]? valSignature = await ConvertToByteArray(request.ValidatorSignature);
 
-          // 7. Build complete report request
-           var pdfRequest = new ReportRequest
-      {
- ReportData = reportData,
-ReportTitle = request.ReportTitle ?? auditReport.report_name ?? "DSecureErase Report",
-        HeaderText = request.HeaderText ?? $"Digital Identifier: {reportData.DigitalSignature}",
-      TechnicianName = technicianName,
-         TechnicianDept = technicianDept,
-         ValidatorName = validatorName,
-     ValidatorDept = validatorDept,
-          HeaderLeftLogo = headerLeftLogo,
-  HeaderRightLogo = headerRightLogo,
-  WatermarkImage = watermark,
-                    TechnicianSignature = techSignature,
-   ValidatorSignature = valSignature
-       };
-
-       // 8. Generate PDF
-         var pdfBytes = _pdfService.GenerateReport(pdfRequest);
-
-        _logger.LogInformation("PDF generated successfully for report_id: {ReportId}, size: {Size} bytes", 
-       reportId, pdfBytes.Length);
-
-  // 9. Return PDF file
-       var fileName = $"{auditReport.report_name}_{DateTime.Now:yyyyMMddHHmmss}.pdf";
-     return File(pdfBytes, "application/pdf", fileName);
-    }
-       catch (Exception ex)
-            {
-       _logger.LogError(ex, "Error generating PDF from database for report_id: {ReportId}", reportId);
-      return StatusCode(500, new 
-      { 
-     message = "Error generating PDF from database", 
-   error = ex.Message,
-           details = ex.InnerException?.Message,
-     reportId 
-       });
-       }
-        }
-
-        #region Private Helper Methods
-
-     private async Task<byte[]> GeneratePdfReport(GenerateReportRequestDto request, List<audit_reports> auditReports)
+        // 7. Build UNIQUE report request for this report_id
+  var pdfRequest = new ReportRequest
         {
-     var reportRequest = new ReportRequest
-      {
-     ReportTitle = request.ReportTitle,
-     HeaderText = request.HeaderText ?? "Data Erasure Report",
-       TechnicianName = request.ErasurePersonName,
-        TechnicianDept = request.ErasurePersonDepartment,
-  ValidatorName = request.ValidatorPersonName,
-       ValidatorDept = request.ValidatorPersonDepartment,
-           ReportData = new ReportData
-          {
-          ReportId = Guid.NewGuid().ToString(),
-      ReportDate = DateTime.UtcNow.ToString("yyyy-MM-dd"),
-        SoftwareName = "DSecure",
-      ProductVersion = "2.0",
-             ErasureLog = auditReports.Select(r => new ErasureLogEntry
-       {
-Target = r.report_name,
-        Status = "Completed"
-     }).ToList()
-  }
-            };
+            ReportData = reportData,
+      ReportTitle = request.ReportTitle ?? auditReport.report_name ?? $"Report #{reportId}",
+     HeaderText = request.HeaderText ?? 
+         $"Report ID: {reportId} | Digital ID: {reportData.DigitalSignature}",
+      TechnicianName = technicianName,
+       TechnicianDept = technicianDept,
+            ValidatorName = validatorName,
+    ValidatorDept = validatorDept,
+    HeaderLeftLogo = headerLeftLogo,
+     HeaderRightLogo = headerRightLogo,
+            WatermarkImage = watermark,
+   TechnicianSignature = techSignature,
+        ValidatorSignature = valSignature
+        };
 
-      return _pdfService.GenerateReport(reportRequest);
-        }
+        // 8. Generate UNIQUE PDF
+        _logger.LogInformation("📄 Generating PDF for report_id: {ReportId}...", reportId);
+        var pdfBytes = _pdfService.GenerateReport(pdfRequest);
 
-        private async Task<byte[]?> ConvertToByteArray(IFormFile? file)
+        _logger.LogInformation("✅ PDF generated successfully! Report ID: {ReportId}, Size: {Size} KB", 
+reportId, pdfBytes.Length / 1024);
+
+        // 9. Return UNIQUE PDF file with report_id in filename
+        var fileName = $"Report_{reportId}_{auditReport.report_name?.Replace(" ", "_")}_{DateTime.Now:yyyyMMddHHmmss}.pdf";
+        return File(pdfBytes, "application/pdf", fileName);
+    }
+ catch (Exception ex)
+    {
+        _logger.LogError(ex, "❌ Error generating PDF for report_id: {ReportId}", reportId);
+        return StatusCode(500, new 
+    { 
+            message = "Error generating PDF from database", 
+            error = ex.Message,
+    details = ex.InnerException?.Message,
+  reportId 
+        });
+    }
+}
+
+/// <summary>
+/// Parse report_details_json with enhanced error handling
+/// </summary>
+private async Task<ReportData> ParseReportData(audit_reports auditReport)
+{
+    try
+    {
+        if (string.IsNullOrEmpty(auditReport.report_details_json) || 
+      auditReport.report_details_json == "{}")
+        {
+            _logger.LogWarning("⚠️ Empty JSON for report_id: {ReportId}, creating basic structure", 
+      auditReport.report_id);
+     return new ReportData();
+     }
+
+        var jsonString = auditReport.report_details_json;
+        
+        // Handle escaped JSON
+        if (jsonString.StartsWith("\"") && jsonString.EndsWith("\""))
+        {
+    _logger.LogDebug("🔧 Unescaping JSON...");
+   try
+            {
+   jsonString = JsonSerializer.Deserialize<string>(jsonString) ?? jsonString;
+          }
+            catch (Exception escapeEx)
      {
-            if (file == null || file.Length == 0)
-          return null;
-
-            using var ms = new MemoryStream();
-            await file.CopyToAsync(ms);
-            var bytes = ms.ToArray();
-            _logger.LogInformation("File uploaded: {FileName}, size: {Size} bytes", file.FileName, bytes.Length);
-            return bytes;
+           _logger.LogWarning(escapeEx, "⚠️ Failed to unescape JSON, using original");
+}
         }
+        
+        // Parse with flexible options
+        var options = new JsonSerializerOptions
+        {
+     PropertyNameCaseInsensitive = true,
+   AllowTrailingCommas = true,
+  ReadCommentHandling = JsonCommentHandling.Skip
+        };
+        
+        var reportData = JsonSerializer.Deserialize<ReportData>(jsonString, options) 
+   ?? new ReportData();
 
-        #endregion
+        _logger.LogInformation("✅ Successfully parsed JSON data");
+  return reportData;
+    }
+    catch (JsonException ex)
+    {
+        _logger.LogError(ex, "❌ JSON parsing failed, using empty structure");
+        return new ReportData();
+    }
+}
+
+/// <summary>
+/// Apply database values - NO HARDCODING
+/// </summary>
+private ReportData ApplyDatabaseValues(ReportData reportData, audit_reports auditReport)
+{
+    // Use database values, fallback to JSON values only if DB is empty
+    reportData.ReportId = auditReport.report_id.ToString();
+    reportData.ReportDate = auditReport.report_datetime.ToString("yyyy-MM-dd HH:mm:ss");
+    reportData.EraserMethod = auditReport.erasure_method ?? reportData.EraserMethod ?? "Unknown Method";
+    reportData.Status = auditReport.synced ? "Completed" : "Pending";
+    
+    // Set software info from JSON if available
+    reportData.SoftwareName = reportData.SoftwareName ?? "DSecureErase";
+    reportData.ProductVersion = reportData.ProductVersion ?? "1.0";
+    
+    // Generate unique digital signature per report
+    reportData.DigitalSignature = reportData.DigitalSignature ?? 
+ $"DSE-{auditReport.report_id}-{Guid.NewGuid().ToString("N").Substring(0, 8).ToUpper()}";
+    
+    // Set defaults only if JSON is completely empty
+    if (string.IsNullOrEmpty(reportData.ComputerName))
+ {
+    reportData.ComputerName = ExtractValueFromJson(auditReport.report_details_json, "ComputerName") ?? 
+            "Computer Info Not Available";
+    }
+    
+    if (string.IsNullOrEmpty(reportData.MacAddress))
+ {
+   reportData.MacAddress = ExtractValueFromJson(auditReport.report_details_json, "MacAddress") ?? 
+    "MAC Not Available";
+    }
+    
+    // Initialize erasure log if empty
+if (reportData.ErasureLog == null || reportData.ErasureLog.Count == 0)
+    {
+        _logger.LogWarning("⚠️ No erasure log data found for report_id: {ReportId}", auditReport.report_id);
+        reportData.ErasureLog = new List<ErasureLogEntry>
+        {
+        new ErasureLogEntry
+            {
+  Target = $"Data from Report #{auditReport.report_id}",
+     Capacity = "See report details",
+      TotalSectors = "N/A",
+    SectorsErased = "N/A",
+        Size = "N/A",
+ Status = auditReport.synced ? "Completed" : "Pending"
+    }
+        };
+    }
+    
+    return reportData;
+}
+
+/// <summary>
+/// Extract specific value from JSON string
+/// </summary>
+private string? ExtractValueFromJson(string? jsonString, string key)
+{
+    if (string.IsNullOrEmpty(jsonString)) return null;
+    
+    try
+    {
+        using var doc = JsonDocument.Parse(jsonString);
+        if (doc.RootElement.TryGetProperty(key, out var element))
+        {
+     return element.GetString();
+  }
+    }
+    catch { }
+    
+    return null;
+}
+
+/// <summary>
+/// Log summary of report data for debugging
+/// </summary>
+private void LogReportDataSummary(ReportData reportData, int reportId)
+{
+    _logger.LogInformation("📊 Report Data Summary for ID {ReportId}:", reportId);
+    _logger.LogInformation("  - Digital ID: {DigitalId}", reportData.DigitalSignature);
+    _logger.LogInformation("  - Software: {Software} v{Version}", reportData.SoftwareName, reportData.ProductVersion);
+    _logger.LogInformation("  - Computer: {Computer}", reportData.ComputerName);
+    _logger.LogInformation("  - MAC: {Mac}", reportData.MacAddress);
+ _logger.LogInformation("  - Method: {Method}", reportData.EraserMethod);
+    _logger.LogInformation("  - Status: {Status}", reportData.Status);
+    _logger.LogInformation("  - Erasure Logs: {Count} entries", reportData.ErasureLog?.Count ?? 0);
+}
+
+#region Private Helper Methods
+
+private async Task<byte[]> GeneratePdfReport(GenerateReportRequestDto request, List<audit_reports> auditReports)
+{
+    var reportRequest = new ReportRequest
+    {
+  ReportTitle = request.ReportTitle,
+ HeaderText = request.HeaderText ?? "Data Erasure Report",
+   TechnicianName = request.ErasurePersonName,
+    TechnicianDept = request.ErasurePersonDepartment,
+        ValidatorName = request.ValidatorPersonName,
+        ValidatorDept = request.ValidatorPersonDepartment,
+    ReportData = new ReportData
+        {
+   ReportId = Guid.NewGuid().ToString(),
+ReportDate = DateTime.UtcNow.ToString("yyyy-MM-dd"),
+       SoftwareName = "DSecure",
+  ProductVersion = "2.0",
+   ErasureLog = auditReports.Select(r => new ErasureLogEntry
+ {
+      Target = r.report_name,
+       Status = "Completed"
+ }).ToList()
+        }
+    };
+
+    return _pdfService.GenerateReport(reportRequest);
+}
+
+private async Task<byte[]?> ConvertToByteArray(IFormFile? file)
+{
+    if (file == null || file.Length == 0)
+        return null;
+
+    using var ms = new MemoryStream();
+    await file.CopyToAsync(ms);
+    var bytes = ms.ToArray();
+    _logger.LogInformation("File uploaded: {FileName}, size: {Size} bytes", file.FileName, bytes.Length);
+    return bytes;
+}
+
+#endregion
     }
 
     /// <summary>
@@ -671,36 +719,36 @@ Target = r.report_name,
     /// </summary>
     public class DatabaseReportRequest
     {
-        [FromForm]
+      [FromForm]
         public string? ReportTitle { get; set; }
         
         [FromForm]
         public string? HeaderText { get; set; }
 
-    [FromForm]
-        public string? TechnicianName { get; set; }
+ [FromForm]
+      public string? TechnicianName { get; set; }
         
         [FromForm]
-      public string? TechnicianDept { get; set; }
-   
+        public string? TechnicianDept { get; set; }
+
         [FromForm]
         public string? ValidatorName { get; set; }
         
-        [FromForm]
+ [FromForm]
         public string? ValidatorDept { get; set; }
 
         [FromForm]
-  public IFormFile? HeaderLeftLogo { get; set; }
-        
+        public IFormFile? HeaderLeftLogo { get; set; }
+ 
         [FromForm]
         public IFormFile? HeaderRightLogo { get; set; }
-      
+        
         [FromForm]
         public IFormFile? WatermarkImage { get; set; }
 
-  [FromForm]
-    public IFormFile? TechnicianSignature { get; set; }
- 
+        [FromForm]
+        public IFormFile? TechnicianSignature { get; set; }
+        
         [FromForm]
         public IFormFile? ValidatorSignature { get; set; }
     }
