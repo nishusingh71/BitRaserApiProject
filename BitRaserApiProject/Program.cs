@@ -61,7 +61,7 @@ var jwtKey = Environment.GetEnvironmentVariable("Jwt__Key")
 
 var jwtIssuer = Environment.GetEnvironmentVariable("Jwt__Issuer")
     ?? builder.Configuration["Jwt:Issuer"]
- ?? "BitRaserAPI";
+ ?? "DSecureAPI";
 
 var jwtAudience = Environment.GetEnvironmentVariable("Jwt__Audience")
     ?? builder.Configuration["Jwt:Audience"]
@@ -315,18 +315,18 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo
     {
-        Title = "DSecure Api",
-        Version = "2.0",
+        Title = "DSecure API Project",
+ Version = "v2.0",
      Description = "Enhanced API for managing devices, users, licenses, and PDF reports with advanced Role-Based Access Control",
-Contact = new OpenApiContact
+        Contact = new OpenApiContact
         {
  Name = "Dhruv Rai",
-     Email = "Dhruv.rai@stellarinfo.com",
+      Email = "Dhruv.rai@stellarinfo.com",
         },
-      License = new OpenApiLicense
-  {
+        License = new OpenApiLicense
+        {
             Name = "MIT License",
- Url = new Uri("https://opensource.org/licenses/MIT")
+    Url = new Uri("https://opensource.org/licenses/MIT")
         }
     });
 
@@ -334,54 +334,54 @@ Contact = new OpenApiContact
     try
     {
         var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
-        var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+ var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
         if (File.Exists(xmlPath))
         {
             c.IncludeXmlComments(xmlPath);
-        }
- }
+   }
+    }
     catch (Exception ex)
     {
-        Console.WriteLine($"⚠️ Could not load XML documentation: {ex.Message}");
+  Console.WriteLine($"⚠️ Could not load XML documentation: {ex.Message}");
     }
 
     // Enhanced schema configuration
     c.CustomSchemaIds(type =>
     {
         if (type.FullName != null)
-{
-return type.FullName.Replace("+", ".");
+      {
+            return type.FullName.Replace("+", ".");
         }
         return type.Name;
     });
 
- c.SupportNonNullableReferenceTypes();
+    c.SupportNonNullableReferenceTypes();
     c.OperationFilter<SwaggerDefaultValues>();
 
     // Enhanced security definitions
- c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Description = "JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\"",
-  Name = "Authorization",
+        Name = "Authorization",
     In = ParameterLocation.Header,
- Type = SecuritySchemeType.ApiKey,
+   Type = SecuritySchemeType.ApiKey,
         Scheme = "Bearer",
         BearerFormat = "JWT"
     });
 
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
-        {
-            new OpenApiSecurityScheme
-   {
-            Reference = new OpenApiReference
-              {
-        Type = ReferenceType.SecurityScheme,
+     {
+       new OpenApiSecurityScheme
+         {
+    Reference = new OpenApiReference
+     {
+            Type = ReferenceType.SecurityScheme,
            Id = "Bearer"
-     }
+    }
             },
-          Array.Empty<string>()
-        }
+            Array.Empty<string>()
+ }
     });
 
     // Add examples for better API documentation
@@ -408,7 +408,7 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
     {
         options.SwaggerEndpoint("/swagger/v1/swagger.json", "DSecure API Project v2.0");
         options.RoutePrefix = "swagger";
-        options.DocumentTitle = "DSecure API - Enhanced Documentation";
+        options.DocumentTitle = "DSecure API Project - Enhanced Documentation";
         options.DefaultModelsExpandDepth(-1);
         options.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
         options.EnableTryItOutByDefault();
@@ -535,7 +535,7 @@ app.MapControllers();
 
 // Startup completion message with enhanced information
 var appLogger = app.Services.GetRequiredService<ILogger<Program>>();
-appLogger.LogInformation("🎉 DSecure API Project (Enhanced) started successfully!");
+appLogger.LogInformation("🎉 DSecure API Project (Enhanced) v2.0 started successfully!");
 appLogger.LogInformation("📖 Swagger UI available at: http://localhost:{Port}/swagger", port);
 appLogger.LogInformation("🔗 Base URL: http://localhost:{Port}", port);
 appLogger.LogInformation("🌍 Environment: {Environment}", app.Environment.EnvironmentName);

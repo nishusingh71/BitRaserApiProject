@@ -54,6 +54,7 @@ namespace BitRaserApiProject.Controllers
             public string? UserRole { get; set; }  // Primary role
             public string? UserGroup { get; set; }
             public string? Department { get; set; }
+            public string? Timezone { get; set; }  // User's timezone preference
             public DateTime? LoginTime { get; set; }
             public DateTime? LastLogoutTime { get; set; }
             public string? Phone { get; set; }
@@ -197,6 +198,7 @@ namespace BitRaserApiProject.Controllers
                     response.UserRole = subuserData.Role ?? roles.FirstOrDefault();
                     response.Department = subuserData.Department;
                     response.Phone = subuserData.Phone;
+                    response.Timezone = subuserData.timezone;
                     response.ParentUserEmail = subuserData.user_email;
                     response.UserId = subuserData.subuser_id;
                 
@@ -213,6 +215,7 @@ namespace BitRaserApiProject.Controllers
                     response.UserRole = mainUser.user_role ?? roles.FirstOrDefault();
                     response.Department = mainUser.department;
                     response.Phone = mainUser.phone_number;
+                    response.Timezone = mainUser.timezone;
                     response.UserId = mainUser.user_id;
                     
                     // Get group name if user_group exists
