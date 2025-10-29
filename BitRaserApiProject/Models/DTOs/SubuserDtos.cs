@@ -74,64 +74,41 @@ namespace BitRaserApiProject.Models.DTOs
         public string? Notes { get; set; } // Optional
     }
 
-    /// <summary>
-    /// Audit report update request model
-    /// </summary>
     public class UpdateSubuserDto
     {
         [MaxLength(100)]
-    public string? SubuserUsername { get; set; }
-     
-        [MaxLength(100)]
-        public string? Name { get; set; }
+      public string? SubuserUsername { get; set; } // Added
         
-        [MaxLength(20)]
-        public string? Phone { get; set; }
+[MaxLength(100)]
+        public string? Name { get; set; }
+      
+     [MaxLength(20)]
+    public string? Phone { get; set; }
      
-        [MaxLength(100)]
+     [MaxLength(100)]
         public string? Department { get; set; }
    
-        [MaxLength(50)]
-  public string? Role { get; set; }
-        
-        public string? PermissionsJson { get; set; }
-        
-    public int? AssignedMachines { get; set; }
+   [MaxLength(50)]
+        public string? Role { get; set; }
       
-      public int? MaxMachines { get; set; }
-        
-        public string? MachineIdsJson { get; set; }
- 
-        public string? LicenseIdsJson { get; set; }
-      
-     public int? GroupId { get; set; }
-        
-      [MaxLength(100)]
-        public string? SubuserGroup { get; set; }
-        
-     public int? LicenseAllocation { get; set; }
-  
-        [MaxLength(50)]
-        public string? Status { get; set; }
+        public int? MaxMachines { get; set; }
+ public int? GroupId { get; set; }
+    public int? LicenseAllocation { get; set; } // Added: Update license allocation
         
         [MaxLength(100)]
-        public string? Timezone { get; set; }
+  public string? SubuserGroup { get; set; } // Added: Update subuser_group
+     
+        [MaxLength(50)]
+    public string? Status { get; set; }
         
-        public bool? IsEmailVerified { get; set; }
-        
-   public bool? CanCreateSubusers { get; set; }
-        
-        public bool? CanViewReports { get; set; }
-   
-        public bool? CanManageMachines { get; set; }
-        
-        public bool? CanAssignLicenses { get; set; }
+      public bool? CanCreateSubusers { get; set; }
+   public bool? CanViewReports { get; set; }
+  public bool? CanManageMachines { get; set; }
+   public bool? CanAssignLicenses { get; set; }
+   public bool? EmailNotifications { get; set; }
+     public bool? SystemAlerts { get; set; }
   
-        public bool? EmailNotifications { get; set; }
-        
-        public bool? SystemAlerts { get; set; }
-  
- [MaxLength(500)]
+   [MaxLength(500)]
   public string? Notes { get; set; }
     }
 
