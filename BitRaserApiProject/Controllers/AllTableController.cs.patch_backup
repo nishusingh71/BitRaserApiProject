@@ -1,0 +1,609 @@
+using System.IdentityModel.Tokens.Jwt;
+using System.Security.Claims;
+using System.Text;
+using BitRaserApiProject.Models;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using BCrypt.Net;
+using BitRaserApiProject.Services;
+
+namespace BitRaserApiProject.Controllers
+{
+    /// <summary>
+    /// Sessions management controller
+    /// </summary>
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class SessionsController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+        
+        public SessionsController(ApplicationDbContext context) 
+        { 
+            _context = context; 
+        }
+
+        /// <summary>
+        /// Get all sessions
+        /// </summary>
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<Sessions>>> GetSessions()
+        {
+            return await _context.Sessions.ToListAsync();
+        }
+
+        /// <summary>
+        /// Get session by ID
+        /// </summary>
+        [HttpGet("{id}")]
+        public async Task<ActionResult<Sessions>> GetSession(int id)
+        {
+            var session = await _context.Sessions.FindAsync(id);
+            return session == null ? NotFound() : Ok(session);
+        }
+
+        /// <summary>
+        /// Get sessions by user email
+        /// </summary>
+        [HttpGet("by-email/{email}")]
+        public async Task<ActionResult<IEnumerable<Sessions>>> GetSessionsByEmail(string email)
+        {
+            var sessions = await _context.Sessions.Where(s => s.user_email == email).ToListAsync();
+            return sessions.Any() ? Ok(sessions) : NotFound();
+        }
+
+        /// <summary>
+        /// Create a new session
+        /// </summary>
+        [HttpPost]
+        public async Task<ActionResult<Sessions>> CreateSession([FromBody] Sessions session)
+        {
+            _context.Sessions.Add(session);
+            await _context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetSession), new { id = session.session_id }, session);
+        }
+
+        /// <summary>
+        /// Update session by ID
+        /// </summary>
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateSession(int id, [FromBody] Sessions updatedSession)
+        {
+            if (id != updatedSession.session_id) return BadRequest();
+            var session = await _context.Sessions.FindAsync(id);
+            if (session == null) return NotFound();
+
+            session.logout_time = updatedSession.logout_time;
+            session.session_status = updatedSession.session_status;
+            session.ip_address = updatedSession.ip_address;
+            session.device_info = updatedSession.device_info;
+
+            _context.Entry(session).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Delete session by ID
+        /// </summary>
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteSession(int id)
+        {
+            var session = await _context.Sessions.FindAsync(id);
+            if (session == null) return NotFound();
+            _context.Sessions.Remove(session);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+    }
+
+    /// <summary>
+    /// System logs management controller
+    /// </summary>
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class LogsController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+        
+        public LogsController(ApplicationDbContext context) 
+        { 
+            _context = context; 
+        }
+
+        /// <summary>
+        /// Get all logs
+        /// </summary>
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<logs>>> GetLogs()
+        {
+            return await _context.logs.ToListAsync();
+        }
+
+        /// <summary>
+        /// Get log by ID
+        /// </summary>
+        [HttpGet("{id}")]
+        public async Task<ActionResult<logs>> GetLog(int id)
+        {
+            var log = await _context.logs.FindAsync(id);
+            return log == null ? NotFound() : Ok(log);
+        }
+
+        /// <summary>
+        /// Get logs by user email
+        /// </summary>
+        [HttpGet("by-email/{email}")]
+        public async Task<ActionResult<IEnumerable<logs>>> GetLogsByEmail(string email)
+        {
+            var logsList = await _context.logs.Where(l => l.user_email == email).ToListAsync();
+            return logsList.Any() ? Ok(logsList) : NotFound();
+        }
+
+        /// <summary>
+        /// Create a new log entry
+        /// </summary>
+        [HttpPost]
+        public async Task<ActionResult<logs>> CreateLog([FromBody] logs log)
+        {
+            _context.logs.Add(log);
+            await _context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetLog), new { id = log.log_id }, log);
+        }
+
+        /// <summary>
+        /// Update log by ID
+        /// </summary>
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateLog(int id, [FromBody] logs updatedLog)
+        {
+            if (id != updatedLog.log_id) return BadRequest();
+            var log = await _context.logs.FindAsync(id);
+            if (log == null) return NotFound();
+
+            log.log_level = updatedLog.log_level;
+            log.log_message = updatedLog.log_message;
+            log.log_details_json = updatedLog.log_details_json;
+
+            _context.Entry(log).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Delete log by ID
+        /// </summary>
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteLog(int id)
+        {
+            var log = await _context.logs.FindAsync(id);
+            if (log == null) return NotFound();
+            _context.logs.Remove(log);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+    }
+
+    /// <summary>
+    /// Subuser management controller
+    /// </summary>
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class SubuserController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+        
+        public SubuserController(ApplicationDbContext context) 
+        { 
+            _context = context; 
+        }
+
+        /// <summary>
+        /// Get all subusers
+        /// </summary>
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<subuser>>> GetSubusers()
+        {
+            return await _context.subuser.ToListAsync();
+        }
+
+        /// <summary>
+        /// Get subuser by ID
+        /// </summary>
+        [HttpGet("{id}")]
+        public async Task<ActionResult<subuser>> GetSubuser(int id)
+        {
+            var sub = await _context.subuser.FindAsync(id);
+            return sub == null ? NotFound() : Ok(sub);
+        }
+
+        /// <summary>
+        /// Get subusers by parent user email
+        /// </summary>
+        [HttpGet("by-superuser/{parentUserEmail}")]
+        public async Task<ActionResult<IEnumerable<subuser>>> GetSubusersBySuperuser(string parentUserEmail)
+        {
+            var subusers = await _context.subuser.Where(s => s.user_email == parentUserEmail).ToListAsync();
+            return subusers.Any() ? Ok(subusers) : NotFound();
+        }
+
+        /// <summary>
+        /// Create a new subuser
+        /// </summary>
+        [HttpPost]
+        public async Task<ActionResult<subuser>> CreateSubuser([FromBody] subuser sub)
+        {
+            // Check for duplicate subuser email under this superuser
+            if (await _context.subuser.AnyAsync(s => s.user_email == sub.user_email && s.subuser_email == sub.subuser_email))
+                return Conflict("Subuser email already exists for this superuser.");
+
+            _context.subuser.Add(sub);
+            await _context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetSubuser), new { id = sub.subuser_id }, sub);
+        }
+
+        /// <summary>
+        /// Update subuser by ID
+        /// </summary>
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateSubuser(int id, [FromBody] subuser updatedSub)
+        {
+            if (id != updatedSub.subuser_id) return BadRequest();
+            var sub = await _context.subuser.FindAsync(id);
+
+            if (sub == null) return NotFound();
+
+            sub.subuser_email = updatedSub.subuser_email;
+            sub.subuser_password = updatedSub.subuser_password;
+
+            _context.Entry(sub).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Delete subuser by ID
+        /// </summary>
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteSubuser(int id)
+        {
+            var sub = await _context.subuser.FindAsync(id);
+            if (sub == null) return NotFound();
+            _context.subuser.Remove(sub);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        /// <summary>
+ /// PATCH: Partial update subuser by email
+    /// Updates only the fields provided in the request
+        /// </summary>
+        [HttpPatch("by-email/{email}")]
+  public async Task<IActionResult> PatchSubuserByEmail(string email, [FromBody] SubuserPatchDto request)
+    {
+            try
+ {
+  var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+       
+     if (subuser == null)
+            return NotFound(new { 
+      success = false,
+     message = $"Subuser with email '{email}' not found" 
+     });
+
+        // Track updated fields
+       var updatedFields = new List<string>();
+
+          // Partial update logic
+    if (!string.IsNullOrEmpty(request.SubuserUsername))
+           {
+  subuser.subuser_username = request.SubuserUsername;
+    updatedFields.Add("SubuserUsername");
+           }
+
+              if (!string.IsNullOrEmpty(request.Name))
+         {
+    subuser.Name = request.Name;
+  updatedFields.Add("Name");
+      }
+
+                if (!string.IsNullOrEmpty(request.Phone))
+             {
+         subuser.Phone = request.Phone;
+updatedFields.Add("Phone");
+      }
+
+     if (!string.IsNullOrEmpty(request.Department))
+     {
+             subuser.Department = request.Department;
+  updatedFields.Add("Department");
+   }
+
+             if (!string.IsNullOrEmpty(request.Role))
+    {
+            subuser.Role = request.Role;
+           updatedFields.Add("Role");
+      }
+
+    if (!string.IsNullOrEmpty(request.Status))
+        {
+     subuser.status = request.Status;
+    updatedFields.Add("Status");
+     }
+
+ if (request.MaxMachines.HasValue)
+    {
+ subuser.MaxMachines = request.MaxMachines.Value;
+     updatedFields.Add("MaxMachines");
+        }
+
+       if (request.GroupId.HasValue)
+ {
+          subuser.GroupId = request.GroupId.Value;
+                    updatedFields.Add("GroupId");
+      }
+
+     if (request.LicenseAllocation.HasValue)
+                {
+            subuser.license_allocation = request.LicenseAllocation.Value;
+           updatedFields.Add("LicenseAllocation");
+      }
+
+ if (request.CanViewReports.HasValue)
+  {
+     subuser.CanViewReports = request.CanViewReports.Value;
+       updatedFields.Add("CanViewReports");
+          }
+
+           if (request.CanManageMachines.HasValue)
+    {
+          subuser.CanManageMachines = request.CanManageMachines.Value;
+    updatedFields.Add("CanManageMachines");
+             }
+
+   if (request.CanAssignLicenses.HasValue)
+    {
+       subuser.CanAssignLicenses = request.CanAssignLicenses.Value;
+        updatedFields.Add("CanAssignLicenses");
+    }
+
+       if (request.CanCreateSubusers.HasValue)
+ {
+           subuser.CanCreateSubusers = request.CanCreateSubusers.Value;
+     updatedFields.Add("CanCreateSubusers");
+    }
+
+        if (request.EmailNotifications.HasValue)
+          {
+  subuser.EmailNotifications = request.EmailNotifications.Value;
+          updatedFields.Add("EmailNotifications");
+        }
+
+      if (request.SystemAlerts.HasValue)
+         {
+     subuser.SystemAlerts = request.SystemAlerts.Value;
+           updatedFields.Add("SystemAlerts");
+      }
+
+   if (!string.IsNullOrEmpty(request.Notes))
+        {
+    subuser.Notes = request.Notes;
+ updatedFields.Add("Notes");
+      }
+
+ // Update timestamp
+     subuser.UpdatedAt = DateTime.UtcNow;
+
+                _context.Entry(subuser).State = EntityState.Modified;
+  await _context.SaveChangesAsync();
+
+      return Ok(new { 
+        success = true,
+  message = "Subuser updated successfully",
+      subuser_email = email,
+          updatedFields = updatedFields,
+         updatedAt = subuser.UpdatedAt
+  });
+ }
+         catch (Exception ex)
+      {
+                return StatusCode(500, new { 
+    success = false,
+ message = "Error updating subuser", 
+   error = ex.Message 
+        });
+    }
+  }
+
+        /// <summary>
+        /// PATCH: Partial update subuser by parent email and subuser email
+        /// Allows updating subusers using parent user context
+        /// </summary>
+        [HttpPatch("by-parent/{parentEmail}/subuser/{subuserEmail}")]
+        public async Task<IActionResult> PatchSubuserByParentAndEmail(
+            string parentEmail, 
+            string subuserEmail, 
+            [FromBody] SubuserPatchDto request)
+        {
+            try
+        {
+       // Find subuser by both parent and subuser email
+        var subuser = await _context.subuser
+       .FirstOrDefaultAsync(s => s.user_email == parentEmail && s.subuser_email == subuserEmail);
+       
+          if (subuser == null)
+ {
+return NotFound(new { 
+          success = false,
+  message = $"Subuser '{subuserEmail}' not found under parent '{parentEmail}'" 
+               });
+      }
+
+                // Track updated fields
+        var updatedFields = new List<string>();
+
+            // Partial update logic (same as above)
+          if (!string.IsNullOrEmpty(request.SubuserUsername))
+     {
+      subuser.subuser_username = request.SubuserUsername;
+      updatedFields.Add("SubuserUsername");
+}
+
+       if (!string.IsNullOrEmpty(request.Name))
+            {
+             subuser.Name = request.Name;
+      updatedFields.Add("Name");
+            }
+
+       if (!string.IsNullOrEmpty(request.Phone))
+       {
+ subuser.Phone = request.Phone;
+             updatedFields.Add("Phone");
+  }
+
+           if (!string.IsNullOrEmpty(request.Department))
+       {
+        subuser.Department = request.Department;
+      updatedFields.Add("Department");
+         }
+
+     if (!string.IsNullOrEmpty(request.Role))
+          {
+ subuser.Role = request.Role;
+         updatedFields.Add("Role");
+  }
+
+      if (!string.IsNullOrEmpty(request.Status))
+       {
+  subuser.status = request.Status;
+        updatedFields.Add("Status");
+         }
+
+      if (request.MaxMachines.HasValue)
+  {
+               subuser.MaxMachines = request.MaxMachines.Value;
+    updatedFields.Add("MaxMachines");
+            }
+
+    if (request.GroupId.HasValue)
+    {
+ subuser.GroupId = request.GroupId.Value;
+     updatedFields.Add("GroupId");
+          }
+
+         if (request.LicenseAllocation.HasValue)
+                {
+       subuser.license_allocation = request.LicenseAllocation.Value;
+    updatedFields.Add("LicenseAllocation");
+      }
+
+         if (request.CanViewReports.HasValue)
+        {
+        subuser.CanViewReports = request.CanViewReports.Value;
+              updatedFields.Add("CanViewReports");
+             }
+
+            if (request.CanManageMachines.HasValue)
+       {
+            subuser.CanManageMachines = request.CanManageMachines.Value;
+       updatedFields.Add("CanManageMachines");
+     }
+
+          if (request.CanAssignLicenses.HasValue)
+   {
+    subuser.CanAssignLicenses = request.CanAssignLicenses.Value;
+  updatedFields.Add("CanAssignLicenses");
+     }
+
+    if (request.CanCreateSubusers.HasValue)
+              {
+                    subuser.CanCreateSubusers = request.CanCreateSubusers.Value;
+    updatedFields.Add("CanCreateSubusers");
+                }
+
+       if (request.EmailNotifications.HasValue)
+     {
+      subuser.EmailNotifications = request.EmailNotifications.Value;
+           updatedFields.Add("EmailNotifications");
+     }
+
+     if (request.SystemAlerts.HasValue)
+ {
+           subuser.SystemAlerts = request.SystemAlerts.Value;
+      updatedFields.Add("SystemAlerts");
+       }
+
+       if (!string.IsNullOrEmpty(request.Notes))
+         {
+      subuser.Notes = request.Notes;
+     updatedFields.Add("Notes");
+}
+
+             // Update timestamp
+   subuser.UpdatedAt = DateTime.UtcNow;
+
+      _context.Entry(subuser).State = EntityState.Modified;
+              await _context.SaveChangesAsync();
+
+   return Ok(new { 
+                 success = true,
+                message = "Subuser updated successfully via parent email",
+      parentEmail = parentEmail,
+    subuserEmail = subuserEmail,
+            updatedFields = updatedFields,
+   updatedAt = subuser.UpdatedAt
+       });
+       }
+         catch (Exception ex)
+  {
+        return StatusCode(500, new { 
+ success = false,
+          message = "Error updating subuser by parent", 
+           error = ex.Message 
+        });
+            }
+        }
+    }
+
+    /// <summary>
+    /// DTO for partial subuser updates
+    /// </summary>
+    public class SubuserPatchDto
+    {
+      public string? SubuserUsername { get; set; }
+ public string? Name { get; set; }
+      public string? Phone { get; set; }
+     public string? Department { get; set; }
+        public string? Role { get; set; }
+     public string? Status { get; set; }
+        public int? MaxMachines { get; set; }
+    public int? GroupId { get; set; }
+        public int? LicenseAllocation { get; set; }
+     public bool? CanViewReports { get; set; }
+        public bool? CanManageMachines { get; set; }
+        public bool? CanAssignLicenses { get; set; }
+        public bool? CanCreateSubusers { get; set; }
+   public bool? EmailNotifications { get; set; }
+    public bool? SystemAlerts { get; set; }
+   public string? Notes { get; set; }
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

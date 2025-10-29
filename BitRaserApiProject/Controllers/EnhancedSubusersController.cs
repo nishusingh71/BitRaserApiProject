@@ -414,21 +414,21 @@ subuser_email = request.Email,
 var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
      
        var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
-             
+        
   if (subuser == null)
-         return NotFound(new { 
-       success = false,
+ return NotFound(new { 
+success = false,
      message = $"Subuser with email '{email}' not found" 
 });
 
-         // Check if user can update this subuser
+  // Check if user can update this subuser
       bool canUpdate = subuser.user_email == currentUserEmail ||
          await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
 
   if (!canUpdate)
-      {
+{
    return StatusCode(403, new { 
-              success = false,
+        success = false,
     error = "You can only update your own subusers" 
    });
          }
@@ -437,115 +437,163 @@ var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUser
              var updatedFields = new List<string>();
 
    // ✅ Partial update - only update fields that are provided
-  if (!string.IsNullOrEmpty(request.Name))
-         {
-                    subuser.Name = request.Name;
-                  updatedFields.Add("Name");
+          if (!string.IsNullOrEmpty(request.SubuserUsername))
+     {
+          subuser.subuser_username = request.SubuserUsername;
+            updatedFields.Add("SubuserUsername");
         }
 
-        if (!string.IsNullOrEmpty(request.Phone))
+        if (!string.IsNullOrEmpty(request.Name))
            {
-              subuser.Phone = request.Phone;
-             updatedFields.Add("Phone");
+              subuser.Name = request.Name;
+    updatedFields.Add("Name");
        }
 
-             if (!string.IsNullOrEmpty(request.Department))
+          if (!string.IsNullOrEmpty(request.Phone))
   {
-         subuser.Department = request.Department;
-             updatedFields.Add("Department");
+         subuser.Phone = request.Phone;
+       updatedFields.Add("Phone");
     }
 
-       if (!string.IsNullOrEmpty(request.Role))
+       if (!string.IsNullOrEmpty(request.Department))
+    {
+      subuser.Department = request.Department;
+   updatedFields.Add("Department");
+      }
+
+ if (!string.IsNullOrEmpty(request.Role))
     {
       subuser.Role = request.Role;
    updatedFields.Add("Role");
       }
 
-       if (!string.IsNullOrEmpty(request.Status))
-                {
-          subuser.status = request.Status;
-         updatedFields.Add("Status");
-      }
-
-                if (request.MaxMachines.HasValue)
-    {
-  subuser.MaxMachines = request.MaxMachines.Value;
-         updatedFields.Add("MaxMachines");
-     }
-
-         if (request.GroupId.HasValue)
-    {
-    subuser.GroupId = request.GroupId.Value;
-           updatedFields.Add("GroupId");
+        if (!string.IsNullOrEmpty(request.PermissionsJson))
+        {
+     subuser.PermissionsJson = request.PermissionsJson;
+      updatedFields.Add("PermissionsJson");
         }
 
- if (request.LicenseAllocation.HasValue) // ✅ Added
+        if (request.AssignedMachines.HasValue)
+   {
+            subuser.AssignedMachines = request.AssignedMachines.Value;
+            updatedFields.Add("AssignedMachines");
+        }
+
+       if (!string.IsNullOrEmpty(request.Status))
         {
+   subuser.status = request.Status;
+     updatedFields.Add("Status");
+      }
+
+        if (request.MaxMachines.HasValue)
+    {
+  subuser.MaxMachines = request.MaxMachines.Value;
+  updatedFields.Add("MaxMachines");
+     }
+
+        if (!string.IsNullOrEmpty(request.MachineIdsJson))
+        {
+            subuser.MachineIdsJson = request.MachineIdsJson;
+       updatedFields.Add("MachineIdsJson");
+        }
+
+        if (!string.IsNullOrEmpty(request.LicenseIdsJson))
+        {
+     subuser.LicenseIdsJson = request.LicenseIdsJson;
+     updatedFields.Add("LicenseIdsJson");
+        }
+
+         if (request.GroupId.HasValue)
+{
+    subuser.GroupId = request.GroupId.Value;
+ updatedFields.Add("GroupId");
+    }
+
+    if (!string.IsNullOrEmpty(request.SubuserGroup))
+        {
+       subuser.subuser_group = request.SubuserGroup;
+   updatedFields.Add("SubuserGroup");
+        }
+
+ if (request.LicenseAllocation.HasValue)
+     {
    subuser.license_allocation = request.LicenseAllocation.Value;
             updatedFields.Add("LicenseAllocation");
   }
 
+        if (!string.IsNullOrEmpty(request.Timezone))
+      {
+subuser.timezone = request.Timezone;
+            updatedFields.Add("Timezone");
+}
+
+        if (request.IsEmailVerified.HasValue)
+        {
+      subuser.IsEmailVerified = request.IsEmailVerified.Value;
+            updatedFields.Add("IsEmailVerified");
+    }
+
      if (request.CanViewReports.HasValue)
     {
-          subuser.CanViewReports = request.CanViewReports.Value;
+    subuser.CanViewReports = request.CanViewReports.Value;
   updatedFields.Add("CanViewReports");
         }
 
       if (request.CanManageMachines.HasValue)
-         {
+    {
            subuser.CanManageMachines = request.CanManageMachines.Value;
-       updatedFields.Add("CanManageMachines");
-                }
+  updatedFields.Add("CanManageMachines");
+        }
 
   if (request.CanAssignLicenses.HasValue)
     {
-         subuser.CanAssignLicenses = request.CanAssignLicenses.Value;
+      subuser.CanAssignLicenses = request.CanAssignLicenses.Value;
      updatedFields.Add("CanAssignLicenses");
     }
 
      if (request.CanCreateSubusers.HasValue)
     {
-         subuser.CanCreateSubusers = request.CanCreateSubusers.Value;
-    updatedFields.Add("CanCreateSubusers");
+       subuser.CanCreateSubusers = request.CanCreateSubusers.Value;
+  updatedFields.Add("CanCreateSubusers");
         }
 
-           if (request.EmailNotifications.HasValue)
-    {
-            subuser.EmailNotifications = request.EmailNotifications.Value;
-         updatedFields.Add("EmailNotifications");
+if (request.EmailNotifications.HasValue)
+  {
+     subuser.EmailNotifications = request.EmailNotifications.Value;
+       updatedFields.Add("EmailNotifications");
     }
 
     if (request.SystemAlerts.HasValue)
          {
  subuser.SystemAlerts = request.SystemAlerts.Value;
          updatedFields.Add("SystemAlerts");
-                }
+     }
 
-         if (!string.IsNullOrEmpty(request.Notes))
-            {
+      if (!string.IsNullOrEmpty(request.Notes))
+ {
      subuser.Notes = request.Notes;
-     updatedFields.Add("Notes");
+ updatedFields.Add("Notes");
      }
 
     // Update audit fields
         var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
      if (parentUser != null)
-              {
+       {
          subuser.UpdatedBy = parentUser.user_id;
  }
          subuser.UpdatedAt = DateTime.UtcNow;
 
-                // Save changes
+    // Save changes
         _context.Entry(subuser).State = EntityState.Modified;
     await _context.SaveChangesAsync();
 
-          // Get group name if updated
-                string? groupName = null;
-     if (subuser.GroupId.HasValue)
-         {
+  // Get group name if updated
+    string? groupName = null;
+ if (subuser.GroupId.HasValue)
+    {
          var group = await _context.Set<Group>().FindAsync(subuser.GroupId.Value);
           groupName = group?.name;
-       }
+}
 
     return Ok(new { 
       success = true,
@@ -556,24 +604,33 @@ var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUser
       updatedAt = subuser.UpdatedAt,
           // Return updated data
             subuser = new {
-            subuser_email = subuser.subuser_email,
+      subuser_email = subuser.subuser_email,
+        subuser_username = subuser.subuser_username,
   name = subuser.Name,
-      phone = subuser.Phone,
-          department = subuser.Department,
+   phone = subuser.Phone,
+     department = subuser.Department,
      role = subuser.Role,
-            status = subuser.status,
+      permissionsJson = subuser.PermissionsJson,
+    assignedMachines = subuser.AssignedMachines,
+      maxMachines = subuser.MaxMachines,
+                machineIdsJson = subuser.MachineIdsJson,
+        licenseIdsJson = subuser.LicenseIdsJson,
+ status = subuser.status,
      groupId = subuser.GroupId,
   groupName = groupName,
-           maxMachines = subuser.MaxMachines,
-        license_allocation = subuser.license_allocation, // ✅ Added
-        canViewReports = subuser.CanViewReports,
-          canManageMachines = subuser.CanManageMachines,
-           canAssignLicenses = subuser.CanAssignLicenses,
-      canCreateSubusers = subuser.CanCreateSubusers,
-            emailNotifications = subuser.EmailNotifications,
-       systemAlerts = subuser.SystemAlerts,
-   notes = subuser.Notes
-          }
+         subuserGroup = subuser.subuser_group,
+    license_allocation = subuser.license_allocation,
+          timezone = subuser.timezone,
+          isEmailVerified = subuser.IsEmailVerified,
+    canViewReports = subuser.CanViewReports,
+        canManageMachines = subuser.CanManageMachines,
+    canAssignLicenses = subuser.CanAssignLicenses,
+  canCreateSubusers = subuser.CanCreateSubusers,
+ emailNotifications = subuser.EmailNotifications,
+    systemAlerts = subuser.SystemAlerts,
+   notes = subuser.Notes,
+    updatedAt = subuser.UpdatedAt
+     }
       });
 }
             catch (Exception ex)
@@ -581,16 +638,267 @@ var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUser
        return StatusCode(500, new { 
    success = false,
          message = "Error updating subuser", 
-             error = ex.Message 
+       error = ex.Message 
       });
       }
+        }
+
+        /// <summary>
+        /// PATCH: Update subuser by parent email and subuser email
+        /// Allows updating subusers using parent user context
+    /// </summary>
+   [HttpPatch("by-parent/{parentEmail}/subuser/{subuserEmail}")]
+     [RequirePermission("UPDATE_SUBUSER")]
+        public async Task<IActionResult> PatchSubuserByParent(
+  string parentEmail, 
+          string subuserEmail, 
+            [FromBody] UpdateSubuserDto request)
+        {
+            try
+            {
+     var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+     var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+  
+           // Check if current user can manage this parent's subusers
+     bool canManageParent = parentEmail == currentUserEmail ||
+   await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
+
+       if (!canManageParent)
+      {
+  return StatusCode(403, new { 
+     success = false,
+   error = $"You cannot manage subusers for {parentEmail}" 
+     });
+        }
+
+                // Find subuser by both parent and subuser email
+    var subuser = await _context.subuser
+             .FirstOrDefaultAsync(s => s.user_email == parentEmail && s.subuser_email == subuserEmail);
+     
+            if (subuser == null)
+   {
+ return NotFound(new { 
+success = false,
+        message = $"Subuser '{subuserEmail}' not found under parent '{parentEmail}'" 
+         });
+           }
+
+          // Track updated fields
+        var updatedFields = new List<string>();
+
+     // ✅ Partial update logic (same as above)
+     if (!string.IsNullOrEmpty(request.SubuserUsername))
+      {
+         subuser.subuser_username = request.SubuserUsername;
+   updatedFields.Add("SubuserUsername");
+ }
+
+          if (!string.IsNullOrEmpty(request.Name))
+    {
+   subuser.Name = request.Name;
+  updatedFields.Add("Name");
+      }
+
+     if (!string.IsNullOrEmpty(request.Phone))
+            {
+        subuser.Phone = request.Phone;
+          updatedFields.Add("Phone");
+             }
+
+         if (!string.IsNullOrEmpty(request.Department))
+   {
+       subuser.Department = request.Department;
+          updatedFields.Add("Department");
+  }
+
+    if (!string.IsNullOrEmpty(request.Role))
+         {
+     subuser.Role = request.Role;
+updatedFields.Add("Role");
+  }
+
+        if (!string.IsNullOrEmpty(request.PermissionsJson))
+      {
+   subuser.PermissionsJson = request.PermissionsJson;
+    updatedFields.Add("PermissionsJson");
+   }
+
+ if (request.AssignedMachines.HasValue)
+        {
+      subuser.AssignedMachines = request.AssignedMachines.Value;
+    updatedFields.Add("AssignedMachines");
+        }
+
+    if (!string.IsNullOrEmpty(request.Status))
+         {
+     subuser.status = request.Status;
+   updatedFields.Add("Status");
+    }
+
+           if (request.MaxMachines.HasValue)
+  {
+   subuser.MaxMachines = request.MaxMachines.Value;
+        updatedFields.Add("MaxMachines");
+    }
+
+  if (!string.IsNullOrEmpty(request.MachineIdsJson))
+        {
+         subuser.MachineIdsJson = request.MachineIdsJson;
+      updatedFields.Add("MachineIdsJson");
+  }
+
+   if (!string.IsNullOrEmpty(request.LicenseIdsJson))
+        {
+   subuser.LicenseIdsJson = request.LicenseIdsJson;
+  updatedFields.Add("LicenseIdsJson");
+  }
+
+       if (request.GroupId.HasValue)
+     {
+        subuser.GroupId = request.GroupId.Value;
+         updatedFields.Add("GroupId");
+ }
+
+  if (!string.IsNullOrEmpty(request.SubuserGroup))
+ {
+     subuser.subuser_group = request.SubuserGroup;
+   updatedFields.Add("SubuserGroup");
+  }
+
+      if (request.LicenseAllocation.HasValue)
+        {
+          subuser.license_allocation = request.LicenseAllocation.Value;
+ updatedFields.Add("LicenseAllocation");
+    }
+
+   if (!string.IsNullOrEmpty(request.Timezone))
+        {
+   subuser.timezone = request.Timezone;
+       updatedFields.Add("Timezone");
+   }
+
+   if (request.IsEmailVerified.HasValue)
+        {
+   subuser.IsEmailVerified = request.IsEmailVerified.Value;
+    updatedFields.Add("IsEmailVerified");
+ }
+
+   if (request.CanViewReports.HasValue)
+       {
+        subuser.CanViewReports = request.CanViewReports.Value;
+         updatedFields.Add("CanViewReports");
+      }
+
+       if (request.CanManageMachines.HasValue)
+  {
+           subuser.CanManageMachines = request.CanManageMachines.Value;
+     updatedFields.Add("CanManageMachines");
+      }
+
+    if (request.CanAssignLicenses.HasValue)
+   {
+   subuser.CanAssignLicenses = request.CanAssignLicenses.Value;
+            updatedFields.Add("CanAssignLicenses");
+  }
+
+    if (request.CanCreateSubusers.HasValue)
+   {
+      subuser.CanCreateSubusers = request.CanCreateSubusers.Value;
+  updatedFields.Add("CanCreateSubusers");
+         }
+
+       if (request.EmailNotifications.HasValue)
+     {
+    subuser.EmailNotifications = request.EmailNotifications.Value;
+ updatedFields.Add("EmailNotifications");
+   }
+
+  if (request.SystemAlerts.HasValue)
+         {
+subuser.SystemAlerts = request.SystemAlerts.Value;
+      updatedFields.Add("SystemAlerts");
+  }
+
+       if (!string.IsNullOrEmpty(request.Notes))
+      {
+    subuser.Notes = request.Notes;
+updatedFields.Add("Notes");
+           }
+
+                // Update audit fields
+     var updaterUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+          if (updaterUser != null)
+              {
+      subuser.UpdatedBy = updaterUser.user_id;
+      }
+  subuser.UpdatedAt = DateTime.UtcNow;
+
+           // Save changes
+       _context.Entry(subuser).State = EntityState.Modified;
+     await _context.SaveChangesAsync();
+
+  // Get group name
+  string? groupName = null;
+     if (subuser.GroupId.HasValue)
+             {
+        var group = await _context.Set<Group>().FindAsync(subuser.GroupId.Value);
+            groupName = group?.name;
+       }
+
+                return Ok(new { 
+                success = true,
+        message = "Subuser updated successfully via parent email",
+     parentEmail = parentEmail,
+        subuserEmail = subuserEmail,
+      updatedFields = updatedFields,
+        updatedBy = currentUserEmail,
+ updatedAt = subuser.UpdatedAt,
+    subuser = new {
+  subuser_email = subuser.subuser_email,
+   user_email = subuser.user_email,
+       subuser_username = subuser.subuser_username,
+       name = subuser.Name,
+  phone = subuser.Phone,
+      department = subuser.Department,
+role = subuser.Role,
+            permissionsJson = subuser.PermissionsJson,
+          assignedMachines = subuser.AssignedMachines,
+  maxMachines = subuser.MaxMachines,
+       machineIdsJson = subuser.MachineIdsJson,
+        licenseIdsJson = subuser.LicenseIdsJson,
+        status = subuser.status,
+ groupId = subuser.GroupId,
+       groupName = groupName,
+ subuserGroup = subuser.subuser_group,
+  license_allocation = subuser.license_allocation,
+     timezone = subuser.timezone,
+    isEmailVerified = subuser.IsEmailVerified,
+   canViewReports = subuser.CanViewReports,
+      canManageMachines = subuser.CanManageMachines,
+         canAssignLicenses = subuser.CanAssignLicenses,
+    canCreateSubusers = subuser.CanCreateSubusers,
+      emailNotifications = subuser.EmailNotifications,
+     systemAlerts = subuser.SystemAlerts,
+  notes = subuser.Notes,
+ updatedAt = subuser.UpdatedAt
+    }
+        });
+            }
+            catch (Exception ex)
+         {
+     return StatusCode(500, new { 
+       success = false,
+    message = "Error updating subuser by parent", 
+      error = ex.Message 
+                });
+            }
         }
 
         /// <summary>
         /// Delete subuser
         /// </summary>
         [HttpDelete("{email}")]
-        [RequirePermission("DELETE_SUBUSER")]
+      [RequirePermission("DELETE_SUBUSER")]
         public async Task<IActionResult> DeleteSubuser(string email)
         {
   var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
