@@ -24,6 +24,7 @@ namespace BitRaserApiProject.Models.DTOs
         public int? MaxMachines { get; set; }
         public int? GroupId { get; set; } // Added
         public string? GroupName { get; set; }
+        public int? LicenseAllocation { get; set; } // Added: Number of licenses allocated
         public string Status { get; set; } = string.Empty;
         public bool IsEmailVerified { get; set; }
         public bool CanCreateSubusers { get; set; }
@@ -61,6 +62,7 @@ namespace BitRaserApiProject.Models.DTOs
   
         public int? MaxMachines { get; set; } // Optional - will default to 5
  public int? GroupId { get; set; } // Optional
+        public int? LicenseAllocation { get; set; } // Optional - Number of licenses to allocate
         public bool? CanCreateSubusers { get; set; } // Optional - will default to false
         public bool? CanViewReports { get; set; } // Optional - will default to true
         public bool? CanManageMachines { get; set; } // Optional - will default to false
@@ -91,6 +93,7 @@ namespace BitRaserApiProject.Models.DTOs
       
         public int? MaxMachines { get; set; }
  public int? GroupId { get; set; }
+    public int? LicenseAllocation { get; set; } // Added: Update license allocation
         
         [MaxLength(50)]
     public string? Status { get; set; }

@@ -97,6 +97,7 @@ phone = s.Phone ?? "N/A",
 isEmailVerified = s.IsEmailVerified,
   assignedMachines = s.AssignedMachines ?? 0,
 maxMachines = s.MaxMachines ?? 5,
+        license_allocation = s.license_allocation ?? 0, // ✅ Added
      // Roles from SubuserRoles relationship
      roles = s.SubuserRoles.Select(sr => new {
    roleId = sr.RoleId,
@@ -156,7 +157,7 @@ subuser.subuser_id,
  _context.Set<Group>().Where(g => g.group_id == subuser.GroupId.Value).Select(g => g.name).FirstOrDefault() ?? "No Group"
 : "No Group",
        isEmailVerified = subuser.IsEmailVerified,
-    // Detailed roles information
+ // Detailed roles information
   roles = subuser.SubuserRoles.Select(sr => new {
     roleId = sr.RoleId,
     roleName = sr.Role.RoleName,
@@ -165,15 +166,16 @@ description = sr.Role.Description,
  assignedAt = sr.AssignedAt,
     assignedBy = sr.AssignedByEmail
   }).ToList(),
-// Permissions from roles
+  // Permissions from roles
    permissions = subuser.SubuserRoles
     .SelectMany(sr => sr.Role.RolePermissions)
    .Select(rp => rp.Permission.PermissionName)
   .Distinct()
-        .ToList(),
+   .ToList(),
   // Machine and license info
    assignedMachines = subuser.AssignedMachines ?? 0,
           maxMachines = subuser.MaxMachines ?? 5,
+    license_allocation = subuser.license_allocation ?? 0, // ✅ Added
   groupId = subuser.GroupId,
 // Permissions flags
     canCreateSubusers = subuser.CanCreateSubusers,
@@ -275,19 +277,20 @@ emailNotifications = subuser.EmailNotifications,
 
             // Create subuser with name
  var newSubuser = new subuser
-            {
-  subuser_email = request.Email,
+      {
+subuser_email = request.Email,
   subuser_password = BCrypt.Net.BCrypt.HashPassword(request.Password),
       user_email = currentUserEmail!,
    superuser_id = parentUser.user_id,
-      Name = request.Name,
+  Name = request.Name,
   Phone = request.Phone ?? "",
     Department = request.Department ?? "",
   Role = request.Role ?? "subuser",
   status = "active",
     IsEmailVerified = false,
-     MaxMachines = request.MaxMachines ?? 5,
+   MaxMachines = request.MaxMachines ?? 5,
    GroupId = request.GroupId,
+        license_allocation = request.LicenseAllocation ?? 0, // ✅ Added
       CanCreateSubusers = request.CanCreateSubusers ?? false,
  CanViewReports = request.CanViewReports ?? true,
         CanManageMachines = request.CanManageMachines ?? false,
@@ -296,7 +299,7 @@ emailNotifications = subuser.EmailNotifications,
      SystemAlerts = request.SystemAlerts ?? true,
        CreatedBy = parentUser.user_id,
        CreatedAt = DateTime.UtcNow,
-      Notes = request.Notes
+   Notes = request.Notes
     };
 
    _context.subuser.Add(newSubuser);
@@ -395,142 +398,192 @@ emailNotifications = subuser.EmailNotifications,
       name = subuser.Name,
   updatedAt = subuser.UpdatedAt
  });
-   }
+ }
 
         /// <summary>
-        /// Assign role to subuser
-  /// </summary>
-        [HttpPost("{email}/assign-role")]
-        [RequirePermission("ASSIGN_ROLES")]
- public async Task<IActionResult> AssignRole(string email, [FromBody] SubuserRoleAssignDto roleDto)
-        {
-          var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
-      if (!await _authService.HasPermissionAsync(currentUserEmail!, "ASSIGN_ROLES"))
-     return StatusCode(403, new { error = "Insufficient permissions to assign roles" });
+   /// PATCH: Partial update subuser details by email
+        /// Updates only the fields provided in the request
+        /// </summary>
+        [HttpPatch("{email}")]
+        [RequirePermission("UPDATE_SUBUSER")]
+        public async Task<IActionResult> PatchSubuser(string email, [FromBody] UpdateSubuserDto request)
+   {
+          try
+ {
+           var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+     
+       var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+             
+  if (subuser == null)
+         return NotFound(new { 
+       success = false,
+     message = $"Subuser with email '{email}' not found" 
+});
 
-      var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
-          if (subuser == null) return NotFound($"Subuser with email {email} not found");
+         // Check if user can update this subuser
+      bool canUpdate = subuser.user_email == currentUserEmail ||
+         await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
 
-      // Check if this is user's subuser
-     if (subuser.user_email != currentUserEmail && 
-        !await _authService.HasPermissionAsync(currentUserEmail!, "ASSIGN_ROLES_TO_ALL"))
-        {
-        return StatusCode(403, new { error = "You can only assign roles to your own subusers" });
+  if (!canUpdate)
+      {
+   return StatusCode(403, new { 
+              success = false,
+    error = "You can only update your own subusers" 
+   });
+         }
+
+  // Track which fields were updated
+             var updatedFields = new List<string>();
+
+   // ✅ Partial update - only update fields that are provided
+  if (!string.IsNullOrEmpty(request.Name))
+         {
+                    subuser.Name = request.Name;
+                  updatedFields.Add("Name");
+        }
+
+        if (!string.IsNullOrEmpty(request.Phone))
+           {
+              subuser.Phone = request.Phone;
+             updatedFields.Add("Phone");
        }
 
-            await AssignRoleToSubuserAsync(email, roleDto.RoleName, currentUserEmail!);
-
-     return Ok(new { 
-       message = $"Role {roleDto.RoleName} assigned to subuser {email}", 
-            subuser_email = email,
-                roleName = roleDto.RoleName,
-              assignedBy = currentUserEmail,
-            assignedAt = DateTime.UtcNow
-    });
-        }
-
-      /// <summary>
-  /// Remove role from subuser
-  /// </summary>
-    [HttpDelete("{email}/remove-role/{roleName}")]
-      [RequirePermission("ASSIGN_ROLES")]
-        public async Task<IActionResult> RemoveRole(string email, string roleName)
-        {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
-            var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
-            if (subuser == null) return NotFound($"Subuser with email {email} not found");
-
-            // Check if this is user's subuser
-            if (subuser.user_email != currentUserEmail && 
-  !await _authService.HasPermissionAsync(currentUserEmail!, "ASSIGN_ROLES_TO_ALL"))
-            {
-     return StatusCode(403, new { error = "You can only remove roles from your own subusers" });
+             if (!string.IsNullOrEmpty(request.Department))
+  {
+         subuser.Department = request.Department;
+             updatedFields.Add("Department");
     }
 
-         var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
-            if (role == null) return NotFound($"Role {roleName} not found");
+       if (!string.IsNullOrEmpty(request.Role))
+    {
+      subuser.Role = request.Role;
+   updatedFields.Add("Role");
+      }
 
- var subuserRole = await _context.Set<SubuserRole>()
-       .FirstOrDefaultAsync(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == role.RoleId);
+       if (!string.IsNullOrEmpty(request.Status))
+                {
+          subuser.status = request.Status;
+         updatedFields.Add("Status");
+      }
 
-            if (subuserRole == null)
-     return NotFound($"Role {roleName} not assigned to subuser {email}");
+                if (request.MaxMachines.HasValue)
+    {
+  subuser.MaxMachines = request.MaxMachines.Value;
+         updatedFields.Add("MaxMachines");
+     }
 
-  _context.Set<SubuserRole>().Remove(subuserRole);
-        await _context.SaveChangesAsync();
-
-            return Ok(new { 
-message = $"Role {roleName} removed from subuser {email}",
-   subuser_email = email,
-       roleName = roleName,
-      removedBy = currentUserEmail,
-        removedAt = DateTime.UtcNow
-   });
+         if (request.GroupId.HasValue)
+    {
+    subuser.GroupId = request.GroupId.Value;
+           updatedFields.Add("GroupId");
         }
 
-        /// <summary>
-        /// Get subuser statistics including role distribution
-        /// </summary>
-[HttpGet("statistics")]
-        public async Task<ActionResult<object>> GetSubuserStatistics([FromQuery] string? parentEmail)
-     {
-     var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-      var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-        
-      IQueryable<subuser> query = _context.subuser
-     .Include(s => s.SubuserRoles)
-.ThenInclude(sr => sr.Role);
-
-          // Apply role-based filtering
-if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSER_STATISTICS", isCurrentUserSubuser))
+ if (request.LicenseAllocation.HasValue) // ✅ Added
         {
-     // Users can only see their own subuser statistics
-     parentEmail = currentUserEmail;
-            }
+   subuser.license_allocation = request.LicenseAllocation.Value;
+            updatedFields.Add("LicenseAllocation");
+  }
 
-      if (!string.IsNullOrEmpty(parentEmail))
-       query = query.Where(s => s.user_email == parentEmail);
+     if (request.CanViewReports.HasValue)
+    {
+          subuser.CanViewReports = request.CanViewReports.Value;
+  updatedFields.Add("CanViewReports");
+        }
 
-            var stats = new {
-     TotalSubusers = await query.CountAsync(),
-  ActiveSubusers = await query.CountAsync(s => s.status == "active"),
-     InactiveSubusers = await query.CountAsync(s => s.status == "inactive"),
- SuspendedSubusers = await query.CountAsync(s => s.status == "suspended"),
-           VerifiedEmails = await query.CountAsync(s => s.IsEmailVerified),
-   UnverifiedEmails = await query.CountAsync(s => !s.IsEmailVerified),
-    SubusersCreatedToday = await query.CountAsync(s => s.CreatedAt.Date == DateTime.UtcNow.Date),
-SubusersCreatedThisWeek = await query.CountAsync(s => s.CreatedAt >= DateTime.UtcNow.AddDays(-7)),
-    SubusersCreatedThisMonth = await query.CountAsync(s => s.CreatedAt.Month == DateTime.UtcNow.Month),
-     // Role distribution
-     RoleDistribution = await query
-  .SelectMany(s => s.SubuserRoles)
-        .GroupBy(sr => sr.Role.RoleName)
-      .Select(g => new { RoleName = g.Key, Count = g.Count() })
-    .ToListAsync(),
- // Department distribution
-  DepartmentDistribution = await query
-        .Where(s => !string.IsNullOrEmpty(s.Department))
-     .GroupBy(s => s.Department)
-  .Select(g => new { Department = g.Key, Count = g.Count() })
-  .OrderByDescending(x => x.Count)
-     .Take(10)
-      .ToListAsync(),
-     // Recent subusers with roles
-            RecentSubusers = await query
-        .OrderByDescending(s => s.CreatedAt)
-          .Take(5)
-     .Select(s => new {
-        s.subuser_email,
-          name = s.Name ?? "N/A",
-           roles = s.SubuserRoles.Select(sr => sr.Role.RoleName).ToList(),
-   s.CreatedAt
-    })
-   .ToListAsync()
-    };
+      if (request.CanManageMachines.HasValue)
+         {
+           subuser.CanManageMachines = request.CanManageMachines.Value;
+       updatedFields.Add("CanManageMachines");
+                }
 
-  return Ok(stats);
+  if (request.CanAssignLicenses.HasValue)
+    {
+         subuser.CanAssignLicenses = request.CanAssignLicenses.Value;
+     updatedFields.Add("CanAssignLicenses");
+    }
+
+     if (request.CanCreateSubusers.HasValue)
+    {
+         subuser.CanCreateSubusers = request.CanCreateSubusers.Value;
+    updatedFields.Add("CanCreateSubusers");
+        }
+
+           if (request.EmailNotifications.HasValue)
+    {
+            subuser.EmailNotifications = request.EmailNotifications.Value;
+         updatedFields.Add("EmailNotifications");
+    }
+
+    if (request.SystemAlerts.HasValue)
+         {
+ subuser.SystemAlerts = request.SystemAlerts.Value;
+         updatedFields.Add("SystemAlerts");
+                }
+
+         if (!string.IsNullOrEmpty(request.Notes))
+            {
+     subuser.Notes = request.Notes;
+     updatedFields.Add("Notes");
+     }
+
+    // Update audit fields
+        var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+     if (parentUser != null)
+              {
+         subuser.UpdatedBy = parentUser.user_id;
+ }
+         subuser.UpdatedAt = DateTime.UtcNow;
+
+                // Save changes
+        _context.Entry(subuser).State = EntityState.Modified;
+    await _context.SaveChangesAsync();
+
+          // Get group name if updated
+                string? groupName = null;
+     if (subuser.GroupId.HasValue)
+         {
+         var group = await _context.Set<Group>().FindAsync(subuser.GroupId.Value);
+          groupName = group?.name;
+       }
+
+    return Ok(new { 
+      success = true,
+  message = "Subuser updated successfully",
+        subuser_email = email,
+            updatedFields = updatedFields,
+   updatedBy = currentUserEmail,
+      updatedAt = subuser.UpdatedAt,
+          // Return updated data
+            subuser = new {
+            subuser_email = subuser.subuser_email,
+  name = subuser.Name,
+      phone = subuser.Phone,
+          department = subuser.Department,
+     role = subuser.Role,
+            status = subuser.status,
+     groupId = subuser.GroupId,
+  groupName = groupName,
+           maxMachines = subuser.MaxMachines,
+        license_allocation = subuser.license_allocation, // ✅ Added
+        canViewReports = subuser.CanViewReports,
+          canManageMachines = subuser.CanManageMachines,
+           canAssignLicenses = subuser.CanAssignLicenses,
+      canCreateSubusers = subuser.CanCreateSubusers,
+            emailNotifications = subuser.EmailNotifications,
+       systemAlerts = subuser.SystemAlerts,
+   notes = subuser.Notes
+          }
+      });
+}
+            catch (Exception ex)
+    {
+       return StatusCode(500, new { 
+   success = false,
+         message = "Error updating subuser", 
+             error = ex.Message 
+      });
+      }
         }
 
         /// <summary>

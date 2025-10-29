@@ -143,7 +143,7 @@ namespace BitRaserApiProject.Models
     {
         [Key]
         public int subuser_id { get; set; } // Primary Key
-        public int superuser_id { get; set; } // Reference to users.user_id (superuser)
+        public int? superuser_id { get; set; } // ✅ Made nullable - Reference to users.user_id (superuser)
         
         [Required, MaxLength(255)]
         public string subuser_email { get; set; } // Email of the subuser
@@ -167,8 +167,8 @@ namespace BitRaserApiProject.Models
 public string? Department { get; set; }
    
   // Role & Permissions
-   [Required, MaxLength(50)]
-  public string Role { get; set; } = "subuser"; // subuser, team_member, limited_admin
+   [MaxLength(50)]
+  public string? Role { get; set; } = "subuser"; // subuser, team_member, limited_admin
         
   public string? PermissionsJson { get; set; } // JSON string for granular permissions 
      
@@ -181,6 +181,11 @@ public string? Department { get; set; }
     // Group Access
  public int? GroupId { get; set; }
         
+     [MaxLength(100)]
+        public string? subuser_group { get; set; } // Group name or identifier (string format)
+        
+    public int? license_allocation { get; set; } = 0; // Number of licenses allocated to subuser
+  
      // Status & Activity Fields (ONLY LOWERCASE - Database Mapped)
    [MaxLength(50)]
      public string? status { get; set; } = "active"; // active, inactive, suspended
