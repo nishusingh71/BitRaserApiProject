@@ -683,131 +683,248 @@ namespace BitRaserApiProject.Controllers
 
         private async Task<byte[]> GenerateSingleReportPDF(audit_reports report, PdfExportOptions? options)
         {
-            ReportData reportData;
-            
-            try
-            {
-                // Try to parse the JSON details
-                if (!string.IsNullOrEmpty(report.report_details_json) && report.report_details_json != "{}")
-                {
-                    reportData = JsonSerializer.Deserialize<ReportData>(report.report_details_json) ?? new ReportData();
-                }
-                else
-                {
-                    reportData = new ReportData();
-                }
-            }
-            catch (JsonException)
-            {
-                // If JSON parsing fails, create basic report data
-                reportData = new ReportData();
-            }
+            // ✅ Parse D-Secure JSON format properly
+      ReportData reportData = await ParseDSecureReportData(report);
 
-            // Fill in basic information from the audit_reports record
-            reportData.ReportId = report.report_id.ToString();
-            reportData.ReportDate = report.report_datetime.ToString("yyyy-MM-dd HH:mm:ss");
-            reportData.EraserMethod = report.erasure_method;
-            reportData.Status = report.synced ? "Completed" : "Pending";
-            reportData.SoftwareName = "DSecure API";
-            reportData.ProductVersion = "v1.0";
-
-            var reportRequest = new ReportRequest
-            {
-                ReportData = reportData,
-                ReportTitle = report.report_name,
-                HeaderText = options?.HeaderText ?? "DSecure API - Audit Report",
+            // ✅ Create proper report request with mapped data
+    var reportRequest = new ReportRequest
+    {
+    ReportData = reportData,
+          ReportTitle = report.report_name ?? $"Report #{report.report_id}",
+     HeaderText = options?.HeaderText ?? $"D-SecureErase Audit Report - ID: {report.report_id}",
                 TechnicianName = options?.TechnicianName ?? "System",
                 TechnicianDept = options?.TechnicianDept ?? "API Service",
-                ValidatorName = options?.ValidatorName ?? "System",
-                ValidatorDept = options?.ValidatorDept ?? "Automated Export"
-            };
+           ValidatorName = options?.ValidatorName ?? "System",
+              ValidatorDept = options?.ValidatorDept ?? "Automated Export"
+        };
 
-            return _pdfService.GenerateReport(reportRequest);
+ return _pdfService.GenerateReport(reportRequest);
         }
 
-        private async Task<byte[]> GenerateSingleReportPDFWithFiles(audit_reports report, SingleReportExportWithFilesRequest request)
+   private async Task<byte[]> GenerateSingleReportPDFWithFiles(audit_reports report, SingleReportExportWithFilesRequest request)
         {
-            ReportData reportData;
-            
-            try
-            {
-                // Try to parse the JSON details
-                if (!string.IsNullOrEmpty(report.report_details_json) && report.report_details_json != "{}")
-                {
-                    reportData = JsonSerializer.Deserialize<ReportData>(report.report_details_json) ?? new ReportData();
-                }
-                else
-                {
-                    reportData = new ReportData();
-                }
-            }
-            catch (JsonException)
-            {
-                // If JSON parsing fails, create basic report data
-                reportData = new ReportData();
-            }
+   // ✅ Parse D-Secure JSON format properly
+          ReportData reportData = await ParseDSecureReportData(report);
 
-            // Fill in basic information from the audit_reports record
-            reportData.ReportId = report.report_id.ToString();
-            reportData.ReportDate = report.report_datetime.ToString("yyyy-MM-dd HH:mm:ss");
-            reportData.EraserMethod = report.erasure_method;
-            reportData.Status = report.synced ? "Completed" : "Pending";
-            reportData.SoftwareName = "DSecure API";
-            reportData.ProductVersion = "v1.0";
-
-            var reportRequest = new ReportRequest
-            {
-                ReportData = reportData,
-                ReportTitle = request.ReportTitle ?? report.report_name,
-                HeaderText = request.HeaderText ?? "DSecure API - Audit Report",
-                TechnicianName = request.TechnicianName ?? "System",
-                TechnicianDept = request.TechnicianDept ?? "API Service",
-                ValidatorName = request.ValidatorName ?? "System",
+          // ✅ Create proper report request with mapped data
+     var reportRequest = new ReportRequest
+          {
+        ReportData = reportData,
+       ReportTitle = request.ReportTitle ?? report.report_name ?? $"Report #{report.report_id}",
+     HeaderText = request.HeaderText ?? $"D-SecureErase Audit Report - ID: {report.report_id}",
+   TechnicianName = request.TechnicianName ?? "System",
+        TechnicianDept = request.TechnicianDept ?? "API Service",
+          ValidatorName = request.ValidatorName ?? "System",
                 ValidatorDept = request.ValidatorDept ?? "Automated Export"
-            };
+         };
 
-            // Convert uploaded files to byte arrays
-            if (request.HeaderLeftLogo != null && request.HeaderLeftLogo.Length > 0)
-            {
-                using var ms = new MemoryStream();
-                await request.HeaderLeftLogo.CopyToAsync(ms);
-                reportRequest.HeaderLeftLogo = ms.ToArray();
-            }
+// Convert uploaded files to byte arrays
+      if (request.HeaderLeftLogo != null && request.HeaderLeftLogo.Length > 0)
+   {
+  using var ms = new MemoryStream();
+    await request.HeaderLeftLogo.CopyToAsync(ms);
+      reportRequest.HeaderLeftLogo = ms.ToArray();
+   }
 
             if (request.HeaderRightLogo != null && request.HeaderRightLogo.Length > 0)
-            {
-                using var ms = new MemoryStream();
-                await request.HeaderRightLogo.CopyToAsync(ms);
-                reportRequest.HeaderRightLogo = ms.ToArray();
+       {
+      using var ms = new MemoryStream();
+      await request.HeaderRightLogo.CopyToAsync(ms);
+ reportRequest.HeaderRightLogo = ms.ToArray();
             }
 
             if (request.WatermarkImage != null && request.WatermarkImage.Length > 0)
             {
-                using var ms = new MemoryStream();
-                await request.WatermarkImage.CopyToAsync(ms);
-                reportRequest.WatermarkImage = ms.ToArray();
-            }
+    using var ms = new MemoryStream();
+    await request.WatermarkImage.CopyToAsync(ms);
+      reportRequest.WatermarkImage = ms.ToArray();
+    }
 
-            if (request.TechnicianSignature != null && request.TechnicianSignature.Length > 0)
-            {
+      if (request.TechnicianSignature != null && request.TechnicianSignature.Length > 0)
+      {
                 using var ms = new MemoryStream();
                 await request.TechnicianSignature.CopyToAsync(ms);
-                reportRequest.TechnicianSignature = ms.ToArray();
-            }
+      reportRequest.TechnicianSignature = ms.ToArray();
+     }
 
             if (request.ValidatorSignature != null && request.ValidatorSignature.Length > 0)
             {
-                using var ms = new MemoryStream();
-                await request.ValidatorSignature.CopyToAsync(ms);
-                reportRequest.ValidatorSignature = ms.ToArray();
+  using var ms = new MemoryStream();
+     await request.ValidatorSignature.CopyToAsync(ms);
+      reportRequest.ValidatorSignature = ms.ToArray();
             }
 
-            return _pdfService.GenerateReport(reportRequest);
+     return _pdfService.GenerateReport(reportRequest);
+ }
+
+        /// <summary>
+        /// Parse D-Secure report_details_json with proper field mapping
+        /// Handles the exact JSON format from D-SecureErase client application
+        /// </summary>
+        private async Task<ReportData> ParseDSecureReportData(audit_reports auditReport)
+        {
+      var reportData = new ReportData();
+
+            try
+   {
+ if (string.IsNullOrEmpty(auditReport.report_details_json) || 
+      auditReport.report_details_json == "{}")
+         {
+       return CreateDefaultReportData(auditReport);
+           }
+
+      // ✅ Parse JSON with case-insensitive matching
+       using var doc = JsonDocument.Parse(auditReport.report_details_json);
+        var root = doc.RootElement;
+
+             // ✅ Map D-Secure fields to ReportData fields
+ reportData.ReportId = GetJsonString(root, "report_id") ?? auditReport.report_id.ToString();
+ reportData.ReportDate = GetJsonString(root, "datetime") ?? auditReport.report_datetime.ToString("yyyy-MM-dd HH:mm:ss");
+          reportData.DigitalSignature = GetJsonString(root, "digital_signature") ?? $"DSE-{auditReport.report_id}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}";
+     
+// Software information
+   reportData.SoftwareName = GetJsonString(root, "software_name") ?? "D-SecureErase";
+           reportData.ProductVersion = GetJsonString(root, "product_version") ?? "1.0";
+ 
+ // Machine information
+           reportData.ComputerName = GetJsonString(root, "computer_name") ?? "Unknown";
+     reportData.MacAddress = GetJsonString(root, "mac_address") ?? "Unknown";
+      reportData.Manufacturer = GetJsonString(root, "manufacturer") ?? "Unknown";
+  
+      // ✅ Merge os and os_version into single field
+     var os = GetJsonString(root, "os");
+    var osVersion = GetJsonString(root, "os_version");
+     
+          if (!string.IsNullOrEmpty(os) && !string.IsNullOrEmpty(osVersion))
+    {
+        reportData.OSVersion = $"{os} {osVersion}";
+              }
+      else if (!string.IsNullOrEmpty(os))
+{
+       reportData.OSVersion = os;
+      }
+     else if (!string.IsNullOrEmpty(osVersion))
+      {
+   reportData.OSVersion = osVersion;
+              }
+     else
+           {
+       reportData.OSVersion = "Unknown";
+                }
+    
+    // Erasure information
+   reportData.EraserMethod = GetJsonString(root, "eraser_method") ?? auditReport.erasure_method ?? "Unknown";
+      reportData.Status = GetJsonString(root, "status") ?? (auditReport.synced ? "Completed" : "Pending");
+      reportData.ProcessMode = GetJsonString(root, "process_mode") ?? "Standard Erasure";
+    reportData.ValidationMethod = GetJsonString(root, "validation_method") ?? "Not Specified";
+                
+     // Timing information
+      reportData.EraserStartTime = GetJsonString(root, "Eraser_Start_Time");
+          reportData.EraserEndTime = GetJsonString(root, "Eraser_End_Time");
+              
+ // File statistics
+                reportData.TotalFiles = GetJsonInt(root, "total_files");
+     reportData.ErasedFiles = GetJsonInt(root, "erased_files");
+     reportData.FailedFiles = GetJsonInt(root, "failed_files");
+
+   // ✅ Parse erasure_log array with proper mapping
+    if (root.TryGetProperty("erasure_log", out var logArray) && logArray.ValueKind == JsonValueKind.Array)
+       {
+    reportData.ErasureLog = new List<ErasureLogEntry>();
+              
+ foreach (var logEntry in logArray.EnumerateArray())
+   {
+       var entry = new ErasureLogEntry
+          {
+     Target = GetJsonString(logEntry, "target") ?? "Unknown",
+   Status = GetJsonString(logEntry, "status") ?? "Unknown",
+      Capacity = GetJsonString(logEntry, "free_space") ?? GetJsonString(logEntry, "dummy_file_size") ?? "Unknown",
+     Size = GetJsonString(logEntry, "dummy_file_size") ?? "Unknown",
+          TotalSectors = GetJsonString(logEntry, "sectors_erased") ?? "Unknown",
+ SectorsErased = GetJsonString(logEntry, "sectors_erased") ?? "Unknown"
+     };
+        
+           reportData.ErasureLog.Add(entry);
+      }
+          }
+
+      return reportData;
+            }
+       catch (JsonException ex)
+    {
+          // Fallback to default data if JSON parsing fails
+return CreateDefaultReportData(auditReport);
+       }
+        }
+
+        /// <summary>
+        /// Create default ReportData when JSON is missing or invalid
+        /// </summary>
+        private ReportData CreateDefaultReportData(audit_reports auditReport)
+ {
+    return new ReportData
+ {
+   ReportId = auditReport.report_id.ToString(),
+         ReportDate = auditReport.report_datetime.ToString("yyyy-MM-dd HH:mm:ss"),
+     DigitalSignature = $"DSE-{auditReport.report_id}-{Guid.NewGuid().ToString("N")[..8].ToUpper()}",
+             SoftwareName = "D-SecureErase",
+          ProductVersion = "1.0",
+      ComputerName = auditReport.client_email,
+     MacAddress = "Unknown",
+     Manufacturer = "Unknown",
+        OSVersion = "Unknown",
+     EraserMethod = auditReport.erasure_method ?? "Unknown",
+             Status = auditReport.synced ? "Completed" : "Pending",
+            ProcessMode = "Standard Erasure",
+   ValidationMethod = "Not Specified",
+         ErasureLog = new List<ErasureLogEntry>
+         {
+           new ErasureLogEntry
+            {
+        Target = $"Report #{auditReport.report_id}",
+           Status = auditReport.synced ? "Completed" : "Pending",
+              Capacity = "See database for details",
+   Size = "Unknown",
+       TotalSectors = "Unknown",
+             SectorsErased = "Unknown"
+            }
+     }
+    };
+        }
+
+        /// <summary>
+        /// Safely get string value from JSON element
+        /// </summary>
+        private string? GetJsonString(JsonElement element, string propertyName)
+        {
+          if (element.TryGetProperty(propertyName, out var prop))
+  {
+          return prop.ValueKind == JsonValueKind.String ? prop.GetString() : prop.ToString();
+      }
+    return null;
+        }
+
+        /// <summary>
+        /// Safely get int value from JSON element
+      /// </summary>
+  private int GetJsonInt(JsonElement element, string propertyName)
+        {
+       if (element.TryGetProperty(propertyName, out var prop))
+            {
+        if (prop.ValueKind == JsonValueKind.Number)
+        {
+   return prop.GetInt32();
+    }
+    if (prop.ValueKind == JsonValueKind.String && int.TryParse(prop.GetString(), out var result))
+    {
+          return result;
+                }
+   }
+            return 0;
         }
 
         #endregion
-    }
-
+}
     /// <summary>
     /// Report filter request model
     /// </summary>
