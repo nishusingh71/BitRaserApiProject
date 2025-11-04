@@ -209,17 +209,23 @@ namespace BitRaserApiProject.Controllers
             _context.subuser.Add(newSubuser);
             await _context.SaveChangesAsync();
 
-            // Assign default role if specified, otherwise assign "SubUser" role
+            // Assign role to rolebasedAuth system (UserRoles/SubuserRoles table)
             var roleToAssign = request.DefaultRole ?? "SubUser";
-            await _userDataService.AssignRoleByEmailAsync(request.SubuserEmail, roleToAssign, parentEmail, true);
+            var roleAssigned = await _userDataService.AssignRoleByEmailAsync(request.SubuserEmail, roleToAssign, parentEmail, true);
+            
+            if (!roleAssigned)
+          {
+     _logger.LogWarning("Failed to assign role {RoleName} to subuser {Email}", roleToAssign, request.SubuserEmail);
+         }
 
-            return Ok(new { 
-                message = "Subuser created successfully", 
-                subuser_email = request.SubuserEmail,
-                parent_email = parentEmail,
-                default_role = roleToAssign,
-                created_at = DateTime.UtcNow
-            });
+        return Ok(new { 
+    message = "Subuser created successfully", 
+     subuser_email = request.SubuserEmail,
+  parent_email = parentEmail,
+      default_role = roleToAssign,
+            role_assigned_to_rbac = roleAssigned,
+     created_at = DateTime.UtcNow
+    });
         }
 
         [HttpPut("subusers/{subuserEmail}/roles")]

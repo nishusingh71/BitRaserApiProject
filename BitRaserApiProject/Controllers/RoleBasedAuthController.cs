@@ -87,164 +87,193 @@ namespace BitRaserApiProject.Controllers
         public async Task<IActionResult> Login([FromBody] RoleBasedLoginRequest request)
         {
             try
-            {
-                if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.Password))
-                {
-                    return BadRequest(new { message = "Email and password are required" });
-                }
+          {
+ if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.Password))
+      {
+ return BadRequest(new { message = "Email and password are required" });
+           }
 
-                string? userEmail = null;
-                bool isSubuser = false;
-                users? mainUser = null;
-                subuser? subuserData = null;
+            string? userEmail = null;
+     bool isSubuser = false;
+    users? mainUser = null;
+    subuser? subuserData = null;
 
-                // Try to authenticate as main user first
-                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.Email);
-                if (user != null && !string.IsNullOrEmpty(user.hash_password) && BCrypt.Net.BCrypt.Verify(request.Password, user.hash_password))
-                {
-                    userEmail = request.Email;
-                    isSubuser = false;
-                    mainUser = user;
-                }
-                else
-                {
-                    // Try to authenticate as subuser
-                    var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
-                    if (subuser != null && BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
-                    {
-                        userEmail = request.Email;
-                        isSubuser = true;
-                        subuserData = subuser;
-                    }
-                }
+      // Try to authenticate as main user first
+  var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.Email);
+      if (user != null && !string.IsNullOrEmpty(user.hash_password) && BCrypt.Net.BCrypt.Verify(request.Password, user.hash_password))
+   {
+        userEmail = request.Email;
+         isSubuser = false;
+         mainUser = user;
+        }
+        else
+       {
+// Try to authenticate as subuser
+        var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+         if (subuser != null && BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
+ {
+      userEmail = request.Email;
+      isSubuser = true;
+           subuserData = subuser;
+    }
+      }
 
-                if (userEmail == null)
-                {
-                    return Unauthorized(new { message = "Invalid credentials" });
-                }
+  if (userEmail == null)
+         {
+            return Unauthorized(new { message = "Invalid credentials" });
+           }
 
-                // Get last logout time from users/subusers table or sessions
-                DateTime? lastLogoutTime = null;
+    // Get last logout time from users/subusers table or sessions
+ DateTime? lastLogoutTime = null;
                 if (isSubuser && subuserData != null)
-                {
-                    lastLogoutTime = subuserData.last_logout;
-                }
-                else if (mainUser != null)
-                {
-                    lastLogoutTime = mainUser.last_logout;
-                }
+     {
+    lastLogoutTime = subuserData.last_logout;
+             }
+           else if (mainUser != null)
+         {
+      lastLogoutTime = mainUser.last_logout;
+       }
         
                 // Fallback to sessions table if not in user table
-                if (!lastLogoutTime.HasValue)
+   if (!lastLogoutTime.HasValue)
+   {
+          var lastSession = await _context.Sessions
+            .Where(s => s.user_email == userEmail && s.logout_time != null)
+         .OrderByDescending(s => s.logout_time)
+ .FirstOrDefaultAsync();
+          lastLogoutTime = lastSession?.logout_time;
+          }
+
+  // Create session entry for tracking
+          var loginTime = DateTime.UtcNow;
+     var session = new Sessions
+       {
+  user_email = userEmail,
+          login_time = loginTime,
+        ip_address = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+  device_info = Request.Headers["User-Agent"].ToString(),
+         session_status = "active"
+        };
+
+ _context.Sessions.Add(session);
+
+    // Update last_login in users or subusers table
+         if (isSubuser && subuserData != null)
                 {
-                    var lastSession = await _context.Sessions
-                        .Where(s => s.user_email == userEmail && s.logout_time != null)
-                        .OrderByDescending(s => s.logout_time)
-                        .FirstOrDefaultAsync();
-                    lastLogoutTime = lastSession?.logout_time;
-                }
-
-                // Create session entry for tracking
-                var loginTime = DateTime.UtcNow;
-                var session = new Sessions
+    subuserData.last_login = loginTime;
+                subuserData.LastLoginIp = session.ip_address;
+        _context.Entry(subuserData).State = EntityState.Modified;
+ }
+       else if (mainUser != null)
                 {
-                    user_email = userEmail,
-                    login_time = loginTime,
-                    ip_address = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                    device_info = Request.Headers["User-Agent"].ToString(),
-                    session_status = "active"
-                };
+      mainUser.last_login = loginTime;
+          _context.Entry(mainUser).State = EntityState.Modified;
+         }
 
-                _context.Sessions.Add(session);
+     await _context.SaveChangesAsync();
 
-                // Update last_login in users or subusers table
-                if (isSubuser && subuserData != null)
+        var token = await GenerateJwtTokenAsync(userEmail, isSubuser);
+          
+     // ✅ Get roles from RBAC system (UserRoles/SubuserRoles tables)
+   var rolesFromRBAC = (await _roleService.GetUserRolesAsync(userEmail, isSubuser)).ToList();
+         var permissions = await _roleService.GetUserPermissionsAsync(userEmail, isSubuser);
+
+                // ✅ ENHANCED: Build complete roles array
+      var allRoles = new List<string>(rolesFromRBAC);
+       
+        // ✅ Add user_role field to roles array if not already present and if it exists
+          if (isSubuser && subuserData != null)
+      {
+      // For subusers: Add subuser.Role field if not empty and not already in roles
+            if (!string.IsNullOrEmpty(subuserData.Role) && !allRoles.Contains(subuserData.Role))
                 {
-                    subuserData.last_login = loginTime;
-                    subuserData.LastLoginIp = session.ip_address;
-                    _context.Entry(subuserData).State = EntityState.Modified;
-                }
-                else if (mainUser != null)
-                {
-                    mainUser.last_login = loginTime;
-                    _context.Entry(mainUser).State = EntityState.Modified;
-                }
-
-                await _context.SaveChangesAsync();
-
-                var token = await GenerateJwtTokenAsync(userEmail, isSubuser);
-                var roles = await _roleService.GetUserRolesAsync(userEmail, isSubuser);
-                var permissions = await _roleService.GetUserPermissionsAsync(userEmail, isSubuser);
-
-                _logger.LogInformation("User login successful: {Email} ({UserType})", userEmail, isSubuser ? "subuser" : "user");
-
-                // Build enhanced response
-                var response = new RoleBasedLoginResponse
-                {
-                    Token = token,
-                    UserType = isSubuser ? "subuser" : "user",
-                    Email = userEmail,
-                    Roles = roles,
-                    Permissions = permissions,
-                    ExpiresAt = DateTime.UtcNow.AddHours(8),
-                    LoginTime = loginTime,
-                    LastLogoutTime = lastLogoutTime
-                };
-
-                // Add user-specific details
-                if (isSubuser && subuserData != null)
-                {
-                    response.UserName = subuserData.Name;
-                    // Priority: RBAC roles > subuser.Role field
-                    response.UserRole = roles.FirstOrDefault() ?? subuserData.Role ?? "User";
-                    response.Department = subuserData.Department;
-                    response.Phone = subuserData.Phone;
-                    response.Timezone = subuserData.timezone;
-                    response.ParentUserEmail = subuserData.user_email;
-                    response.UserId = subuserData.subuser_id;
-                
-                    // Get group name if GroupId exists
-                    if (subuserData.GroupId.HasValue)
-                    {
-                        var group = await _context.Set<Group>().FindAsync(subuserData.GroupId.Value);
-                        response.UserGroup = group?.name;
-                    }
-                }
-                else if (mainUser != null)
-                {
-                    response.UserName = mainUser.user_name;
-                    // ✅ Priority: RBAC roles from UserRoles table > user.user_role field > default "User"
-                    response.UserRole = roles.FirstOrDefault() ?? mainUser.user_role ?? "User";
-                    response.Department = mainUser.department;
-                    response.Phone = mainUser.phone_number;
-                    response.Timezone = mainUser.timezone;
-                    response.UserId = mainUser.user_id;
-                    
-                    // Get group name if user_group exists
-                    if (!string.IsNullOrEmpty(mainUser.user_group))
-                    {
-                        // Try to parse as int to get group from Groups table
-                        if (int.TryParse(mainUser.user_group, out int groupId))
-                        {
-                            var group = await _context.Set<Group>().FindAsync(groupId);
-                            response.UserGroup = group?.name ?? mainUser.user_group;
-                        }
-                        else
-                        {
-                            response.UserGroup = mainUser.user_group;
-                        }
-                    }
-                }
-
-                return Ok(response);
+     allRoles.Add(subuserData.Role);
+          }
+     }
+     else if (mainUser != null)
+          {
+         // For main users: Add user.user_role field if not empty and not already in roles
+    if (!string.IsNullOrEmpty(mainUser.user_role) && !allRoles.Contains(mainUser.user_role))
+       {
+      allRoles.Add(mainUser.user_role);
+           }
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during login for {Email}", request.Email);
-                return StatusCode(500, new { message = "An error occurred during login" });
-            }
+          
+        // ✅ If roles array is still empty, add "SuperAdmin" as default (matches CreateUser behavior)
+             if (!allRoles.Any())
+     {
+           allRoles.Add("SuperAdmin");
         }
 
+   _logger.LogInformation("User login successful: {Email} ({UserType})", userEmail, isSubuser ? "subuser" : "user");
+
+   // Build enhanced response
+                var response = new RoleBasedLoginResponse
+        {
+   Token = token,
+              UserType = isSubuser ? "subuser" : "user",
+  Email = userEmail,
+         Roles = allRoles,  // ✅ Use enhanced roles array
+               Permissions = permissions,
+              ExpiresAt = DateTime.UtcNow.AddHours(8),
+          LoginTime = loginTime,
+     LastLogoutTime = lastLogoutTime
+   };
+
+      // Add user-specific details
+      if (isSubuser && subuserData != null)
+      {
+     response.UserName = subuserData.Name;
+          // ✅ Priority: First role from allRoles array (includes RBAC + field roles)
+      response.UserRole = allRoles.FirstOrDefault() ?? "User";
+          response.Department = subuserData.Department;
+       response.Phone = subuserData.Phone;
+    response.Timezone = subuserData.timezone;
+response.ParentUserEmail = subuserData.user_email;
+         response.UserId = subuserData.subuser_id;
+            
+         // Get group name if GroupId exists
+  if (subuserData.GroupId.HasValue)
+    {
+         var group = await _context.Set<Group>().FindAsync(subuserData.GroupId.Value);
+         response.UserGroup = group?.name;
+      }
+  }
+                else if (mainUser != null)
+                {
+           response.UserName = mainUser.user_name;
+        // ✅ Priority: First role from allRoles array (includes RBAC + field roles + default)
+    response.UserRole = allRoles.FirstOrDefault() ?? "User";
+    response.Department = mainUser.department;
+         response.Phone = mainUser.phone_number;
+        response.Timezone = mainUser.timezone;
+              response.UserId = mainUser.user_id;
+           
+    // Get group name if user_group exists
+         if (!string.IsNullOrEmpty(mainUser.user_group))
+     {
+              // Try to parse as int to get group from Groups table
+     if (int.TryParse(mainUser.user_group, out int groupId))
+        {
+         var group = await _context.Set<Group>().FindAsync(groupId);
+             response.UserGroup = group?.name ?? mainUser.user_group;
+   }
+ else
+             {
+     response.UserGroup = mainUser.user_group;
+  }
+        }
+            }
+
+    return Ok(response);
+            }
+    catch (Exception ex)
+      {
+  _logger.LogError(ex, "Error during login for {Email}", request.Email);
+    return StatusCode(500, new { message = "An error occurred during login" });
+            }
+        }
+        
         [HttpPost("create-subuser")]
         [RequirePermission("UserManagement")]
         public async Task<IActionResult> CreateSubuser([FromBody] CreateSubuserRequest request)

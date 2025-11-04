@@ -244,25 +244,26 @@ namespace BitRaserApiProject.Controllers
             _context.Users.Add(newUser);
             await _context.SaveChangesAsync();
 
-            // Assign default role if specified
-            if (!string.IsNullOrEmpty(request.DefaultRole))
-            {
-                await AssignRoleToUserAsync(request.UserEmail, request.DefaultRole, currentUserEmail!);
-            }
+            // ✅ CHANGED: By default assign SuperAdmin role (highest privilege)
+      // Priority: DefaultRole > "SuperAdmin" (default)
+  var roleToAssign = request.DefaultRole ?? "SuperAdmin";  // Changed from "User" to "SuperAdmin"
+       var roleAssigned = await AssignRoleToUserAsync(request.UserEmail, roleToAssign, currentUserEmail!);
 
-            var response = new {
-                userEmail = newUser.user_email,
-                userName = newUser.user_name,
+     var response = new {
+            userEmail = newUser.user_email,
+    userName = newUser.user_name,
                 // NEW FIELDS
-                department = newUser.department,
-                userGroup = newUser.user_group,
-                userRole = newUser.user_role,
-                licenseAllocation = newUser.license_allocation,
-                status = newUser.status,
-                // EXISTING FIELDS
-                createdAt = newUser.created_at,
-                message = "User created successfully"
-            };
+       department = newUser.department,
+        userGroup = newUser.user_group,
+      userRole = newUser.user_role,
+       licenseAllocation = newUser.license_allocation,
+      status = newUser.status,
+            // EXISTING FIELDS
+ createdAt = newUser.created_at,
+                assignedRole = roleToAssign,
+              roleAssignedToRBAC = roleAssigned,
+           message = roleAssigned ? $"User created successfully with {roleToAssign} role assigned to RBAC" : $"User created successfully ({roleToAssign} role assignment to RBAC failed)"
+         };
 
             return CreatedAtAction(nameof(GetUser), new { email = newUser.user_email }, response);
         }
@@ -316,17 +317,19 @@ namespace BitRaserApiProject.Controllers
             _context.Users.Add(newUser);
             await _context.SaveChangesAsync();
 
-            // Auto-assign User role for public registration
-            await AssignRoleToUserAsync(request.UserEmail, "User", "system");
+     // ✅ Auto-assign User role for public registration to rolebasedAuth system
+    var roleAssigned = await AssignRoleToUserAsync(request.UserEmail, "User", "system");
 
-            var response = new {
-                userEmail = newUser.user_email,
+       var response = new {
+     userEmail = newUser.user_email,
                 userName = newUser.user_name,
-                createdAt = newUser.created_at,
-                message = "User registered successfully"
-            };
+ createdAt = newUser.created_at,
+      assignedRole = "User",
+           roleAssignedToRBAC = roleAssigned,
+        message = roleAssigned ? "User registered successfully with default role" : "User registered successfully (role assignment to RBAC failed)"
+    };
 
-            return CreatedAtAction(nameof(GetUser), new { email = newUser.user_email }, response);
+        return CreatedAtAction(nameof(GetUser), new { email = newUser.user_email }, response);
         }
 
         /// <summary>
@@ -836,31 +839,41 @@ namespace BitRaserApiProject.Controllers
             return managedEmails;
         }
 
-        private async Task AssignRoleToUserAsync(string userEmail, string roleName, string assignedByEmail)
+        private async Task<bool> AssignRoleToUserAsync(string userEmail, string roleName, string assignedByEmail)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+            try
+            {
+                 var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
             var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
 
-            if (user != null && role != null)
+         if (user != null && role != null)
             {
-                // Check if role already assigned
-                var existingRole = await _context.UserRoles
-                    .FirstOrDefaultAsync(ur => ur.UserId == user.user_id && ur.RoleId == role.RoleId);
+        // Check if role already assigned
+     var existingRole = await _context.UserRoles
+ .FirstOrDefaultAsync(ur => ur.UserId == user.user_id && ur.RoleId == role.RoleId);
 
-                if (existingRole == null)
-                {
-                    var userRole = new UserRole
-                    {
-                        UserId = user.user_id,
-                        RoleId = role.RoleId,
-                        AssignedAt = DateTime.UtcNow,
-                        AssignedByEmail = assignedByEmail
-                    };
+    if (existingRole == null)
+              {
+           var userRole = new UserRole
+            {
+  UserId = user.user_id,
+   RoleId = role.RoleId,
+   AssignedAt = DateTime.UtcNow,
+          AssignedByEmail = assignedByEmail
+        };
 
-                    _context.UserRoles.Add(userRole);
-                    await _context.SaveChangesAsync();
-                }
-            }
+      _context.UserRoles.Add(userRole);
+         await _context.SaveChangesAsync();
+ }
+        return true; // Role assigned successfully or already exists
+         }
+     
+    return false; // User or role not found
+       }
+            catch (Exception)
+ {
+             return false; // Assignment failed
+        }
         }
 
         private async Task<DateTime?> GetLastActivityAsync(string userEmail)
@@ -1101,7 +1114,7 @@ namespace BitRaserApiProject.Controllers
         public string? UserGroup { get; set; }
         
  /// <summary>User role (optional)</summary>
-        /// <example>admin</example>
+        /// <example>admin</expert>
   [System.ComponentModel.DataAnnotations.MaxLength(50)]
      public string? UserRole { get; set; }
       

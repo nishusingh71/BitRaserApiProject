@@ -200,82 +200,81 @@ namespace BitRaserApiProject.Controllers
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
+  
             // Subusers cannot create subusers (prevent recursive subuser creation)
-            if (isCurrentUserSubuser)
-            {
-                return StatusCode(403, new { error = "Subusers cannot create subusers" });
+      if (isCurrentUserSubuser)
+     {
+           return StatusCode(403, new { error = "Subusers cannot create subusers" });
             }
 
-            // Validate input - only email and password are required
+     // Validate input - only email and password are required
             if (string.IsNullOrEmpty(request.subuser_email) || string.IsNullOrEmpty(request.subuser_password))
-                return BadRequest("Subuser email and password are required");
+       return BadRequest("Subuser email and password are required");
 
-            // Check if subuser already exists
-            var existingSubuser = await _context.subuser
+         // Check if subuser already exists
+ var existingSubuser = await _context.subuser
                 .Where(s => s.subuser_email == request.subuser_email)
-                .Select(s => new { s.subuser_email })  // Only select email field to avoid non-existent column errors
-                .FirstOrDefaultAsync();
-                
-            if (existingSubuser != null)
-                return Conflict($"Subuser with email {request.subuser_email} already exists");
-
-            // Check if email is already used as a main user
-            var existingUser = await _context.Users
-                .Where(u => u.user_email == request.subuser_email)
-                .Select(u => new { u.user_email })  // Only select email field
-                .FirstOrDefaultAsync();
+  .Select(s => new { s.subuser_email })  // Only select email field to avoid non-existent column errors
+          .FirstOrDefaultAsync();
          
-            if (existingUser != null)
-                return Conflict($"Email {request.subuser_email} is already used as a main user account");
+         if (existingSubuser != null)
+          return Conflict($"Subuser with email {request.subuser_email} already exists");
 
-            // Validate parent user email (use current user if not specified) - parentUserEmail is optional
-            var parentUserEmail = request.parentUserEmail ?? currentUserEmail!;
-    
+// Check if email is already used as a main user
+    var existingUser = await _context.Users
+        .Where(u => u.user_email == request.subuser_email)
+ .Select(u => new { u.user_email })  // Only select email field
+          .FirstOrDefaultAsync();
+     
+   if (existingUser != null)
+      return Conflict($"Email {request.subuser_email} is already used as a main user account");
+
+ // Validate parent user email (use current user if not specified) - parentUserEmail is optional
+ var parentUserEmail = request.parentUserEmail ?? currentUserEmail!;
+  
             // Check if current user can create subuser for the specified parent
-            if (parentUserEmail != currentUserEmail && 
-                !await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSERS_FOR_OTHERS", isCurrentUserSubuser))
-            {
-                return StatusCode(403, new { error = "You can only create subusers for yourself" });
-            }
+     if (parentUserEmail != currentUserEmail && 
+        !await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSERS_FOR_OTHERS", isCurrentUserSubuser))
+     {
+        return StatusCode(403, new { error = "You can only create subusers for yourself" });
+        }
 
             // Validate parent user exists
-            var parentUser = await _context.Users
-              .FirstOrDefaultAsync(u => u.user_email == parentUserEmail);
+   var parentUser = await _context.Users
+      .FirstOrDefaultAsync(u => u.user_email == parentUserEmail);
      if (parentUser == null)
           return BadRequest($"Parent user with email {parentUserEmail} not found");
 
-            // Create subuser with all fields
+     // Create subuser with all fields
   var newSubuser = new subuser
        {
-       subuser_email = request.subuser_email,
+   subuser_email = request.subuser_email,
     subuser_password = BCrypt.Net.BCrypt.HashPassword(request.subuser_password),
     user_email = parentUserEmail,
-              superuser_id = parentUser.user_id,
+       superuser_id = parentUser.user_id,
    Name = request.subuser_name ?? request.subuser_email.Split('@')[0], // Use email prefix if name not provided
         Department = request.department, // Optional
  Role = request.role ?? "subuser", // Default to "subuser" if not provided
   Phone = request.phone, // Optional
-        GroupId = !string.IsNullOrEmpty(request.subuser_group) && int.TryParse(request.subuser_group, out int groupId) ? groupId : (int?)null, // Convert string to int?
+   GroupId = !string.IsNullOrEmpty(request.subuser_group) && int.TryParse(request.subuser_group, out int groupId) ? groupId : (int?)null, // Convert string to int?
       status = "active",  // Use lowercase field to avoid duplicate column error
  IsEmailVerified = false,
     CreatedAt = DateTime.UtcNow,
-         CreatedBy = parentUser.user_id
+       CreatedBy = parentUser.user_id
   };
 
     _context.subuser.Add(newSubuser);
        await _context.SaveChangesAsync();
 
-       // Assign role if specified
- if (!string.IsNullOrEmpty(request.role))
- {
-    await AssignRoleToSubuserAsync(request.subuser_email, request.role, currentUserEmail!);
-  }
- else
-            {
-      // Assign a default "SubUser" role if no role specified
-                await AssignRoleToSubuserAsync(request.subuser_email, "SubUser", currentUserEmail!);
-            }
+       // ✅ Assign role to rolebasedAuth system (SubuserRoles table)
+    // This ensures the role field is also added to the roles array in RBAC
+       var roleToAssign = request.role ?? "SubUser";
+       var roleAssigned = await AssignRoleToSubuserAsync(request.subuser_email, roleToAssign, currentUserEmail!);
+       
+       if (!roleAssigned)
+       {
+           _logger.LogWarning("Failed to assign role {RoleName} to subuser {Email} in RBAC system", roleToAssign, request.subuser_email);
+       }
 
             var response = new {
           subuserEmail = newSubuser.subuser_email,
@@ -285,10 +284,11 @@ namespace BitRaserApiProject.Controllers
        phone = newSubuser.Phone,
   subuserGroup = newSubuser.GroupId?.ToString(), // Convert back to string for response
        parentUserEmail = newSubuser.user_email,
-       subuserID = newSubuser.subuser_id,
+   subuserID = newSubuser.subuser_id,
    status = newSubuser.status,  // Use lowercase field
       createdAt = newSubuser.CreatedAt,
-    message = "Subuser created successfully"
+      roleAssignedToRBAC = roleAssigned, // Indicate if role was added to RBAC
+    message = roleAssigned ? "Subuser created successfully with role assigned to RBAC" : "Subuser created successfully (role assignment to RBAC failed)"
    };
 
         return CreatedAtAction(nameof(GetSubuser), new { email = newSubuser.subuser_email }, response);
