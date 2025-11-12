@@ -104,74 +104,103 @@ namespace BitRaserApiProject.Controllers
         /// <summary>
         /// Get all machines with role-based filtering
         /// </summary>
+        /// ✅ SIMPLIFIED: No Org Admin concept - Simple hierarchical filtering
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetAllMachines([FromQuery] MachineFilterRequest? filter)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
+       
             IQueryable<machines> query = _context.Machines;
 
-            // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser))
+            // ✅ SIMPLIFIED: Apply role-based filtering based on actual permissions
+     bool hasGlobalAccess = await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser);
+         
+    if (hasGlobalAccess)
+          {
+     // ✅ SuperAdmin/Admin: Get their managed hierarchy (not entire DB)
+     var allManagedEmails = await GetAllManagedEmailsAsync(currentUserEmail!);
+       query = query.Where(m => 
+       allManagedEmails.Contains(m.user_email) || 
+          (m.subuser_email != null && allManagedEmails.Contains(m.subuser_email))
+);
+        }
+            else if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_MANAGED_USER_MACHINES", isCurrentUserSubuser))
             {
-                // Users and subusers can only see their own machines unless they have elevated permissions
-                if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_MANAGED_USER_MACHINES", isCurrentUserSubuser))
-                {
-                    var managedUserEmails = await GetManagedUserEmailsAsync(currentUserEmail!);
-                    query = query.Where(m => managedUserEmails.Contains(m.user_email) || 
-                                           m.user_email == currentUserEmail ||
-                                           m.subuser_email == currentUserEmail);
-                }
-                else
-                {
-                    // Show own machines (for both users and subusers)
-                    query = query.Where(m => m.user_email == currentUserEmail || m.subuser_email == currentUserEmail);
-                }
+         // Manager: Get managed users + their subusers
+            var managedUserEmails = await GetManagedUserEmailsAsync(currentUserEmail!);
+    var managedSubuserEmails = await GetSubusersOfManagedUsersAsync(managedUserEmails);
+       
+      var allManagedEmails = managedUserEmails.Concat(managedSubuserEmails).ToList();
+    
+                query = query.Where(m => 
+               allManagedEmails.Contains(m.user_email) || 
+           m.user_email == currentUserEmail ||
+    (m.subuser_email != null && allManagedEmails.Contains(m.subuser_email)) ||
+        m.subuser_email == currentUserEmail
+       );
+ }
+  else if (isCurrentUserSubuser)
+   {
+    // ❌ Subuser - only own machines
+           query = query.Where(m => m.subuser_email == currentUserEmail);
             }
+            else
+         {
+          // ✅ Regular User - own machines + subuser machines
+         var subuserEmails = await _context.subuser
+.Where(s => s.user_email == currentUserEmail)
+              .Select(s => s.subuser_email)
+            .ToListAsync();
+   
+         query = query.Where(m => 
+         m.user_email == currentUserEmail ||  // Own machines
+        (m.subuser_email != null && subuserEmails.Contains(m.subuser_email))  // Subuser machines
+     );
+}
 
             // Apply additional filters if provided
-            if (filter != null)
-            {
-                if (!string.IsNullOrEmpty(filter.UserEmail))
-                    query = query.Where(m => m.user_email.Contains(filter.UserEmail));
+          if (filter != null)
+       {
+     if (!string.IsNullOrEmpty(filter.UserEmail))
+             query = query.Where(m => m.user_email.Contains(filter.UserEmail));
 
-                if (!string.IsNullOrEmpty(filter.MacAddress))
-                    query = query.Where(m => m.mac_address.Contains(filter.MacAddress));
+           if (!string.IsNullOrEmpty(filter.MacAddress))
+  query = query.Where(m => m.mac_address.Contains(filter.MacAddress));
 
-                if (filter.LicenseActivated.HasValue)
-                    query = query.Where(m => m.license_activated == filter.LicenseActivated.Value);
+    if (filter.LicenseActivated.HasValue)
+             query = query.Where(m => m.license_activated == filter.LicenseActivated.Value);
 
-                if (!string.IsNullOrEmpty(filter.VmStatus))
-                    query = query.Where(m => m.vm_status.Contains(filter.VmStatus));
+if (!string.IsNullOrEmpty(filter.VmStatus))
+          query = query.Where(m => m.vm_status.Contains(filter.VmStatus));
 
-                if (filter.RegisteredFrom.HasValue)
-                    query = query.Where(m => m.created_at >= filter.RegisteredFrom.Value);
+    if (filter.RegisteredFrom.HasValue)
+      query = query.Where(m => m.created_at >= filter.RegisteredFrom.Value);
 
-                if (filter.RegisteredTo.HasValue)
-                    query = query.Where(m => m.created_at <= filter.RegisteredTo.Value);
+     if (filter.RegisteredTo.HasValue)
+            query = query.Where(m => m.created_at <= filter.RegisteredTo.Value);
             }
 
-            var machines = await query
-                .OrderByDescending(m => m.created_at)
-                .Take(filter?.PageSize ?? 100)
-                .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-                .Select(m => new {
-                    fingerprintHash = m.fingerprint_hash,
-                    userEmail = m.user_email,
-                    subuserEmail = m.subuser_email,
-                    macAddress = m.mac_address,
-                    osVersion = m.os_version,
-                    licenseActivated = m.license_activated,
-                    licenseActivationDate = m.license_activation_date,
-                    licenseDaysValid = m.license_days_valid,
-                    vmStatus = m.vm_status,
-                    createdAt = m.created_at,
-                    hasLicenseDetails = !string.IsNullOrEmpty(m.license_details_json) && m.license_details_json != "{}"
-                })
-                .ToListAsync();
+         var machines = await query
+   .OrderByDescending(m => m.created_at)
+    .Take(filter?.PageSize ?? 100)
+       .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+            .Select(m => new {
+  fingerprintHash = m.fingerprint_hash,
+          userEmail = m.user_email,
+      subuserEmail = m.subuser_email,
+     macAddress = m.mac_address,
+osVersion = m.os_version,
+              licenseActivated = m.license_activated,
+            licenseActivationDate = m.license_activation_date,
+          licenseDaysValid = m.license_days_valid,
+                  vmStatus = m.vm_status,
+   createdAt = m.created_at,
+    hasLicenseDetails = !string.IsNullOrEmpty(m.license_details_json) && m.license_details_json != "{}"
+ })
+           .ToListAsync();
 
-            return Ok(machines);
+      return Ok(machines);
         }
 
         /// <summary>
@@ -512,28 +541,94 @@ namespace BitRaserApiProject.Controllers
 
         private async Task<bool> CanManageUserAsync(string currentUserEmail, string targetUserEmail)
         {
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
-            
-            // Check if current user has admin permissions
-            if (await _authService.HasPermissionAsync(currentUserEmail, "READ_ALL_MACHINES", isCurrentUserSubuser))
-                return true;
+       var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+        
+          // Check if current user has admin permissions
+  if (await _authService.HasPermissionAsync(currentUserEmail, "READ_ALL_MACHINES", isCurrentUserSubuser))
+ return true;
 
-            // Check if current user can manage this specific user
-            return await _authService.CanManageUserAsync(currentUserEmail, targetUserEmail);
+   // Check if current user can manage this specific user
+         return await _authService.CanManageUserAsync(currentUserEmail, targetUserEmail);
         }
 
-        private async Task<List<string>> GetManagedUserEmailsAsync(string managerEmail)
+     private async Task<List<string>> GetManagedUserEmailsAsync(string managerEmail)
         {
-            // Get users this manager can manage based on hierarchy
-            var managedEmails = new List<string> { managerEmail };
+ // Get users this manager can manage based on hierarchy
+    var managedEmails = new List<string> { managerEmail };
 
-            // Add logic to get users managed by this manager
-            // This is a placeholder - implement based on your user hierarchy
-            
+  // Get direct subusers
+          var subusers = await _context.subuser
+ .Where(s => s.user_email == managerEmail)
+      .Select(s => s.user_email)
+.Distinct()
+   .ToListAsync();
+         
+    managedEmails.AddRange(subusers);
+  
             return managedEmails;
         }
 
-        #endregion
+        /// <summary>
+    /// Get ALL managed emails for SuperAdmin/Admin
+    /// ✅ SIMPLIFIED: No Org Admin concept
+   /// Returns: Admin's managed users + their subusers (NOT entire DB)
+      /// </summary>
+  private async Task<List<string>> GetAllManagedEmailsAsync(string adminEmail)
+        {
+     var managedEmails = new List<string> { adminEmail };
+      
+// ✅ SIMPLE LOGIC:
+      // For SuperAdmin with SYSTEM_ADMIN permission: Get all users
+    // For regular Admin with READ_ALL_MACHINES: Get managed users only
+     // TODO: Implement management hierarchy (e.g., created_by, managed_by fields)
+     
+    var isSystemSuperAdmin = await _authService.HasPermissionAsync(adminEmail, "SYSTEM_ADMIN");
+   
+            if (isSystemSuperAdmin)
+    {
+      // ✅ System SuperAdmin: Get ALL users (if truly needed for system-wide operations)
+    var allUserEmails = await _context.Users
+       .Select(u => u.user_email)
+   .ToListAsync();
+     managedEmails.AddRange(allUserEmails);
+      }
+     else
+   {
+   // ✅ Regular Admin: Get users managed by this admin
+         // Option 1: If you have created_by or managed_by field
+    // var managedUsers = await _context.Users
+       //     .Where(u => u.created_by == adminEmail || u.managed_by == adminEmail)
+    //     .Select(u => u.user_email)
+    //     .ToListAsync();
+       // managedEmails.AddRange(managedUsers);
+     
+  // Option 2: For now, just return admin's own email (will be extended later)
+  // TODO: Implement management hierarchy
+       managedEmails.Add(adminEmail);
+    }
+    
+            // Get all subusers of managed users
+      var allSubusers = await _context.subuser
+ .Where(s => managedEmails.Contains(s.user_email))
+  .Select(s => s.subuser_email)
+ .ToListAsync();
+         managedEmails.AddRange(allSubusers);
+      
+         return managedEmails.Distinct().ToList();
+        }
+
+        /// <summary>
+    /// Get subusers of managed users
+/// </summary>
+  private async Task<List<string>> GetSubusersOfManagedUsersAsync(List<string> managedUserEmails)
+  {
+ return await _context.subuser
+     .Where(s => managedUserEmails.Contains(s.user_email))
+    .Select(s => s.subuser_email)
+      .ToListAsync();
+}
+
+      #endregion
     }
 
     #region Request Models
@@ -544,13 +639,13 @@ namespace BitRaserApiProject.Controllers
     public class MachineFilterRequest
     {
         public string? UserEmail { get; set; }
-        public string? MacAddress { get; set; }
+public string? MacAddress { get; set; }
         public bool? LicenseActivated { get; set; }
         public string? VmStatus { get; set; }
         public DateTime? RegisteredFrom { get; set; }
-        public DateTime? RegisteredTo { get; set; }
+ public DateTime? RegisteredTo { get; set; }
         public int? LicenseExpiringInDays { get; set; }
-        public int Page { get; set; } = 0;
+     public int Page { get; set; } = 0;
         public int PageSize { get; set; } = 100;
     }
 
@@ -561,14 +656,14 @@ namespace BitRaserApiProject.Controllers
     {
         public string MacAddress { get; set; } = string.Empty;
         public string FingerprintHash { get; set; } = string.Empty;
-        public string PhysicalDriveId { get; set; } = string.Empty;
+    public string PhysicalDriveId { get; set; } = string.Empty;
         public string CpuId { get; set; } = string.Empty;
         public string BiosSerial { get; set; } = string.Empty;
-        public string OsVersion { get; set; } = string.Empty;
+   public string OsVersion { get; set; } = string.Empty;
         public bool? LicenseActivated { get; set; }
         public DateTime? LicenseActivationDate { get; set; }
         public int? LicenseDaysValid { get; set; }
-        public string? LicenseDetailsJson { get; set; }
+   public string? LicenseDetailsJson { get; set; }
         public string? VmStatus { get; set; }
     }
 
@@ -579,17 +674,17 @@ namespace BitRaserApiProject.Controllers
     {
         public string? OsVersion { get; set; }
         public string? VmStatus { get; set; }
-        public string? LicenseDetailsJson { get; set; }
-        public int? LicenseDaysValid { get; set; }
+    public string? LicenseDetailsJson { get; set; }
+    public int? LicenseDaysValid { get; set; }
     }
 
     /// <summary>
     /// License activation request model
     /// </summary>
     public class LicenseActivationRequest
-    {
+ {
         public int? DaysValid { get; set; }
-        public string? LicenseDetailsJson { get; set; }
+    public string? LicenseDetailsJson { get; set; }
     }
 
     #endregion

@@ -33,6 +33,7 @@ namespace BitRaserApiProject.Controllers
 
         /// <summary>
         /// Get all audit reports with role-based filtering
+        /// ✅ ENHANCED: Parents can see their own reports + subuser reports
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetAuditReports([FromQuery] ReportFilterRequest? filter)
@@ -45,8 +46,24 @@ namespace BitRaserApiProject.Controllers
             // Apply role-based filtering
             if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser))
             {
-                // Users and subusers can only see their own reports
-                query = query.Where(r => r.client_email == userEmail);
+                if (isCurrentUserSubuser)
+                {
+                    // ❌ Subuser - only own reports
+                    query = query.Where(r => r.client_email == userEmail);
+                }
+                else
+                {
+                    // ✅ ENHANCED: User - own reports + subuser reports
+                    var subuserEmails = await _context.subuser
+     .Where(s => s.user_email == userEmail)
+                      .Select(s => s.subuser_email)
+                      .ToListAsync();
+     
+                    query = query.Where(r => 
+r.client_email == userEmail ||// Own reports
+      subuserEmails.Contains(r.client_email)            // Subuser reports
+       );
+                }
             }
 
             // Apply additional filters if provided

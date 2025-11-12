@@ -30,6 +30,7 @@ namespace BitRaserApiProject.Controllers
 
         /// <summary>
         /// Get all commands with role-based filtering
+        /// ✅ Added: User email based filtering
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetCommands([FromQuery] CommandFilterRequest? filter)
@@ -39,19 +40,14 @@ namespace BitRaserApiProject.Controllers
             
             IQueryable<Commands> query = _context.Commands;
 
-            // Apply role-based filtering - allow users and subusers to see commands unless admin restrictions
+            // Apply role-based filtering
             if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_COMMANDS", isCurrentUserSubuser))
             {
-                // For regular users and subusers, they can see all commands for operational purposes
-                // Admin-level restrictions only apply if they have the specific permission
-                if (!await _authService.HasPermissionAsync(userEmail!, "MANAGE_COMMANDS", isCurrentUserSubuser))
-                {
-                    // Basic users and subusers can still view commands for their operations
-                    // They might need to see system commands to understand system state
-                }
+                // Regular users and subusers can see all commands for operational purposes
+                // No filtering applied - system-level commands
             }
 
-            // Apply additional filters if provided
+            // Apply additional filters if provided (non-JSON filters first)
             if (filter != null)
             {
                 if (!string.IsNullOrEmpty(filter.CommandStatus))
@@ -67,20 +63,94 @@ namespace BitRaserApiProject.Controllers
                     query = query.Where(c => c.issued_at <= filter.IssuedTo.Value);
             }
 
+            // Execute query first
             var commands = await query
                 .OrderByDescending(c => c.issued_at)
                 .Take(filter?.PageSize ?? 100)
                 .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-                .Select(c => new {
-                    c.Command_id,
-                    c.command_text,
-                    c.command_status,
-                    c.issued_at,
-                    HasJsonData = !string.IsNullOrEmpty(c.command_json) && c.command_json != "{}"
-                })
                 .ToListAsync();
 
-            return Ok(commands);
+            // ✅ FIX: Apply user email filter in memory (MySQL JSON search issue)
+            if (filter != null && !string.IsNullOrEmpty(filter.UserEmail))
+            {
+                var userEmailFilter = filter.UserEmail.ToLower();
+                commands = commands
+                    .Where(c => {
+    if (string.IsNullOrEmpty(c.command_json) || c.command_json == "{}")
+    return false;
+               
+          var json = c.command_json.ToLower();
+     return json.Contains($"\"user_email\":\"{userEmailFilter}\"") ||
+       json.Contains($"\"issued_by\":\"{userEmailFilter}\"");
+          })
+      .ToList();
+            }
+
+            // Parse and add user email from command_json
+            var commandsWithUser = commands.Select(c => {
+ var userEmailFromJson = ExtractUserEmailFromJson(c.command_json);
+    return new {
+          c.Command_id,
+             c.command_text,
+        c.command_status,
+     c.issued_at,
+            IssuedByEmail = userEmailFromJson,
+   HasJsonData = !string.IsNullOrEmpty(c.command_json) && c.command_json != "{}"
+      };
+      }).ToList();
+
+            return Ok(commandsWithUser);
+        }
+
+        /// <summary>
+        /// ✅ NEW: Get commands by user email
+        /// </summary>
+        [HttpGet("by-email/{userEmail}")]
+        public async Task<ActionResult<IEnumerable<object>>> GetCommandsByUserEmail(string userEmail)
+        {
+        var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+          var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+      
+            // Check if user can view commands for this email
+      bool canView = userEmail == currentUserEmail ||
+             await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_COMMANDS", isCurrentUserSubuser);
+
+            if (!canView)
+            {
+        return StatusCode(403, new { error = "You can only view your own commands" });
+   }
+
+            // ✅ FIX: Get all commands first, then filter in memory (MySQL JSON search issue)
+            var allCommands = await _context.Commands
+        .OrderByDescending(c => c.issued_at)
+     .ToListAsync();
+
+   // Filter by user email in command_json (client-side)
+     var userEmailLower = userEmail.ToLower();
+      var commands = allCommands
+           .Where(c => {
+  if (string.IsNullOrEmpty(c.command_json) || c.command_json == "{}")
+ return false;
+     
+        var json = c.command_json.ToLower();
+            return json.Contains($"\"user_email\":\"{userEmailLower}\"") ||
+            json.Contains($"\"issued_by\":\"{userEmailLower}\"");
+   })
+    .ToList();
+
+         var commandsWithUser = commands.Select(c => {
+      var userEmailFromJson = ExtractUserEmailFromJson(c.command_json);
+     return new {
+       c.Command_id,
+         c.command_text,
+        c.command_status,
+   c.issued_at,
+   IssuedByEmail = userEmailFromJson,
+    c.command_json
+           };
+    }).ToList();
+
+            return commands.Any() ? Ok(commandsWithUser) : NotFound("No commands found for this user");
         }
 
         /// <summary>
@@ -102,6 +172,7 @@ namespace BitRaserApiProject.Controllers
 
         /// <summary>
         /// Create a new command - Users and subusers can create commands
+        /// ✅ Updated: Store user_email in command_json
         /// </summary>
         [HttpPost]
         public async Task<ActionResult<Commands>> CreateCommand([FromBody] CommandCreateRequest request)
@@ -112,18 +183,39 @@ namespace BitRaserApiProject.Controllers
             if (string.IsNullOrEmpty(request.CommandText))
                 return BadRequest("Command text is required");
 
-            var command = new Commands
-            {
-                command_text = request.CommandText,
-                command_json = request.CommandJson ?? "{}",
-                command_status = request.CommandStatus ?? "Pending",
-                issued_at = DateTime.UtcNow
-            };
+            // ✅ Parse or create JSON with user_email
+            string commandJson = request.CommandJson ?? "{}";
+            try
+{
+    var jsonObj = System.Text.Json.JsonDocument.Parse(commandJson);
+     var jsonDict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(commandJson) 
+    ?? new Dictionary<string, object>();
+  
+  // Add user_email to JSON
+    jsonDict["user_email"] = userEmail!;
+       jsonDict["issued_by"] = userEmail!;
+      jsonDict["created_at"] = DateTime.UtcNow.ToString("o");
+    
+            commandJson = System.Text.Json.JsonSerializer.Serialize(jsonDict);
+      }
+    catch
+       {
+         // If JSON is invalid, create new JSON with user_email
+       commandJson = $"{{\"user_email\":\"{userEmail}\",\"issued_by\":\"{userEmail}\",\"created_at\":\"{DateTime.UtcNow:o}\"}}";
+    }
 
-            _context.Commands.Add(command);
-            await _context.SaveChangesAsync();
+      var command = new Commands
+   {
+   command_text = request.CommandText,
+        command_json = commandJson,
+      command_status = request.CommandStatus ?? "Pending",
+      issued_at = DateTime.UtcNow
+   };
 
-            return CreatedAtAction(nameof(GetCommand), new { id = command.Command_id }, command);
+   _context.Commands.Add(command);
+      await _context.SaveChangesAsync();
+
+  return CreatedAtAction(nameof(GetCommand), new { id = command.Command_id }, command);
         }
 
         /// <summary>
@@ -345,19 +437,50 @@ namespace BitRaserApiProject.Controllers
                 status = command.command_status
             });
         }
+
+        /// <summary>
+     /// ✅ NEW: Helper method to extract user email from command_json
+     /// </summary>
+    private string? ExtractUserEmailFromJson(string? commandJson)
+        {
+      if (string.IsNullOrEmpty(commandJson) || commandJson == "{}")
+     return null;
+
+            try
+            {
+      var jsonDoc = System.Text.Json.JsonDocument.Parse(commandJson);
+                
+                // Try to get user_email
+   if (jsonDoc.RootElement.TryGetProperty("user_email", out var userEmailProp))
+            return userEmailProp.GetString();
+     
+          // Try to get issued_by
+    if (jsonDoc.RootElement.TryGetProperty("issued_by", out var issuedByProp))
+     return issuedByProp.GetString();
+                
+      return null;
+      }
+     catch
+         {
+        return null;
+     }
+        }
     }
+
+    #region Request Models
 
     /// <summary>
     /// Command filter request model
     /// </summary>
     public class CommandFilterRequest
     {
-        public string? CommandStatus { get; set; }
+        public string? UserEmail { get; set; }  // ✅ NEW: Filter by user email
+   public string? CommandStatus { get; set; }
         public string? CommandText { get; set; }
         public DateTime? IssuedFrom { get; set; }
         public DateTime? IssuedTo { get; set; }
         public int Page { get; set; } = 0;
-        public int PageSize { get; set; } = 100;
+ public int PageSize { get; set; } = 100;
     }
 
     /// <summary>
@@ -365,7 +488,7 @@ namespace BitRaserApiProject.Controllers
     /// </summary>
     public class CommandCreateRequest
     {
-        public string CommandText { get; set; } = string.Empty;
+      public string CommandText { get; set; } = string.Empty;
         public string? CommandJson { get; set; }
         public string? CommandStatus { get; set; }
     }
@@ -379,7 +502,7 @@ namespace BitRaserApiProject.Controllers
         public string? CommandText { get; set; }
         public string? CommandJson { get; set; }
         public string? CommandStatus { get; set; }
-    }
+  }
 
     /// <summary>
     /// Command status update request model
@@ -387,7 +510,7 @@ namespace BitRaserApiProject.Controllers
     public class CommandStatusUpdateRequest
     {
         public string Status { get; set; } = string.Empty;
-    }
+}
 
     /// <summary>
     /// Bulk command status update request model
@@ -395,6 +518,8 @@ namespace BitRaserApiProject.Controllers
     public class BulkCommandStatusUpdateRequest
     {
         public List<int> CommandIds { get; set; } = new();
-        public string NewStatus { get; set; } = string.Empty;
+     public string NewStatus { get; set; } = string.Empty;
     }
+
+    #endregion
 }

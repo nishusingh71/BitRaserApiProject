@@ -34,26 +34,43 @@ namespace BitRaserApiProject.Controllers
 
         /// <summary>
         /// Get all sessions with role-based filtering and automatic cleanup
+        /// ✅ ENHANCED: Parents can see their own sessions + subuser sessions
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetSessions([FromQuery] SessionFilterRequest? filter)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
+    
             // Cleanup expired sessions first
             await CleanupExpiredSessionsAsync();
-            
+         
             IQueryable<Sessions> query = _context.Sessions;
 
             // Apply role-based filtering
             if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_SESSIONS", isCurrentUserSubuser))
             {
-                // Users and subusers can only see their own sessions
-                query = query.Where(s => s.user_email == userEmail);
-            }
+                if (isCurrentUserSubuser)
+                {
+                  // ❌ Subuser - only own sessions
+      query = query.Where(s => s.user_email == userEmail);
+        }
+            else
+ {
+        // ✅ ENHANCED: User - own sessions + subuser sessions
+          var subuserEmails = await _context.subuser
+     .Where(s => s.user_email == userEmail)
+            .Select(s => s.subuser_email)
+    .ToListAsync();
+                    
+query = query.Where(s => 
+ s.user_email == userEmail ||  // Own sessions
+     subuserEmails.Contains(s.user_email)  // Subuser sessions
+   );
+                }
+       }
 
-            // Apply additional filters if provided
+     // Apply additional filters if provided
             if (filter != null)
             {
                 if (!string.IsNullOrEmpty(filter.UserEmail))

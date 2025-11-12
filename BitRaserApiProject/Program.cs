@@ -288,6 +288,7 @@ builder.Services.AddScoped<IUserDataService, UserDataService>();
 builder.Services.AddScoped<DynamicRouteService>();
 builder.Services.AddScoped<MigrationUtilityService>();
 builder.Services.AddScoped<PdfService>();
+builder.Services.AddScoped<IDapperService, DapperService>();  // ✅ NEW: Dapper Service for high-performance queries
 
 // Add memory cache
 builder.Services.AddMemoryCache();

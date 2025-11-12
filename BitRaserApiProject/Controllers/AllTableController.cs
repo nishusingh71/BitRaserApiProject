@@ -260,6 +260,32 @@ namespace BitRaserApiProject.Controllers
 
             sub.subuser_email = updatedSub.subuser_email;
             sub.subuser_password = updatedSub.subuser_password;
+            sub.subuser_username = updatedSub.subuser_username;
+            sub.Name = updatedSub.Name;
+            sub.Phone = updatedSub.Phone;
+            sub.Department = updatedSub.Department;
+            sub.Role = updatedSub.Role;
+            sub.PermissionsJson = updatedSub.PermissionsJson;
+            sub.AssignedMachines = updatedSub.AssignedMachines;
+            sub.MaxMachines = updatedSub.MaxMachines;
+            sub.MachineIdsJson = updatedSub.MachineIdsJson;
+            sub.LicenseIdsJson = updatedSub.LicenseIdsJson;
+            sub.GroupId = updatedSub.GroupId;
+            sub.subuser_group = updatedSub.subuser_group;
+            sub.license_allocation = updatedSub.license_allocation;
+            sub.status = updatedSub.status;
+            sub.timezone = updatedSub.timezone;
+            sub.domain = updatedSub.domain;
+            sub.organization_name = updatedSub.organization_name;
+            sub.IsEmailVerified = updatedSub.IsEmailVerified;
+            sub.CanCreateSubusers = updatedSub.CanCreateSubusers;
+            sub.CanViewReports = updatedSub.CanViewReports;
+            sub.CanManageMachines = updatedSub.CanManageMachines;
+            sub.CanAssignLicenses = updatedSub.CanAssignLicenses;
+            sub.EmailNotifications = updatedSub.EmailNotifications;
+            sub.SystemAlerts = updatedSub.SystemAlerts;
+            sub.Notes = updatedSub.Notes;
+            sub.UpdatedAt = DateTime.UtcNow;
 
             _context.Entry(sub).State = EntityState.Modified;
             await _context.SaveChangesAsync();
@@ -324,7 +350,12 @@ namespace BitRaserApiProject.Controllers
             var commands = await _context.Commands.ToListAsync();
             return Ok(commands);
         }
-
+        [HttpGet("by-email/{userEmail}")]
+        public async Task<ActionResult<IEnumerable<Commands>>> GetCommandsByEmail(string userEmail)
+        {
+            var commands = await _context.Commands.Where(c => c.user_email == userEmail).ToListAsync();
+            return commands.Any() ? Ok(commands) : NotFound();
+        }
         /// <summary>
         /// Create a new command
         /// </summary>
@@ -586,6 +617,7 @@ namespace BitRaserApiProject.Controllers
             machine.license_activated = updatedMachine.license_activated;
             machine.license_activation_date = updatedMachine.license_activation_date;
             machine.license_days_valid = updatedMachine.license_days_valid;
+            machine.machine_details_json = updatedMachine.machine_details_json;
 
             _context.Entry(machine).State = EntityState.Modified;
             await _context.SaveChangesAsync();
@@ -845,17 +877,26 @@ namespace BitRaserApiProject.Controllers
         [HttpPut("{email}")]
         public async Task<IActionResult> UpdateUser(string email, [FromBody] users updatedUser)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+   var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
             if (user == null)
-                return NotFound();
+        return NotFound();
 
-            user.user_name = updatedUser.user_name;
-            user.phone_number = updatedUser.phone_number;
+     user.user_name = updatedUser.user_name;
+  user.phone_number = updatedUser.phone_number;
             user.user_email = updatedUser.user_email;
+      user.department = updatedUser.department;
+      user.user_group = updatedUser.user_group;
+   user.user_role = updatedUser.user_role;
+            user.license_allocation = updatedUser.license_allocation;
+          user.status = updatedUser.status;
+            user.timezone = updatedUser.timezone;
+            user.domain = updatedUser.domain;
+  user.organization_name = updatedUser.organization_name;
+     user.is_domain_admin = updatedUser.is_domain_admin;
 
-            _context.Entry(user).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
-            return NoContent();
+        _context.Entry(user).State = EntityState.Modified;
+await _context.SaveChangesAsync();
+       return NoContent();
         }
 
         /// <summary>
@@ -1331,6 +1372,104 @@ _logger.LogInformation("Successfully parsed JSON for report {ReportId}", reportI
         public byte[]? ValidatorSignature { get; set; }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

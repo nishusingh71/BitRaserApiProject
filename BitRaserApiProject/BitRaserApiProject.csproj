@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+    <PackageReference Include="Dapper" Version="2.1.66" />
     <PackageReference Include="DotNetEnv" Version="3.1.1" />
     <PackageReference Include="EFCore.AutomaticMigrations.NetTopologySuite" Version="7.0.5" />
     <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.1" />
@@ -41,7 +42,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Folder Include="BackgroundServices\" />
     <Folder Include="Data\Configurations\" />
     <Folder Include="Extensions\" />
     <Folder Include="Filters\" />

@@ -31,29 +31,42 @@ namespace BitRaserApiProject.Controllers
 
         /// <summary>
         /// Get all logs with role-based filtering and advanced search
+        /// ✅ ENHANCED: Parents can see their own logs + subuser logs
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetLogs([FromQuery] LogFilterRequest? filter)
         {
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
+    
             IQueryable<logs> query = _context.logs;
 
             // Apply role-based filtering
             if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_LOGS", isCurrentUserSubuser))
             {
-                // Users and subusers can only see their own logs unless they have elevated permissions
                 if (await _authService.HasPermissionAsync(userEmail!, "READ_USER_LOGS", isCurrentUserSubuser))
                 {
                     // Managers and Support can see logs for users they manage
                     var managedUsers = await GetManagedUsersAsync(userEmail!);
                     query = query.Where(l => managedUsers.Contains(l.user_email) || l.user_email == userEmail);
                 }
+                else if (isCurrentUserSubuser)
+                {
+                    // ❌ Subuser - only own logs
+                    query = query.Where(l => l.user_email == userEmail);
+                }
                 else
                 {
-                    // Regular users and subusers see only their own logs
-                    query = query.Where(l => l.user_email == userEmail);
+                    // ✅ ENHANCED: User - own logs + subuser logs
+                    var subuserEmails = await _context.subuser
+                        .Where(s => s.user_email == userEmail)
+                        .Select(s => s.subuser_email)
+                        .ToListAsync();
+        
+                    query = query.Where(l => 
+                    l.user_email == userEmail ||  // Own logs
+                     subuserEmails.Contains(l.user_email)  // Subuser logs
+                    );
                 }
             }
 

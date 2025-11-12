@@ -220,7 +220,7 @@ namespace BitRaserApiProject.Controllers
          if (existingSubuser != null)
           return Conflict($"Subuser with email {request.subuser_email} already exists");
 
-// Check if email is already used as a main user
+        // Check if email is already used as a main user
     var existingUser = await _context.Users
         .Where(u => u.user_email == request.subuser_email)
  .Select(u => new { u.user_email })  // Only select email field
@@ -579,37 +579,126 @@ updatedBy = currentUserEmail
         }
 
         /// <summary>
-/// Change subuser password by email
-   /// </summary>
-        [HttpPatch("{email}/change-password")]
+ /// Change subuser password by email - Requires current password verification
+        /// </summary>
+   [HttpPatch("{email}/change-password")]
         public async Task<IActionResult> ChangeSubuserPassword(string email, [FromBody] ChangePasswordRequest request)
         {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+     var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    if (string.IsNullOrEmpty(currentUserEmail))
+  {
+        return Unauthorized(new { message = "User not authenticated" });
+       }
+
+var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
             var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
-            
-            if (subuser == null) return NotFound($"Subuser with email {email} not found");
+    
+      if (subuser == null)
+        {
+     return NotFound(new { message = $"Subuser with email {email} not found" });
+  }
 
-            // Check if user can change password for this subuser
-            bool canChange = subuser.user_email == currentUserEmail ||
-                           await _authService.HasPermissionAsync(currentUserEmail!, "CHANGE_ALL_SUBUSER_PASSWORDS", isCurrentUserSubuser);
+    // Check if user can change password for this subuser
+         bool canChange = subuser.user_email == currentUserEmail ||
+       await _authService.HasPermissionAsync(currentUserEmail, "CHANGE_ALL_SUBUSER_PASSWORDS", isCurrentUserSubuser);
 
-            if (!canChange)
-            {
-                return StatusCode(403, new { error = "You can only change passwords for your own subusers" });
-            }
-
-            if (string.IsNullOrEmpty(request.NewPassword))
-                return BadRequest("New password is required");
-
-            subuser.subuser_password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
-            await _context.SaveChangesAsync();
-
-            return Ok(new { 
-                message = "Subuser password changed successfully", 
-                subuserEmail = email
-            });
+ if (!canChange)
+    {
+ return StatusCode(403, new { message = "You can only change passwords for your own subusers" });
         }
+
+  // Validate request
+         if (string.IsNullOrEmpty(request.CurrentPassword))
+ {
+         return BadRequest(new { message = "Current password is required" });
+      }
+
+      if (string.IsNullOrEmpty(request.NewPassword))
+   {
+  return BadRequest(new { message = "New password is required" });
+    }
+
+  if (request.NewPassword.Length < 8)
+       {
+  return BadRequest(new { message = "New password must be at least 8 characters" });
+}
+
+   // Verify current password
+      if (string.IsNullOrEmpty(subuser.subuser_password))
+     {
+          return BadRequest(new { message = "Subuser password not set. Cannot verify current password." });
+      }
+
+         bool isCurrentPasswordValid = BCrypt.Net.BCrypt.Verify(request.CurrentPassword, subuser.subuser_password);
+  if (!isCurrentPasswordValid)
+{
+  _logger.LogWarning("Failed password change attempt for subuser {Email} - incorrect current password", email);
+       return BadRequest(new { message = "Current password is incorrect" });
+ }
+
+  // Check if new password is same as current password
+            bool isSamePassword = BCrypt.Net.BCrypt.Verify(request.NewPassword, subuser.subuser_password);
+  if (isSamePassword)
+   {
+  return BadRequest(new { message = "New password must be different from current password" });
+   }
+
+            // Update password - CRITICAL FIX: Explicitly mark entity as modified
+  string newHashedPassword = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+   subuser.subuser_password = newHashedPassword;
+        subuser.UpdatedAt = DateTime.UtcNow;
+            subuser.UpdatedBy = (await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail))?.user_id;
+
+ // CRITICAL FIX: Explicitly tell EF Core to track this entity as modified
+        _context.Entry(subuser).State = EntityState.Modified;
+          
+            // CRITICAL FIX: Explicitly mark the password field as modified
+          _context.Entry(subuser).Property(s => s.subuser_password).IsModified = true;
+
+try
+   {
+         int rowsAffected = await _context.SaveChangesAsync();
+    
+// Verify that changes were actually saved
+   if (rowsAffected == 0)
+         {
+        _logger.LogError("SaveChanges returned 0 rows affected for subuser {Email}", email);
+       return StatusCode(500, new { 
+        message = "Failed to save password changes to database",
+    error = "No rows were modified"
+         });
+ }
+
+      _logger.LogInformation("Password changed successfully for subuser {Email} by {ChangedBy}. Rows affected: {RowsAffected}", 
+    email, currentUserEmail, rowsAffected);
+
+        return Ok(new { 
+      message = "Subuser password changed successfully", 
+ subuserEmail = email,
+       changedBy = currentUserEmail,
+    changedAt = DateTime.UtcNow,
+      rowsAffected = rowsAffected
+   });
+  }
+ catch (DbUpdateConcurrencyException ex)
+        {
+           _logger.LogError(ex, "Concurrency error changing password for subuser {Email}", email);
+    return StatusCode(409, new { 
+        message = "Password change failed due to concurrency conflict",
+       error = ex.Message
+                });
+            }
+ catch (Exception ex)
+      {
+ _logger.LogError(ex, "Error changing password for subuser {Email}", email);
+return StatusCode(500, new { 
+          message = "Error changing password",
+error = ex.Message,
+  stackTrace = ex.StackTrace
+     });
+            }
+     }
+
 
         /// <summary>
         /// Assign role to subuser by email - Users can assign roles to their subusers
@@ -945,8 +1034,13 @@ public string? NewParentUserEmail { get; set; }
     /// <summary>
     /// Change password request model
     /// </summary>
-    public class ChangePasswordRequest
+  public class ChangePasswordRequest
     {
+        [Required(ErrorMessage = "Current password is required")]
+        public string CurrentPassword { get; set; } = string.Empty;
+        
+        [Required(ErrorMessage = "New password is required")]
+        [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
         public string NewPassword { get; set; } = string.Empty;
     }
 
