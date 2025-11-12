@@ -816,31 +816,31 @@ _context.SubuserRoles.Add(subuserRole);
     public async Task<IActionResult> UpdateTimezone([FromBody] UpdateTimezoneRequest request)
         {
     try
-            {
-         var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                if (string.IsNullOrEmpty(currentUserEmail))
+   {
+ var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(currentUserEmail))
       return Unauthorized(new { message = "Authentication required" });
 
   // If no email provided, update current user's timezone
         var targetEmail = string.IsNullOrEmpty(request.Email) ? currentUserEmail : request.Email;
       var isCurrentUser = targetEmail == currentUserEmail;
 
-    // Validate timezone format (basic validation)
+  // Validate timezone format (basic validation)
       if (string.IsNullOrWhiteSpace(request.Timezone))
            return BadRequest(new { message = "Timezone is required" });
 
-        // If updating someone else's timezone, check permissions
+      // If updating someone else's timezone, check permissions
           if (!isCurrentUser)
   {
-          var currentIsSubuser = await _context.subuser.AnyAsync(s => s.subuser_email == currentUserEmail);
+       var currentIsSubuser = await _context.subuser.AnyAsync(s => s.subuser_email == currentUserEmail);
    var hasPermission = await _roleService.HasPermissionAsync(currentUserEmail, "UPDATE_USER", currentIsSubuser);
-        
-              if (!hasPermission)
-         return StatusCode(403, new { message = "You don't have permission to update other users' timezones" });
+   
+if (!hasPermission)
+   return StatusCode(403, new { message = "You don't have permission to update other users' timezones" });
          }
 
        // Check if target is subuser or user
-         var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == targetEmail);
+var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == targetEmail);
         if (subuser != null)
     {
     subuser.timezone = request.Timezone;
@@ -852,21 +852,21 @@ _context.SubuserRoles.Add(subuserRole);
 
  return Ok(new
 {
-   success = true,
+ success = true,
    message = "Timezone updated successfully",
           email = targetEmail,
   userType = "subuser",
-     timezone = request.Timezone,
+   timezone = request.Timezone,
   updatedBy = currentUserEmail,
    updatedAt = DateTime.UtcNow
      });
    }
 
-                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == targetEmail);
+         var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == targetEmail);
     if (user != null)
             {
-                 user.timezone = request.Timezone;
-        user.updated_at = DateTime.UtcNow;
+       user.timezone = request.Timezone;
+  user.updated_at = DateTime.UtcNow;
      _context.Entry(user).State = EntityState.Modified;
    await _context.SaveChangesAsync();
 
@@ -876,25 +876,218 @@ _context.SubuserRoles.Add(subuserRole);
            {
    success = true,
         message = "Timezone updated successfully",
-      email = targetEmail,
+    email = targetEmail,
   userType = "user",
-                timezone = request.Timezone,
+        timezone = request.Timezone,
      updatedBy = currentUserEmail,
-      updatedAt = DateTime.UtcNow
+  updatedAt = DateTime.UtcNow
     });
      }
 
      return NotFound(new { message = "User or subuser not found" });
         }
       catch (Exception ex)
-            {
-       _logger.LogError(ex, "Error updating timezone for {Email}", request.Email);
+     {
+    _logger.LogError(ex, "Error updating timezone for {Email}", request.Email);
     return StatusCode(500, new { message = "An error occurred while updating timezone", error = ex.Message });
 }
     }
 
-        public class UpdateTimezoneRequest
+   /// <summary>
+        /// Unified Password Change - Works for both Users and Subusers
+     /// Automatically detects user type and updates password
+        /// Requires current password verification for security
+   /// Self-service only - User can only change their own password
+/// </summary>
+      [HttpPatch("change-password")]
+   [Authorize]
+        public async Task<IActionResult> UnifiedChangePassword([FromBody] SelfServicePasswordChangeRequest request)
+ {
+        try
+      {
+var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+if (string.IsNullOrEmpty(currentUserEmail))
+           return Unauthorized(new { message = "Authentication required" });
+
+     // Validate request
+ if (string.IsNullOrEmpty(request.CurrentPassword))
+     return BadRequest(new { message = "Current password is required" });
+
+         if (string.IsNullOrEmpty(request.NewPassword))
+     return BadRequest(new { message = "New password is required" });
+
+        if (request.NewPassword.Length < 8)
+      return BadRequest(new { message = "New password must be at least 8 characters" });
+
+    // Try to find as subuser first
+    var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+        if (subuser != null)
+     {
+      // Verify current password
+   if (string.IsNullOrEmpty(subuser.subuser_password))
+     return BadRequest(new { message = "Subuser password not set" });
+
+   bool isCurrentPasswordValid = BCrypt.Net.BCrypt.Verify(
+  request.CurrentPassword, 
+      subuser.subuser_password
+      );
+
+   if (!isCurrentPasswordValid)
+     {
+ _logger.LogWarning(
+           "Failed password change attempt for subuser {Email} - incorrect current password", 
+    currentUserEmail
+   );
+  return BadRequest(new { message = "Current password is incorrect" });
+ }
+
+     // Check if new password is same as current password
+     bool isSamePassword = BCrypt.Net.BCrypt.Verify(
+   request.NewPassword, 
+       subuser.subuser_password
+     );
+
+  if (isSamePassword)
+   return BadRequest(new { message = "New password must be different from current password" });
+
+ // Update password
+        string newHashedPassword = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+  subuser.subuser_password = newHashedPassword;
+    subuser.UpdatedAt = DateTime.UtcNow;
+
+   // Mark entity as modified
+       _context.Entry(subuser).State = EntityState.Modified;
+    _context.Entry(subuser).Property(s => s.subuser_password).IsModified = true;
+
+      // Save changes
+ int rowsAffected = await _context.SaveChangesAsync();
+
+  if (rowsAffected == 0)
         {
+  _logger.LogError(
+         "SaveChanges returned 0 rows affected for subuser {Email}", 
+ currentUserEmail
+     );
+    return StatusCode(500, new { 
+   message = "Failed to save password changes to database",
+   error = "No rows were modified"
+});
+}
+
+  _logger.LogInformation(
+     "Password changed successfully for subuser {Email}. Rows affected: {RowsAffected}", 
+        currentUserEmail, 
+ rowsAffected
+    );
+
+    return Ok(new { 
+  success = true,
+      message = "Password changed successfully", 
+ email = currentUserEmail,
+     userType = "subuser",
+  changedAt = DateTime.UtcNow,
+  rowsAffected = rowsAffected
+            });
+   }
+
+    // Try to find as main user
+             var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+  if (user != null)
+      {
+   // Verify current password
+if (string.IsNullOrEmpty(user.hash_password))
+     return BadRequest(new { message = "User password not set" });
+
+      bool isCurrentPasswordValid = BCrypt.Net.BCrypt.Verify(
+      request.CurrentPassword, 
+     user.hash_password
+        );
+
+    if (!isCurrentPasswordValid)
+ {
+      _logger.LogWarning(
+  "Failed password change attempt for user {Email} - incorrect current password", 
+ currentUserEmail
+ );
+   return BadRequest(new { message = "Current password is incorrect" });
+  }
+
+   // Check if new password is same as current password
+ bool isSamePassword = BCrypt.Net.BCrypt.Verify(
+       request.NewPassword, 
+   user.hash_password
+    );
+
+   if (isSamePassword)
+   return BadRequest(new { message = "New password must be different from current password" });
+
+        // Update both password fields for users
+     user.user_password = request.NewPassword; // Plain text (if required)
+      user.hash_password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword); // Hashed
+  user.updated_at = DateTime.UtcNow;
+
+         // Mark entity as modified
+       _context.Entry(user).State = EntityState.Modified;
+    _context.Entry(user).Property(u => u.user_password).IsModified = true;
+_context.Entry(user).Property(u => u.hash_password).IsModified = true;
+
+   // Save changes
+       int rowsAffected = await _context.SaveChangesAsync();
+
+     if (rowsAffected == 0)
+       {
+   _logger.LogError(
+    "SaveChanges returned 0 rows affected for user {Email}", 
+       currentUserEmail
+  );
+       return StatusCode(500, new { 
+message = "Failed to save password changes to database",
+       error = "No rows were modified"
+      });
+ }
+
+         _logger.LogInformation(
+       "Password changed successfully for user {Email}. Rows affected: {RowsAffected}", 
+  currentUserEmail, 
+    rowsAffected
+     );
+
+ return Ok(new { 
+   success = true,
+      message = "Password changed successfully", 
+        email = currentUserEmail,
+   userType = "user",
+          changedAt = DateTime.UtcNow,
+   rowsAffected = rowsAffected
+      });
+ }
+
+  return NotFound(new { message = "User or subuser not found" });
+       }
+          catch (DbUpdateConcurrencyException ex)
+    {
+ var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown";
+       _logger.LogError(ex, "Concurrency error changing password for {Email}", userEmail);
+     return StatusCode(409, new { 
+    success = false,
+  message = "Password change failed due to concurrency conflict",
+      error = ex.Message
+     });
+       }
+  catch (Exception ex)
+  {
+      var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown";
+  _logger.LogError(ex, "Error changing password for {Email}", userEmail);
+   return StatusCode(500, new { 
+        success = false,
+   message = "Error changing password",
+           error = ex.Message
+   });
+       }
+  }
+
+        public class UpdateTimezoneRequest
+    {
    /// <summary>
  /// Email of user/subuser to update. If not provided, updates current user's timezone
       /// </summary>
@@ -903,9 +1096,56 @@ _context.SubuserRoles.Add(subuserRole);
  /// <summary>
       /// Timezone string (e.g., "Asia/Kolkata", "America/New_York", "Europe/London")
  /// </summary>
-       [Required(ErrorMessage = "Timezone is required")]
+     [Required(ErrorMessage = "Timezone is required")]
     [MaxLength(100)]
             public string Timezone { get; set; } = string.Empty;
-}
+ }
+
+        /// <summary>
+        /// Self-service password change request - NO EMAIL NEEDED
+        /// User can only change their own password (detected from JWT token)
+        /// </summary>
+        public class SelfServicePasswordChangeRequest
+   {
+ /// <summary>
+            /// Current password for verification
+   /// </summary>
+            [Required(ErrorMessage = "Current password is required")]
+   public string CurrentPassword { get; set; } = string.Empty;
+            
+/// <summary>
+            /// New password (minimum 8 characters)
+        /// </summary>
+          [Required(ErrorMessage = "New password is required")]
+  [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
+        public string NewPassword { get; set; } = string.Empty;
+        }
+
+ /// <summary>
+   /// Unified password change request - Works for both Users and Subusers
+    /// DEPRECATED: Use SelfServicePasswordChangeRequest instead for self-service
+      /// This model supports admin changing other users' passwords
+      /// </summary>
+  [Obsolete("Use SelfServicePasswordChangeRequest for self-service password changes")]
+  public class UnifiedChangePasswordRequest
+    {
+    /// <summary>
+          /// Email of user/subuser to change password. If not provided, changes current user's password
+  /// </summary>
+            public string? Email { get; set; }
+      
+      /// <summary>
+  /// Current password for verification
+     /// </summary>
+  [Required(ErrorMessage = "Current password is required")]
+      public string CurrentPassword { get; set; } = string.Empty;
+  
+ /// <summary>
+       /// New password (minimum 8 characters)
+   /// </summary>
+      [Required(ErrorMessage = "New password is required")]
+   [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
+ public string NewPassword { get; set; } = string.Empty;
+        }
     }
 }
