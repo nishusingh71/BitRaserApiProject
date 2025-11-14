@@ -362,19 +362,17 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
+# ==================================================
+# 🔐 ENVIRONMENT VARIABLES & SENSITIVE FILES
+# ==================================================
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+appsettings.Development.json
+appsettings.Production.json
+
 # Markdown documentation files
 *.md
 !README.md
-
-# Specific documentation files (if you want to be explicit)
-EMAIL_BASED_CRUD_IMPLEMENTATION_PLAN.md
-EMAIL_BASED_CRUD_SUMMARY.md
-EMAIL_BASED_CRUD_HINDI.md
-COMPREHENSIVE_TESTING_GUIDE.md
-ENHANCED_SUBUSER_CONTROLLER_UPDATES.md
-ENHANCED_SUBUSER_HINDI_GUIDE.md
-SUBUSER_GROUP_STRING_TYPE_UPDATE.md
-SUBUSER_GROUP_STRING_HINDI.md
-SUBUSER_OPTIONAL_FIELDS_SUMMARY.md
-SUBUSER_TEST_EXAMPLES.md
-SUBUSER_EASY_GUIDE_HINDI.md

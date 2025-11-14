@@ -1,86 +1,5 @@
-﻿//using Microsoft.EntityFrameworkCore;
-//using BitRaserApiProject;
-//using Microsoft.OpenApi.Models;  // Import your DbContext namespace
-
-//var builder = WebApplication.CreateBuilder(args);
-
-//// Set up the MySQL connection string from appsettings.json
-//string connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-
-//// Set the MySQL version (update this if you are using a different version)
-//var serverVersion = new MySqlServerVersion(new Version(8, 0, 34)); // Use the correct MySQL version (8.0.34 in your case)
-
-//// Add MySQL DbContext with version configuration
-//builder.Services.AddDbContext<ApplicationDbContext>(options =>
-//    options.UseMySql(connectionString, serverVersion));
-
-//// Register the DatabaseInitializer service for database creation
-//builder.Services.AddSingleton(new DatabaseInitializer(connectionString));
-
-//// Add services to the container
-//builder.Services.AddControllers();
-
-//// Configure Swagger/OpenAPI
-//builder.Services.AddEndpointsApiExplorer();
-//builder.Services.AddSwaggerGen(c =>
-//{
-//    // Customize the OpenAPI metadata
-//    c.SwaggerDoc("v1", new OpenApiInfo
-//    {
-//        Title = "DhruvAPI Project",    // Set your desired title here
-//        Version = "1.0",  // Ensure this is explicitly set
-//        Description = "API for managing devices, users, licenses, and  operations", // Add a description if needed
-//        Contact = new OpenApiContact
-//        {
-//            Name = "Dhruv Rai",  // Add your name or company name
-//            Email = "Dhruv.rai@stellarinfo.com", // Add your contact email
-//            //Url = new Uri("https://your-website.com") // Add your website URL if needed
-//        },
-//        //License = new OpenApiLicense
-//        //{
-//        //    Name = "MIT",  // Specify the license name if needed
-//        //    Url = new Uri("https://opensource.org/licenses/MIT") // URL to license
-//        //}
-//    });
-
-//    // Additional Swagger settings if needed
-//});
-
-
-//var app = builder.Build();
-
-//// Ensure database initialization on startup
-//using (var scope = app.Services.CreateScope())
-//{
-//    var dbInitializer = scope.ServiceProvider.GetRequiredService<DatabaseInitializer>();
-//    dbInitializer.InitializeDatabase();
-//}
-
-//// Configure the HTTP request pipeline
-//if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
-//{
-//    app.UseSwagger();
-//    app.UseSwaggerUI(options =>
-//    {
-//        options.SwaggerEndpoint("/swagger/v1/swagger.json", "Dhruv API Project v1");
-//        options.RoutePrefix = "swagger";  // Keep it accessible under '/swagger'
-//    });
-//}
-
-//// Enable HTTPS redirection if required (Uncomment if needed)
-// app.UseHttpsRedirection();
-
-//// Configure authorization middleware (if using authentication)
-//app.UseAuthorization();
-
-//// Map controller routes
-//app.MapControllers();
-
-//// Run the application
-//app.Run();
-
-
-using BitRaserApiProject;
+﻿using BitRaserApiProject;
+using BitRaserApiProject.Services;  // ✅ ADD: Import for OTP and Email services
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -94,8 +13,6 @@ var serverVersion = new MySqlServerVersion(new Version(8, 0, 34));
 
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseMySql(connectionString, serverVersion));
-
-//builder.Services.AddSingleton(new DatabaseInitializer(connectionString));
 
 var jwtKey = builder.Configuration["Jwt:Key"];
 var jwtIssuer = builder.Configuration["Jwt:Issuer"];
@@ -159,13 +76,23 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-var app = builder.Build();
+// Register core services
+builder.Services.AddScoped<IDynamicPermissionService, DynamicPermissionService>();
+builder.Services.AddScoped<IRoleBasedAuthService, RoleBasedAuthService>();
+builder.Services.AddScoped<IUserDataService, UserDataService>();
+builder.Services.AddScoped<DynamicRouteService>();
+builder.Services.AddScoped<MigrationUtilityService>();
+builder.Services.AddScoped<PdfService>();
+builder.Services.AddScoped<IDapperService, DapperService>();
 
-using (var scope = app.Services.CreateScope())
-{
-   // var dbInitializer = scope.ServiceProvider.GetRequiredService<DatabaseInitializer>();
-    //dbInitializer.InitializeDatabase();
-}
+// ✅ Forgot Password Services - OTP and Email
+builder.Services.AddSingleton<IOtpService, OtpService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
+
+// Add memory cache
+builder.Services.AddMemoryCache();
+
+var app = builder.Build();
 
 if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 {

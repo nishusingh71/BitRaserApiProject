@@ -40,6 +40,9 @@ namespace BitRaserApiProject
         public DbSet<ReportTemplate> ReportTemplates { get; set; }
         public DbSet<ScheduledReport> ScheduledReports { get; set; }
         
+        // Private Cloud Database Management
+        public DbSet<PrivateCloudDatabase> PrivateCloudDatabases { get; set; }
+        
         public static string HashLicenseKey(string licenseKey)
         {
             using var sha256 = SHA256.Create();
@@ -261,33 +264,45 @@ namespace BitRaserApiProject
                 .HasMaxLength(100);
 
             modelBuilder.Entity<subuser>()
-            .Property(s => s.Role)
-         .HasMaxLength(50)
-         .IsRequired();
+                .Property(s => s.Role)
+                .HasMaxLength(50)
+                .IsRequired();
 
-          modelBuilder.Entity<subuser>()
-             .Property(s => s.PermissionsJson)
-         .HasColumnType("json");
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.PermissionsJson)
+                .HasColumnType("json");
 
             modelBuilder.Entity<subuser>()
                 .Property(s => s.MachineIdsJson)
-        .HasColumnType("json");
+                .HasColumnType("json");
 
             modelBuilder.Entity<subuser>()
-       .Property(s => s.LicenseIdsJson)
-              .HasColumnType("json");
+                .Property(s => s.LicenseIdsJson)
+                .HasColumnType("json");
 
             modelBuilder.Entity<subuser>()
-        .Property(s => s.status)
-         .HasMaxLength(50);
+                .Property(s => s.status)
+                .HasMaxLength(50);
 
             modelBuilder.Entity<subuser>()
-              .Property(s => s.LastLoginIp)
+                .Property(s => s.LastLoginIp)
                 .HasMaxLength(500);
 
-   modelBuilder.Entity<subuser>()
-          .Property(s => s.Notes)
-          .HasMaxLength(500);
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.Notes)
+                .HasMaxLength(500);
+
+            // ✅ ADD: subuser_group string field configuration
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.subuser_group)
+                .HasMaxLength(100)
+                .HasColumnName("subuser_group");  // Explicitly map to database column
+
+            // ✅ ADD: license_allocation field configuration
+            modelBuilder.Entity<subuser>()
+                .Property(s => s.license_allocation)
+                .HasColumnName("license_allocation")  // Explicitly map to database column
+                .HasDefaultValue(0);
 
             // Group table
             modelBuilder.Entity<Group>()

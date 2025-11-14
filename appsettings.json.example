@@ -1,0 +1,52 @@
+{
+  "ConnectionStrings": {
+    "ApplicationDbContextConnection": "server=localhost;database=BitRaserDb;user id=root;password=password;",
+    "DefaultConnection": "server=localhost;database=BitRaserDb;user id=root;password=password;"
+  },
+  "Jwt": {
+    "Key": "YourSuperSecretKeyThatIsAtLeast32CharactersLong123456789!",
+    "Issuer": "DSecureAPI",
+    "Audience": "DSecureAPIUsers",
+ "ExpirationInMinutes": 480
+  },
+  "EmailSettings": {
+  "SmtpHost": "smtp.gmail.com",
+    "SmtpPort": "587",
+    "FromEmail": "your-email@gmail.com",
+    "FromPassword": "your-gmail-app-password-here",
+    "FromName": "Dsecure Support",
+    "EnableSsl": true
+  },
+  "CORS": {
+    "AllowedOrigins": [
+      "https://dsecure-frontend.vercel.app",
+    "http://localhost:3000",
+ "http://localhost:3001",
+ "http://localhost:4200",
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:8080",
+  "http://localhost:8081",
+    "http://localhost:5000",
+      "http://localhost:5001",
+      "https://localhost:3000",
+"https://localhost:4200",
+      "https://localhost:5174",
+      "https://localhost:8080",
+   "https://dsecuretech.com",
+      "https://www.dsecuretech.com"
+    ],
+    "StrictOrigins": [
+      "https://dsecure-frontend.vercel.app",
+      "https://dsecuretech.com"
+    ]
+  },
+  "Logging": {
+  "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning",
+    "Microsoft.EntityFrameworkCore": "Information"
+  }
+  },
+  "AllowedHosts": "*"
+}

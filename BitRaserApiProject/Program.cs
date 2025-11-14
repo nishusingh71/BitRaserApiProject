@@ -290,6 +290,13 @@ builder.Services.AddScoped<MigrationUtilityService>();
 builder.Services.AddScoped<PdfService>();
 builder.Services.AddScoped<IDapperService, DapperService>();  // ✅ NEW: Dapper Service for high-performance queries
 
+// ✅ FORGOT PASSWORD SERVICES - OTP AND EMAIL
+builder.Services.AddSingleton<IOtpService, OtpService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
+
+// ✅ PRIVATE CLOUD DATABASE SERVICE
+builder.Services.AddScoped<IPrivateCloudService, PrivateCloudService>();
+
 // Add memory cache
 builder.Services.AddMemoryCache();
 

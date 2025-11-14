@@ -88,9 +88,19 @@ namespace BitRaserApiProject.Controllers
                     .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
                     .Take(filter?.PageSize ?? 100)
                     .Select(s => new {
+                        s.subuser_id,
                         s.subuser_email,
                         s.user_email,
-                        s.subuser_id,
+                        subuser_name = s.Name,
+                        s.Department,
+                        s.Role,
+                        s.Phone,
+                        s.subuser_group,
+                        s.license_allocation,
+                        s.status,
+                        s.IsEmailVerified,
+                        s.CreatedAt,
+                        s.UpdatedAt,
                         roles = s.SubuserRoles.Select(sr => sr.Role.RoleName).ToList(),
                         hasPassword = !string.IsNullOrEmpty(s.subuser_password)
                     })
@@ -136,9 +146,19 @@ namespace BitRaserApiProject.Controllers
             }
 
             var subuserDetails = new {
+                subuser.subuser_id,
                 subuser.subuser_email,
                 subuser.user_email,
-                subuser.subuser_id,
+                subuser_name = subuser.Name,
+                subuser.Department,
+                subuser.Role,
+                subuser.Phone,
+                subuser.subuser_group,
+                subuser.license_allocation,
+                subuser.status,
+                subuser.IsEmailVerified,
+                subuser.CreatedAt,
+                subuser.UpdatedAt,
                 roles = subuser.SubuserRoles.Select(sr => new {
                     sr.Role.RoleName,
                     sr.Role.Description,
@@ -181,9 +201,19 @@ namespace BitRaserApiProject.Controllers
                 .Where(s => s.user_email == parentEmail)
                 .OrderByDescending(s => s.subuser_id)
                 .Select(s => new {
+                    s.subuser_id,
                     s.subuser_email,
                     s.user_email,
-                    s.subuser_id,
+                    subuser_name = s.Name,
+                    s.Department,
+                    s.Role,
+                    s.Phone,
+                    s.subuser_group,
+                    s.license_allocation,
+                    s.status,
+                    s.IsEmailVerified,
+                    s.CreatedAt,
+                    s.UpdatedAt,
                     roles = s.SubuserRoles.Select(sr => sr.Role.RoleName).ToList(),
                     hasPassword = !string.IsNullOrEmpty(s.subuser_password)
                 })
@@ -251,16 +281,17 @@ namespace BitRaserApiProject.Controllers
    subuser_email = request.subuser_email,
     subuser_password = BCrypt.Net.BCrypt.HashPassword(request.subuser_password),
     user_email = parentUserEmail,
-       superuser_id = parentUser.user_id,
+  superuser_id = parentUser.user_id,
    Name = request.subuser_name ?? request.subuser_email.Split('@')[0], // Use email prefix if name not provided
-        Department = request.department, // Optional
+ Department = request.department, // Optional
  Role = request.role ?? "subuser", // Default to "subuser" if not provided
   Phone = request.phone, // Optional
-   GroupId = !string.IsNullOrEmpty(request.subuser_group) && int.TryParse(request.subuser_group, out int groupId) ? groupId : (int?)null, // Convert string to int?
+   subuser_group = request.subuser_group, // ✅ Direct string assignment - no conversion needed
+   license_allocation = request.license_allocation ?? 0, // ✅ License allocation field added
       status = "active",  // Use lowercase field to avoid duplicate column error
  IsEmailVerified = false,
     CreatedAt = DateTime.UtcNow,
-       CreatedBy = parentUser.user_id
+CreatedBy = parentUser.user_id
   };
 
     _context.subuser.Add(newSubuser);
@@ -279,15 +310,16 @@ namespace BitRaserApiProject.Controllers
             var response = new {
           subuserEmail = newSubuser.subuser_email,
       subuserName = newSubuser.Name,
-         department = newSubuser.Department,
+  department = newSubuser.Department,
       role = newSubuser.Role,
-       phone = newSubuser.Phone,
-  subuserGroup = newSubuser.GroupId?.ToString(), // Convert back to string for response
+   phone = newSubuser.Phone,
+  subuser_group = newSubuser.subuser_group, // ✅ Direct string field - no conversion
+       license_allocation = newSubuser.license_allocation, // ✅ License allocation in response
        parentUserEmail = newSubuser.user_email,
    subuserID = newSubuser.subuser_id,
-   status = newSubuser.status,  // Use lowercase field
+ status = newSubuser.status,  // Use lowercase field
       createdAt = newSubuser.CreatedAt,
-      roleAssignedToRBAC = roleAssigned, // Indicate if role was added to RBAC
+    roleAssignedToRBAC = roleAssigned, // Indicate if role was added to RBAC
     message = roleAssigned ? "Subuser created successfully with role assigned to RBAC" : "Subuser created successfully (role assignment to RBAC failed)"
    };
 
@@ -318,39 +350,86 @@ namespace BitRaserApiProject.Controllers
                 return StatusCode(403, new { error = "You can only update your own subusers" });
             }
 
-            // Update password if provided
-            if (!string.IsNullOrEmpty(request.NewPassword))
+            // Update all fields if provided
+       if (!string.IsNullOrEmpty(request.SubuserName))
+   {
+   subuser.Name = request.SubuserName;
+ }
+    
+        if (request.Department != null)
+  {
+  subuser.Department = string.IsNullOrEmpty(request.Department) ? null : request.Department;
+  }
+ 
+  if (request.Role != null)
+          {
+    subuser.Role = string.IsNullOrEmpty(request.Role) ? "subuser" : request.Role;
+   }
+    
+     if (request.Phone != null)
+ {
+    subuser.Phone = string.IsNullOrEmpty(request.Phone) ? null : request.Phone;
+  }
+    
+  if (request.SubuserGroup != null)
+{
+   subuser.subuser_group = string.IsNullOrEmpty(request.SubuserGroup) ? null : request.SubuserGroup;
+ }
+  
+   if (request.LicenseAllocation.HasValue)
             {
-                subuser.subuser_password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
-            }
+     subuser.license_allocation = request.LicenseAllocation.Value;
+ }
+      
+     if (!string.IsNullOrEmpty(request.Status))
+    {
+    subuser.status = request.Status;
+      }
 
-            // Update parent user if provided and user has permission
-            if (!string.IsNullOrEmpty(request.NewParentUserEmail) && 
-                request.NewParentUserEmail != subuser.user_email)
-            {
-                if (!await _authService.HasPermissionAsync(currentUserEmail!, "REASSIGN_SUBUSERS", isCurrentUserSubuser))
-                {
-                    return StatusCode(403, new { error = "Insufficient permissions to reassign subuser to different parent" });
-                }
+      // Update password if provided
+   if (!string.IsNullOrEmpty(request.NewPassword))
+     {
+       subuser.subuser_password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+    }
 
-                // Validate new parent user exists
-                var newParent = await _context.Users
-                    .FirstOrDefaultAsync(u => u.user_email == request.NewParentUserEmail);
-                if (newParent == null)
-                    return BadRequest($"Parent user with email {request.NewParentUserEmail} not found");
+   // Update parent user if provided and user has permission
+      if (!string.IsNullOrEmpty(request.NewParentUserEmail) && 
+            request.NewParentUserEmail != subuser.user_email)
+    {
+     if (!await _authService.HasPermissionAsync(currentUserEmail!, "REASSIGN_SUBUSERS", isCurrentUserSubuser))
+   {
+    return StatusCode(403, new { error = "Insufficient permissions to reassign subuser to different parent" });
+         }
 
-                subuser.user_email = request.NewParentUserEmail;
-                subuser.superuser_id = newParent.user_id;
-            }
+       // Validate new parent user exists
+     var newParent = await _context.Users
+      .FirstOrDefaultAsync(u => u.user_email == request.NewParentUserEmail);
+     if (newParent == null)
+       return BadRequest($"Parent user with email {request.NewParentUserEmail} not found");
 
-            _context.Entry(subuser).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
+subuser.user_email = request.NewParentUserEmail;
+       subuser.superuser_id = newParent.user_id;
+      }
 
-            return Ok(new { 
-                message = "Subuser updated successfully", 
-                subuserEmail = email,
-                updatedAt = DateTime.UtcNow
-            });
+      // Update timestamp
+   subuser.UpdatedAt = DateTime.UtcNow;
+     subuser.UpdatedBy = (await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail))?.user_id;
+
+  _context.Entry(subuser).State = EntityState.Modified;
+    await _context.SaveChangesAsync();
+
+      return Ok(new { 
+  message = "Subuser updated successfully", 
+    subuserEmail = email,
+       subuser_name = subuser.Name,
+    department = subuser.Department,
+    role = subuser.Role,
+       phone = subuser.Phone,
+    subuser_group = subuser.subuser_group,
+      license_allocation = subuser.license_allocation,
+   status = subuser.status,
+           updatedAt = DateTime.UtcNow
+      });
         }
 
         /// <summary>
@@ -484,24 +563,8 @@ namespace BitRaserApiProject.Controllers
       // Update subuser_group if provided
             if (request.subuser_group != null)
 {
- if (string.IsNullOrEmpty(request.subuser_group))
-            {
-          targetSubuser.GroupId = null;
-    }
-  else if (int.TryParse(request.subuser_group, out int groupId))
-           {
- // Validate group exists
-  var groupExists = await _context.Set<Group>().AnyAsync(g => g.group_id == groupId);
-        if (!groupExists)
-               {
-       return BadRequest(new { message = $"Group with ID {groupId} not found" });
-}
-           targetSubuser.GroupId = groupId;
-        }
-          else
-       {
-         return BadRequest(new { message = $"Invalid group ID format: {request.subuser_group}" });
- }
+ // ✅ FIXED: Direct string assignment - no conversion to GroupId
+    targetSubuser.subuser_group = string.IsNullOrEmpty(request.subuser_group) ? null : request.subuser_group;
    updatedFields.Add("subuser_group");
      }
 
@@ -548,20 +611,22 @@ namespace BitRaserApiProject.Controllers
         _logger.LogInformation("Subuser {Email} updated by {UpdatedBy}. Fields: {Fields}", 
            targetSubuser.subuser_email, currentUserEmail, string.Join(", ", updatedFields));
 
-           return Ok(new
+       return Ok(new
       {
-        message = "Subuser updated successfully",
+message = "Subuser updated successfully",
            subuser_email = targetSubuser.subuser_email,
        subuser_name = targetSubuser.Name,
-              department = targetSubuser.Department,
+    department = targetSubuser.Department,
 role = targetSubuser.Role,
         phone = targetSubuser.Phone,
-    subuser_group = targetSubuser.GroupId?.ToString(),
+    subuser_group = targetSubuser.subuser_group, // ✅ Direct string field
      parentUserEmail = targetSubuser.user_email,
+    license_allocation = targetSubuser.license_allocation,
+      status = targetSubuser.status,
         updatedFields = updatedFields,
-       updatedAt = targetSubuser.UpdatedAt,
+    updatedAt = targetSubuser.UpdatedAt,
 updatedBy = currentUserEmail
-            });
+          });
    }
     catch (DbUpdateConcurrencyException ex)
     {
@@ -664,7 +729,7 @@ try
          {
     _logger.LogError("SaveChanges returned 0 rows affected for subuser {Email}", email);
 return StatusCode(500, new { 
-        message = "Failed to save password changes to database",
+ message = "Failed to save password changes to database",
     error = "No rows were modified"
          });
  }
@@ -673,11 +738,11 @@ return StatusCode(500, new {
     email, currentUserEmail, rowsAffected);
 
         return Ok(new { 
-    message = "Subuser password changed successfully", 
+message = "Subuser password changed successfully", 
  subuserEmail = email,
     changedBy = currentUserEmail,
     changedAt = DateTime.UtcNow,
-    rowsAffected = rowsAffected
+ rowsAffected = rowsAffected
    });
   }
  catch (DbUpdateConcurrencyException ex)
@@ -686,7 +751,7 @@ return StatusCode(500, new {
   return StatusCode(409, new { 
         message = "Password change failed due to concurrency conflict",
        error = ex.Message
-           });
+    });
       }
  catch (Exception ex)
       {
@@ -695,12 +760,12 @@ return StatusCode(500, new {
           message = "Error changing password",
 error = ex.Message,
   stackTrace = ex.StackTrace
-     });
-        }
+  });
      }
+      } // ✅ Missing closing brace for ChangeSubuserPassword method
 
- /// <summary>
-/// Simple password change - Only requires subuser email
+        /// <summary>
+        /// Simple password change - Only requires subuser email
  /// Subuser can change their own password without needing parent user email
         /// Route: PATCH /api/EnhancedSubuser/simple-change-password
         /// </summary>
@@ -1061,26 +1126,31 @@ _logger.LogError(ex, "Concurrency error changing password for subuser {Email}", 
   [Required(ErrorMessage = "Subuser email is required")]
     [EmailAddress(ErrorMessage = "Invalid email format")]
         [MaxLength(255)]
-        public string subuser_email { get; set; } = string.Empty;
+   public string subuser_email { get; set; } = string.Empty;
    
         [Required(ErrorMessage = "Password is required")]
-        [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
+  [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
         public string subuser_password { get; set; } = string.Empty;
         
      [MaxLength(100)]
  public string? subuser_name { get; set; }
-        
+
         [MaxLength(100)]
      public string? department { get; set; }
       
-        [MaxLength(50)]
+     [MaxLength(50)]
    public string? role { get; set; }
         
     [MaxLength(20)]
-        public string? phone { get; set; }
+   public string? phone { get; set; }
      
       [MaxLength(100)]
-        public string? subuser_group { get; set; }  // Changed from int? to string?
+ public string? subuser_group { get; set; }  // Changed from int? to string?
+        
+     /// <summary>
+        /// License allocation for this subuser
+        /// </summary>
+        public int? license_allocation { get; set; } = 0;
         
         [EmailAddress(ErrorMessage = "Invalid parent email format")]
    public string? parentUserEmail { get; set; } // Optional - If null, uses current user
@@ -1092,9 +1162,31 @@ _logger.LogError(ex, "Concurrency error changing password for subuser {Email}", 
     public class SubuserUpdateRequest
     {
       public string SubuserEmail { get; set; } = string.Empty;
-        public string? NewPassword { get; set; }
-public string? NewParentUserEmail { get; set; }
-    }
+
+  // All optional fields that can be updated
+   [MaxLength(100)]
+      public string? SubuserName { get; set; }
+  
+   [MaxLength(100)]
+ public string? Department { get; set; }
+  
+        [MaxLength(50)]
+ public string? Role { get; set; }
+     
+        [MaxLength(20)]
+  public string? Phone { get; set; }
+        
+    [MaxLength(100)]
+  public string? SubuserGroup { get; set; }
+  
+     public int? LicenseAllocation { get; set; }
+        
+   [MaxLength(50)]
+ public string? Status { get; set; }
+    
+  public string? NewPassword { get; set; }
+   public string? NewParentUserEmail { get; set; }
+  }
 
     /// <summary>
     /// Flexible PATCH request model for partial subuser updates
