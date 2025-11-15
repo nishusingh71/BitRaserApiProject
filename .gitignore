@@ -364,15 +364,7 @@ FodyWeavers.xsd
 
 # ==================================================
 # 🔐 ENVIRONMENT VARIABLES & SENSITIVE FILES
-# ==================================================
-.env
-.env.local
-.env.development
-.env.production
-.env.test
-appsettings.Development.json
-appsettings.Production.json
-
+# =================================================
 # Markdown documentation files
 *.md
 !README.md
