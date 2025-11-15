@@ -364,7 +364,17 @@ FodyWeavers.xsd
 
 # ==================================================
 # 🔐 ENVIRONMENT VARIABLES & SENSITIVE FILES
-# =================================================
-# Markdown documentation files
+# ==================================================
+.env
+.env.local
+.env.development
+# ⚠️ PRODUCTION SETTINGS - COMMIT TO GIT FOR RENDER DEPLOYMENT
+# appsettings.Production.json  # COMMENTED OUT - We need this on Render
+.env.production
+.env.test
+appsettings.Development.json
+
+# Markdown documentation files (except README)
 *.md
 !README.md
+!Documentation/*.md
