@@ -3,201 +3,210 @@ using System.Net.Mail;
 
 namespace BitRaserApiProject.Services
 {
-  public interface IEmailService
+    public interface IEmailService
     {
-        Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName);
+      Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName);
         Task<bool> SendPasswordResetSuccessEmailAsync(string toEmail, string userName);
-    }
+  }
 
     public class EmailService : IEmailService
     {
-    private readonly IConfiguration _configuration;
-        private readonly ILogger<EmailService> _logger;
+        private readonly IConfiguration _configuration;
+    private readonly ILogger<EmailService> _logger;
         private readonly IWebHostEnvironment _env;
 
-        public EmailService(
-       IConfiguration configuration, 
-     ILogger<EmailService> logger,
+  public EmailService(
+IConfiguration configuration, 
+        ILogger<EmailService> logger,
     IWebHostEnvironment env)
         {
-        _configuration = configuration;
-_logger = logger;
-            _env = env;
+  _configuration = configuration;
+        _logger = logger;
+   _env = env;
         }
 
-     public async Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName)
+        public async Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName)
+   {
+   try
         {
-            try
-       {
-   var smtpHost = Environment.GetEnvironmentVariable("EmailSettings__SmtpHost") 
-                  ?? _configuration["EmailSettings:SmtpHost"] 
-         ?? "smtp.gmail.com";
-         
-    var smtpPortStr = Environment.GetEnvironmentVariable("EmailSettings__SmtpPort") 
-           ?? _configuration["EmailSettings:SmtpPort"] 
-     ?? "587";
-         var smtpPort = int.Parse(smtpPortStr);
-     
-          var fromEmail = Environment.GetEnvironmentVariable("EmailSettings__FromEmail") 
-      ?? _configuration["EmailSettings:FromEmail"];
- 
-          var fromPassword = Environment.GetEnvironmentVariable("EmailSettings__FromPassword") 
-         ?? _configuration["EmailSettings:FromPassword"];
-           
-        var fromName = Environment.GetEnvironmentVariable("EmailSettings__FromName") 
-         ?? _configuration["EmailSettings:FromName"] 
-        ?? "DSecure Support";
-        
-      var enableSslStr = Environment.GetEnvironmentVariable("EmailSettings__EnableSsl") 
-        ?? _configuration["EmailSettings:EnableSsl"] 
-        ?? "true";
-                var enableSsl = bool.Parse(enableSslStr);
+    // ✅ Direct configuration from appsettings.json (no .env dependency)
+         var smtpHost = _configuration["EmailSettings:SmtpHost"] ?? "smtp.gmail.com";
+    var smtpPort = int.Parse(_configuration["EmailSettings:SmtpPort"] ?? "587");
+        var fromEmail = _configuration["EmailSettings:FromEmail"];
+   var fromPassword = _configuration["EmailSettings:FromPassword"];
+  var fromName = _configuration["EmailSettings:FromName"] ?? "DSecure Support";
+   var enableSsl = bool.Parse(_configuration["EmailSettings:EnableSsl"] ?? "true");
+    var timeout = int.Parse(_configuration["EmailSettings:Timeout"] ?? "60000");
 
-        var timeoutStr = Environment.GetEnvironmentVariable("EmailSettings__Timeout") 
-      ?? _configuration["EmailSettings:Timeout"] 
-             ?? "30000";
-       var timeout = int.Parse(timeoutStr);
-
-    if (string.IsNullOrEmpty(fromEmail))
-          {
-           _logger.LogError("FromEmail is not configured!");
-         return false;
+           // ✅ Validate required settings
+     if (string.IsNullOrEmpty(fromEmail))
+         {
+     _logger.LogError("❌ FromEmail is not configured in appsettings.json!");
+       return false;
       }
 
-       if (string.IsNullOrEmpty(fromPassword))
-     {
-     _logger.LogError("FromPassword is not configured!");
-         return false;
-        }
+    if (string.IsNullOrEmpty(fromPassword))
+       {
+    _logger.LogError("❌ FromPassword is not configured in appsettings.json!");
+      _logger.LogError("📝 Please set EmailSettings:FromPassword in:");
+         _logger.LogError("   1. appsettings.json (for local)");
+          _logger.LogError("   2. appsettings.Production.json (for production)");
+            return false;
+    }
 
-      _logger.LogInformation("Email Configuration [Environment: {Env}] - Host: {Host}:{Port}, SSL: {SSL}", 
-        _env.EnvironmentName, smtpHost, smtpPort, enableSsl);
+       _logger.LogInformation("📧 Email Configuration [Environment: {Env}]", _env.EnvironmentName);
+  _logger.LogInformation("   Host: {Host}:{Port}, SSL: {SSL}, Timeout: {Timeout}ms", 
+          smtpHost, smtpPort, enableSsl, timeout);
+      _logger.LogInformation("   From: {From}, Password length: {Length} chars", 
+        fromEmail, fromPassword.Length);
 
-     using var smtpClient = new SmtpClient(smtpHost, smtpPort)
-   {
-            Credentials = new NetworkCredential(fromEmail, fromPassword),
-            EnableSsl = enableSsl,
-             DeliveryMethod = SmtpDeliveryMethod.Network,
-        UseDefaultCredentials = false,
-      Timeout = timeout
+        // ✅ Production-ready SMTP configuration
+ using var smtpClient = new SmtpClient(smtpHost, smtpPort)
+      {
+          Credentials = new NetworkCredential(fromEmail, fromPassword),
+   EnableSsl = enableSsl,
+        DeliveryMethod = SmtpDeliveryMethod.Network,
+           UseDefaultCredentials = false,
+          Timeout = timeout
+     };
+
+      // ✅ Set TLS version for production
+      ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
+
+          var mailMessage = new MailMessage
+       {
+     From = new MailAddress(fromEmail, fromName),
+         Subject = "Password Reset OTP - DSecure",
+            Body = GetOtpEmailBody(userName, otp),
+            IsBodyHtml = true,
+    Priority = MailPriority.High
    };
 
-                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
+              mailMessage.To.Add(toEmail);
 
-         var mailMessage = new MailMessage
-     {
-      From = new MailAddress(fromEmail, fromName),
-  Subject = "Password Reset OTP - DSecure",
-          Body = GetOtpEmailBody(userName, otp),
-          IsBodyHtml = true,
-   Priority = MailPriority.High
-       };
+      // ✅ Retry logic for production
+     int maxRetries = 3;
+        int retryCount = 0;
+      Exception? lastException = null;
 
-     mailMessage.To.Add(toEmail);
-
-       int maxRetries = 3;
-    int retryCount = 0;
-       Exception? lastException = null;
-
-      while (retryCount < maxRetries)
-       {
-        try
-   {
-           _logger.LogInformation("Attempt {Retry}/{Max} - Sending email to {Email}", 
-     retryCount + 1, maxRetries, toEmail);
-        
-   await smtpClient.SendMailAsync(mailMessage);
-    
-  _logger.LogInformation("OTP email sent successfully to {Email}", toEmail);
-        return true;
-           }
-           catch (SmtpException smtpEx)
+   while (retryCount < maxRetries)
         {
-  lastException = smtpEx;
-                retryCount++;
+ try
+      {
+   _logger.LogInformation("📧 Attempt {Retry}/{Max} - Sending OTP email to {Email}", 
+         retryCount + 1, maxRetries, toEmail);
+             
+   await smtpClient.SendMailAsync(mailMessage);
   
-           _logger.LogWarning("SMTP attempt {Retry} failed: {Message}", 
-       retryCount, smtpEx.Message);
-
-   if (retryCount < maxRetries)
-{
-        await Task.Delay(1000 * retryCount);
-       }
+    _logger.LogInformation("✅ OTP email sent successfully to {Email}", toEmail);
+              return true;
    }
+         catch (SmtpException smtpEx)
+  {
+              lastException = smtpEx;
+        retryCount++;
+             
+                 _logger.LogWarning("⚠️ SMTP attempt {Retry} failed: {Message}", 
+               retryCount, smtpEx.Message);
+
+          if (retryCount < maxRetries)
+           {
+              await Task.Delay(1000 * retryCount); // Exponential backoff
+  }
+                    }
        }
 
-     if (lastException != null)
-    {
- throw lastException;
-       }
+                // All retries failed
+             if (lastException != null)
+                {
+      throw lastException;
+ }
 
+                return false;
+     }
+  catch (SmtpException smtpEx)
+      {
+       _logger.LogError(smtpEx, "❌ SMTP Error sending OTP email to {Email}", toEmail);
+                _logger.LogError("   Status: {Status}, Message: {Message}", smtpEx.StatusCode, smtpEx.Message);
+      
+        if (smtpEx.Message.Contains("Authentication") || smtpEx.Message.Contains("535"))
+      {
+         _logger.LogError("🔐 SMTP Authentication Failed!");
+          _logger.LogError("   ✅ Check EmailSettings:FromPassword in appsettings.json");
+_logger.LogError("   ✅ Verify Gmail App Password (16 chars, no spaces)");
+          _logger.LogError("   ✅ Generate new: https://myaccount.google.com/apppasswords");
+         }
+  else if (smtpEx.Message.Contains("timed out") || smtpEx.Message.Contains("timeout"))
+   {
+     _logger.LogError("⏱️ SMTP Connection Timeout!");
+        _logger.LogError("   ✅ Check firewall allows port 587");
+        _logger.LogError("   ✅ Try increasing EmailSettings:Timeout in appsettings.json");
+                }
+
+      return false;
+     }
+    catch (Exception ex)
+       {
+                _logger.LogError(ex, "❌ Unexpected error sending OTP email to {Email}", toEmail);
+       _logger.LogError("   Environment: {Env}", _env.EnvironmentName);
+       _logger.LogError("   InnerException: {Inner}", ex.InnerException?.Message);
      return false;
-            }
- catch (SmtpException smtpEx)
-       {
-  _logger.LogError(smtpEx, "SMTP Error sending email to {Email}. Status: {Status}", 
-           toEmail, smtpEx.StatusCode);
-    return false;
-            }
-            catch (Exception ex)
-       {
-       _logger.LogError(ex, "Error sending OTP email to {Email}", toEmail);
-        return false;
-       }
+      }
         }
 
         public async Task<bool> SendPasswordResetSuccessEmailAsync(string toEmail, string userName)
         {
-      try
-            {
-        var smtpHost = _configuration["EmailSettings:SmtpHost"] ?? "smtp.gmail.com";
-      var smtpPort = int.Parse(_configuration["EmailSettings:SmtpPort"] ?? "587");
-        var fromEmail = _configuration["EmailSettings:FromEmail"] ?? "nishus877@gmail.com";
- var fromPassword = _configuration["EmailSettings:FromPassword"]?? "nbaoivfshlzgawtj";
-    var fromName = _configuration["EmailSettings:FromName"] ?? "DSecure Support";
-          var enableSsl = bool.Parse(_configuration["EmailSettings:EnableSsl"] ?? "true");
+            try
+         {
+    // ✅ Direct configuration from appsettings.json
+ var smtpHost = _configuration["EmailSettings:SmtpHost"] ?? "smtp.gmail.com";
+     var smtpPort = int.Parse(_configuration["EmailSettings:SmtpPort"] ?? "587");
+      var fromEmail = _configuration["EmailSettings:FromEmail"];
+           var fromPassword = _configuration["EmailSettings:FromPassword"];
+                var fromName = _configuration["EmailSettings:FromName"] ?? "DSecure Support";
+     var enableSsl = bool.Parse(_configuration["EmailSettings:EnableSsl"] ?? "true");
 
-          if (string.IsNullOrEmpty(fromEmail) || string.IsNullOrEmpty(fromPassword))
-  {
-     _logger.LogError("Email settings not configured properly");
-  return false;
-                }
+   if (string.IsNullOrEmpty(fromEmail) || string.IsNullOrEmpty(fromPassword))
+         {
+          _logger.LogError("❌ Email settings not configured in appsettings.json");
+           return false;
+ }
 
                 using var smtpClient = new SmtpClient(smtpHost, smtpPort)
-           {
-                    Credentials = new NetworkCredential(fromEmail, fromPassword),
-     EnableSsl = enableSsl,
-          DeliveryMethod = SmtpDeliveryMethod.Network,
-      UseDefaultCredentials = false,
-       Timeout = 30000
-            };
-
-           ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
-
-     var mailMessage = new MailMessage
-       {
- From = new MailAddress(fromEmail, fromName),
-           Subject = "Password Reset Successful - DSecure",
-          Body = GetPasswordResetSuccessEmailBody(userName),
-       IsBodyHtml = true
-    };
-
- mailMessage.To.Add(toEmail);
-              await smtpClient.SendMailAsync(mailMessage);
-                
-                _logger.LogInformation("Password reset success email sent to {Email}", toEmail);
-        return true;
-            }
-    catch (Exception ex)
           {
- _logger.LogError(ex, "Failed to send password reset success email to {Email}", toEmail);
-        return false;
-            }
-     }
+                Credentials = new NetworkCredential(fromEmail, fromPassword),
+      EnableSsl = enableSsl,
+            DeliveryMethod = SmtpDeliveryMethod.Network,
+ UseDefaultCredentials = false,
+                Timeout = 60000
+             };
+
+       ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls13;
+
+      var mailMessage = new MailMessage
+                {
+     From = new MailAddress(fromEmail, fromName),
+           Subject = "Password Reset Successful - DSecure",
+                  Body = GetPasswordResetSuccessEmailBody(userName),
+           IsBodyHtml = true
+   };
+
+mailMessage.To.Add(toEmail);
+   await smtpClient.SendMailAsync(mailMessage);
+     
+      _logger.LogInformation("✅ Password reset success email sent to {Email}", toEmail);
+    return true;
+    }
+ catch (Exception ex)
+            {
+       _logger.LogError(ex, "❌ Failed to send password reset success email to {Email}", toEmail);
+    return false;
+    }
+        }
 
         private string GetOtpEmailBody(string userName, string otp)
         {
- return @"
+  return @"
 <!DOCTYPE html>
 <html>
 <head>
@@ -212,7 +221,7 @@ body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; pad
 </head>
 <body>
 <div class='container'>
-<div class='header'><h1>Password Reset Request</h1></div>
+<div class='header'><h1>🔐 Password Reset Request</h1></div>
 <p class='info'>Hello <strong>" + userName + @"</strong>,</p>
 <p class='info'>Use the following OTP to reset your password:</p>
 <div class='otp-box'>
@@ -223,11 +232,11 @@ body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; pad
 </div>
 </body>
 </html>";
-        }
+     }
 
-        private string GetPasswordResetSuccessEmailBody(string userName)
+private string GetPasswordResetSuccessEmailBody(string userName)
         {
-return @"
+ return @"
 <!DOCTYPE html>
 <html>
 <head>
@@ -240,7 +249,7 @@ body { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; pad
 </head>
 <body>
 <div class='container'>
-<div class='header'><h1>Password Reset Successful</h1></div>
+<div class='header'><h1>✅ Password Reset Successful</h1></div>
 <p>Hello <strong>" + userName + @"</strong>,</p>
 <div class='success-box'>
 <h2 style='color: #28a745; margin: 0;'>Your password has been successfully reset!</h2>
