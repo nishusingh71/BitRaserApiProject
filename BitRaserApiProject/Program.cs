@@ -3,6 +3,8 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using BitRaserApiProject;
 using BitRaserApiProject.Services;
+using BitRaserApiProject.Repositories;  // ✅ ADD: For Forgot Password Repository
+using BitRaserApiProject.BackgroundServices;  // ✅ ADD: For Background Services
 using BitRaserApiProject.Swagger;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -290,9 +292,16 @@ builder.Services.AddScoped<MigrationUtilityService>();
 builder.Services.AddScoped<PdfService>();
 builder.Services.AddScoped<IDapperService, DapperService>();  // ✅ NEW: Dapper Service for high-performance queries
 
-// ✅ FORGOT PASSWORD SERVICES - OTP AND EMAIL
+// ✅ FORGOT PASSWORD SERVICES - OTP AND EMAIL (OLD - RETAINED FOR BACKWARD COMPATIBILITY)
 builder.Services.AddSingleton<IOtpService, OtpService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
+
+// ✅ FORGOT/RESET PASSWORD WITHOUT EMAIL - NEW IMPLEMENTATION
+builder.Services.AddScoped<IForgotPasswordRepository, ForgotPasswordRepository>();
+builder.Services.AddScoped<IForgotPasswordService, ForgotPasswordService>();
+
+// ✅ AUTO-CLEANUP BACKGROUND SERVICE FOR EXPIRED PASSWORD RESET REQUESTS
+builder.Services.AddHostedService<ForgotPasswordCleanupBackgroundService>();
 
 // ✅ PRIVATE CLOUD DATABASE SERVICE
 builder.Services.AddScoped<IPrivateCloudService, PrivateCloudService>();

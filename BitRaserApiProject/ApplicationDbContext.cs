@@ -43,6 +43,9 @@ namespace BitRaserApiProject
         // Private Cloud Database Management
         public DbSet<PrivateCloudDatabase> PrivateCloudDatabases { get; set; }
         
+        // ✅ Forgot Password Requests (NO EMAIL - OTP returned in API response)
+        public DbSet<ForgotPasswordRequest> ForgotPasswordRequests { get; set; }
+        
         public static string HashLicenseKey(string licenseKey)
         {
             using var sha256 = SHA256.Create();
@@ -642,10 +645,52 @@ namespace BitRaserApiProject
                 new RolePermission { RoleId = 4, PermissionId = 3 },
                 new RolePermission { RoleId = 4, PermissionId = 5 },
                 new RolePermission { RoleId = 4, PermissionId = 7 },
-                
+    
                 // User gets only view access
                 new RolePermission { RoleId = 5, PermissionId = 5 }
             );
+
+            // ✅ ForgotPasswordRequest table configuration
+            modelBuilder.Entity<ForgotPasswordRequest>()
+         .HasKey(f => f.Id);
+
+  modelBuilder.Entity<ForgotPasswordRequest>()
+     .Property(f => f.Email)
+  .HasMaxLength(255)
+      .IsRequired();
+
+     modelBuilder.Entity<ForgotPasswordRequest>()
+     .Property(f => f.UserType)
+    .HasMaxLength(20)
+        .HasDefaultValue("user");
+
+  modelBuilder.Entity<ForgotPasswordRequest>()
+      .Property(f => f.Otp)
+       .HasMaxLength(6)
+     .IsRequired();
+
+          modelBuilder.Entity<ForgotPasswordRequest>()
+   .Property(f => f.ResetToken)
+        .HasMaxLength(500)
+         .IsRequired();
+
+        modelBuilder.Entity<ForgotPasswordRequest>()
+          .HasIndex(f => f.ResetToken)
+  .IsUnique();
+
+ modelBuilder.Entity<ForgotPasswordRequest>()
+   .HasIndex(f => new { f.Email, f.ExpiresAt });
+
+        modelBuilder.Entity<ForgotPasswordRequest>()
+            .HasIndex(f => new { f.UserId, f.UserType });
+
+       modelBuilder.Entity<ForgotPasswordRequest>()
+.Property(f => f.IpAddress)
+       .HasMaxLength(50);
+
+        modelBuilder.Entity<ForgotPasswordRequest>()
+  .Property(f => f.UserAgent)
+     .HasMaxLength(500);
         }
     }
 
