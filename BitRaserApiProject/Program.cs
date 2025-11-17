@@ -303,6 +303,10 @@ builder.Services.AddScoped<IForgotPasswordService, ForgotPasswordService>();
 // ✅ AUTO-CLEANUP BACKGROUND SERVICE FOR EXPIRED PASSWORD RESET REQUESTS
 builder.Services.AddHostedService<ForgotPasswordCleanupBackgroundService>();
 
+// ✅ KEEP-ALIVE SERVICE TO PREVENT RENDER.COM FREE TIER SPIN-DOWN
+builder.Services.AddHttpClient();  // Register HttpClient for keep-alive pings
+builder.Services.AddHostedService<KeepAliveBackgroundService>();
+
 // ✅ PRIVATE CLOUD DATABASE SERVICE
 builder.Services.AddScoped<IPrivateCloudService, PrivateCloudService>();
 
