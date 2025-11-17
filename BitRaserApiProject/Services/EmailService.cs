@@ -32,11 +32,11 @@ IConfiguration configuration,
     // ✅ Direct configuration from appsettings.json (no .env dependency)
          var smtpHost = _configuration["EmailSettings:SmtpHost"] ?? "smtp.gmail.com";
     var smtpPort = int.Parse(_configuration["EmailSettings:SmtpPort"] ?? "587");
-        var fromEmail = _configuration["EmailSettings:FromEmail"] ?? "nishus877@gmail.com";
-           var fromPassword = _configuration["EmailSettings:FromPassword"] ?? "nbaoivfshlzgawtj";
+        var fromEmail = _configuration["EmailSettings:FromEmail"];
+           var fromPassword = _configuration["EmailSettings:FromPassword"];
   var fromName = _configuration["EmailSettings:FromName"] ?? "DSecure Support";
    var enableSsl = bool.Parse(_configuration["EmailSettings:EnableSsl"] ?? "true");
-    var timeout = int.Parse(_configuration["EmailSettings:Timeout"] ?? "10000");
+    var timeout = int.Parse(_configuration["EmailSettings:Timeout"] ?? "60000");
 
            // ✅ Validate required settings
      if (string.IsNullOrEmpty(fromEmail))
@@ -161,8 +161,8 @@ _logger.LogError("   ✅ Verify Gmail App Password (16 chars, no spaces)");
     // ✅ Direct configuration from appsettings.json
  var smtpHost = _configuration["EmailSettings:SmtpHost"] ?? "smtp.gmail.com";
      var smtpPort = int.Parse(_configuration["EmailSettings:SmtpPort"] ?? "587");
-      var fromEmail = _configuration["EmailSettings:FromEmail"] ?? "nishus877@gmail.com";
-           var fromPassword = _configuration["EmailSettings:FromPassword"] ?? "nbaoivfshlzgawtj";
+      var fromEmail = _configuration["EmailSettings:FromEmail"];
+           var fromPassword = _configuration["EmailSettings:FromPassword"];
                 var fromName = _configuration["EmailSettings:FromName"] ?? "DSecure Support";
      var enableSsl = bool.Parse(_configuration["EmailSettings:EnableSsl"] ?? "true");
 
