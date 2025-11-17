@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.ComponentModel.DataAnnotations;
 using BitRaserApiProject.Models;
 using BitRaserApiProject.Models.DTOs;
 using Microsoft.AspNetCore.Authorization;
@@ -173,6 +174,7 @@ description = sr.Role.Description,
         maxMachines = subuser.MaxMachines ?? 5,
     license_allocation = subuser.license_allocation ?? 0, // ✅ Added
   groupId = subuser.GroupId,
+
 // Permissions flags
     canCreateSubusers = subuser.CanCreateSubusers,
      canViewReports = subuser.CanViewReports,
@@ -589,191 +591,114 @@ var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUser
         /// <summary>
         /// PATCH: Update subuser by parent email and subuser email
         /// Route: /api/EnhancedSubusers/by-parent/{parentEmail}/subuser/{subuserEmail}
-        /// </summary>
-        [HttpPatch("by-parent/{parentEmail}/subuser/{subuserEmail}")]
-        [RequirePermission("UPDATE_SUBUSER")]
-        public async Task<IActionResult> PatchSubuserByParent(string parentEmail, string subuserEmail, [FromBody] UpdateSubuserDto request)
-        {
-     try
-       {
-         var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-  var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-          
-       // Find subuser by both parent email and subuser email
-            var subuser = await _context.subuser
-     .FirstOrDefaultAsync(s => s.user_email == parentEmail && s.subuser_email == subuserEmail);
-      
-        if (subuser == null)
-        return NotFound(new { 
-   success = false,
-           message = $"Subuser '{subuserEmail}' not found under parent '{parentEmail}'" 
-   });
-
-      // Check if user can update this subuser
-bool canUpdate = subuser.user_email == currentUserEmail ||
-         await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
-
-         if (!canUpdate)
-        {
-         return StatusCode(403, new { 
-       success = false,
-error = "You can only update your own subusers" 
-                    });
-    }
-
-    // Track which fields were updated
-     var updatedFields = new List<string>();
-
- // ✅ Partial update - only update fields that are provided
-  if (!string.IsNullOrEmpty(request.Name))
+        /// Only allows updating: name, phone, department, role, status
+        /// Parent users can update their own subusers without special permissions
+  /// </summary>
+  [HttpPatch("by-parent/{parentEmail}/subuser/{subuserEmail}")]
+     public async Task<IActionResult> PatchSubuserByParent(string parentEmail, string subuserEmail, [FromBody] UpdateSubuserByParentDto request)
+    {
+            try
 {
-         subuser.Name = request.Name;
-         updatedFields.Add("Name");
-    }
+      var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+   var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+     
+                // Find subuser by both parent email and subuser email
+          var subuser = await _context.subuser
+           .FirstOrDefaultAsync(s => s.user_email == parentEmail && s.subuser_email == subuserEmail);
+ 
+    if (subuser == null)
+return NotFound(new { 
+    success = false,
+            message = $"Subuser '{subuserEmail}' not found under parent '{parentEmail}'" 
+          });
 
-  if (!string.IsNullOrEmpty(request.Phone))
-    {
-            subuser.Phone = request.Phone;
-              updatedFields.Add("Phone");
-             }
+       // Check if user can update this subuser
+          bool canUpdate = subuser.user_email == currentUserEmail ||
+   await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
 
-      if (!string.IsNullOrEmpty(request.Department))
-       {
-      subuser.Department = request.Department;
-         updatedFields.Add("Department");
-       }
-
-       if (!string.IsNullOrEmpty(request.Role))
-  {
-          subuser.Role = request.Role;
-     updatedFields.Add("Role");
-       }
-
-        if (!string.IsNullOrEmpty(request.Status))
-  {
-                  subuser.status = request.Status;
-   updatedFields.Add("Status");
-  }
-
-                if (request.MaxMachines.HasValue)
-         {
-   subuser.MaxMachines = request.MaxMachines.Value;
-       updatedFields.Add("MaxMachines");
-}
-
-        if (request.GroupId.HasValue)
-     {
-         subuser.GroupId = request.GroupId.Value;
-  updatedFields.Add("GroupId");
-      }
-
-      if (request.LicenseAllocation.HasValue)
-      {
-        subuser.license_allocation = request.LicenseAllocation.Value;
-          updatedFields.Add("LicenseAllocation");
-    }
-
-         if (!string.IsNullOrEmpty(request.SubuserGroup))
-    {
-             subuser.subuser_group = request.SubuserGroup;
- updatedFields.Add("SubuserGroup");
-             }
-
-   if (request.CanViewReports.HasValue)
-    {
-      subuser.CanViewReports = request.CanViewReports.Value;
-          updatedFields.Add("CanViewReports");
-  }
-
-        if (request.CanManageMachines.HasValue)
-      {
-  subuser.CanManageMachines = request.CanManageMachines.Value;
-     updatedFields.Add("CanManageMachines");
-  }
-
-        if (request.CanAssignLicenses.HasValue)
-       {
-       subuser.CanAssignLicenses = request.CanAssignLicenses.Value;
-   updatedFields.Add("CanAssignLicenses");
-   }
-
-       if (request.CanCreateSubusers.HasValue)
-       {
-           subuser.CanCreateSubusers = request.CanCreateSubusers.Value;
-     updatedFields.Add("CanCreateSubusers");
- }
-
-            if (request.EmailNotifications.HasValue)
-            {
-              subuser.EmailNotifications = request.EmailNotifications.Value;
-        updatedFields.Add("EmailNotifications");
-       }
-
-    if (request.SystemAlerts.HasValue)
- {
-     subuser.SystemAlerts = request.SystemAlerts.Value;
-       updatedFields.Add("SystemAlerts");
-      }
-
-       if (!string.IsNullOrEmpty(request.Notes))
-     {
-      subuser.Notes = request.Notes;
-                    updatedFields.Add("Notes");
-      }
-
-           // Update audit fields
-        var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
-    if (parentUser != null)
-{
-        subuser.UpdatedBy = parentUser.user_id;
-     }
-        subuser.UpdatedAt = DateTime.UtcNow;
-
-  // Save changes
-      _context.Entry(subuser).State = EntityState.Modified;
-  await _context.SaveChangesAsync();
-
- return Ok(new { 
-          success = true,
-    message = "Subuser updated successfully",
-  parent_email = parentEmail,
-      subuser_email = subuserEmail,
-   updatedFields = updatedFields,
-       updatedBy = currentUserEmail,
-    updatedAt = subuser.UpdatedAt,
-   // Return updated data
-   subuser = new {
-  subuser_email = subuser.subuser_email,
-         user_email = subuser.user_email,
-          name = subuser.Name,
-  phone = subuser.Phone,
-    department = subuser.Department,
-   role = subuser.Role,
-   status = subuser.status,
-  groupId = subuser.GroupId,
-maxMachines = subuser.MaxMachines,
-    license_allocation = subuser.license_allocation,
-subuser_group = subuser.subuser_group, // ✅ Fixed: Direct string field
-      canViewReports = subuser.CanViewReports,
-       canManageMachines = subuser.CanManageMachines,
-     canAssignLicenses = subuser.CanAssignLicenses,
-      canCreateSubusers = subuser.CanCreateSubusers,
-   emailNotifications = subuser.EmailNotifications,
-  systemAlerts = subuser.SystemAlerts,
-          notes = subuser.Notes
-  }
-       });
-        }
- catch (Exception ex)
-            {
-     return StatusCode(500, new { 
-   success = false,
-   message = "Error updating subuser", 
- error = ex.Message 
+        if (!canUpdate)
+        {
+       return StatusCode(403, new { 
+         success = false,
+         error = "You can only update your own subusers" 
  });
-            }
-  }
+         }
 
+  // Track which fields were updated
+ var updatedFields = new List<string>();
+
+   // ✅ ONLY THESE 5 FIELDS CAN BE UPDATED
+ if (!string.IsNullOrEmpty(request.Name))
+        {
+        subuser.Name = request.Name;
+  updatedFields.Add("Name");
+        }
+
+   if (!string.IsNullOrEmpty(request.Phone))
+       {
+   subuser.Phone = request.Phone;
+           updatedFields.Add("Phone");
+                }
+
+                if (!string.IsNullOrEmpty(request.Department))
+   {
+          subuser.Department = request.Department;
+         updatedFields.Add("Department");
+     }
+
+    if (!string.IsNullOrEmpty(request.Role))
+      {
+            subuser.Role = request.Role;
+     updatedFields.Add("Role");
+           }
+
+   if (!string.IsNullOrEmpty(request.Status))
+         {
+     subuser.status = request.Status;
+               updatedFields.Add("Status");
+     }
+
+  // Update audit fields
+   var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+        if (parentUser != null)
+         {
+     subuser.UpdatedBy = parentUser.user_id;
+        }
+              subuser.UpdatedAt = DateTime.UtcNow;
+
+         // Save changes
+    _context.Entry(subuser).State = EntityState.Modified;
+        await _context.SaveChangesAsync();
+
+      return Ok(new { 
+  success = true,
+          message = "Subuser updated successfully",
+   parent_email = parentEmail,
+             subuser_email = subuserEmail,
+ updatedFields = updatedFields,
+            updatedBy = currentUserEmail,
+          updatedAt = subuser.UpdatedAt,
+         // Return updated data - ONLY the 5 allowed fields
+      subuser = new {
+        subuser_email = subuser.subuser_email,
+     user_email = subuser.user_email,
+     name = subuser.Name,
+       phone = subuser.Phone,
+      department = subuser.Department,
+         role = subuser.Role,
+    status = subuser.status
+    }
+    });
+         }
+         catch (Exception ex)
+        {
+        return StatusCode(500, new { 
+              success = false,
+     message = "Error updating subuser", 
+  error = ex.Message 
+           });
+            }
+ }
         /// <summary>
         /// Delete subuser
         /// </summary>
@@ -849,6 +774,28 @@ var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email ==
     {
         [System.ComponentModel.DataAnnotations.Required]
   public string RoleName { get; set; } = string.Empty;
+    }
+
+ /// <summary>
+    /// DTO for updating subuser via by-parent endpoint
+    /// ONLY allows updating: name, phone, department, role, status
+    /// </summary>
+    public class UpdateSubuserByParentDto
+    {
+        [MaxLength(100)]
+        public string? Name { get; set; }
+        
+        [MaxLength(20)]
+        public string? Phone { get; set; }
+        
+        [MaxLength(100)]
+    public string? Department { get; set; }
+  
+  [MaxLength(50)]
+        public string? Role { get; set; }
+        
+        [MaxLength(50)]
+        public string? Status { get; set; }
     }
 
     #endregion
