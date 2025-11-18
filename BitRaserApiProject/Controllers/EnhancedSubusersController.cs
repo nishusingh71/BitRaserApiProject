@@ -591,114 +591,167 @@ var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUser
         /// <summary>
         /// PATCH: Update subuser by parent email and subuser email
         /// Route: /api/EnhancedSubusers/by-parent/{parentEmail}/subuser/{subuserEmail}
-        /// Only allows updating: name, phone, department, role, status
+   /// Only allows updating: name, phone, department, role, status
         /// Parent users can update their own subusers without special permissions
-  /// </summary>
-  [HttpPatch("by-parent/{parentEmail}/subuser/{subuserEmail}")]
-     public async Task<IActionResult> PatchSubuserByParent(string parentEmail, string subuserEmail, [FromBody] UpdateSubuserByParentDto request)
-    {
+        /// Supports single or multiple field updates via JSON body
+  /// Supports both camelCase (Name, Phone) and snake_case (subuser_name, subuser_phone) for compatibility
+     /// </summary>
+     [HttpPatch("by-parent/{parentEmail}/subuser/{subuserEmail}")]
+      public async Task<IActionResult> PatchSubuserByParent(
+    string parentEmail, 
+          string subuserEmail, 
+            [FromBody] UpdateSubuserByParentDto request)
+        {
             try
-{
-      var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-   var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-     
-                // Find subuser by both parent email and subuser email
-          var subuser = await _context.subuser
-           .FirstOrDefaultAsync(s => s.user_email == parentEmail && s.subuser_email == subuserEmail);
- 
-    if (subuser == null)
-return NotFound(new { 
-    success = false,
-            message = $"Subuser '{subuserEmail}' not found under parent '{parentEmail}'" 
+         {
+         var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+          var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+
+        // Find subuser by both parent email and subuser email
+      var subuser = await _context.subuser
+          .FirstOrDefaultAsync(s => s.user_email == parentEmail && s.subuser_email == subuserEmail);
+                
+          if (subuser == null)
+        return NotFound(new { 
+       success = false,
+        message = $"Subuser '{subuserEmail}' not found under parent '{parentEmail}'" 
+        });
+
+     // Check if user can update this subuser
+bool canUpdate = subuser.user_email == currentUserEmail ||
+               await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
+
+    if (!canUpdate)
+   {
+ return StatusCode(403, new { 
+     success = false,
+      error = "You can only update your own subusers" 
           });
+       }
 
-       // Check if user can update this subuser
-          bool canUpdate = subuser.user_email == currentUserEmail ||
-   await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
+        // Track which fields were updated
+                var updatedFields = new List<string>();
 
-        if (!canUpdate)
-        {
-       return StatusCode(403, new { 
-         success = false,
-         error = "You can only update your own subusers" 
- });
+// ✅ Update fields - Support both naming conventions
+         // Priority: snake_case (subuser_name) over camelCase (Name) for compatibility
+        
+     // Name field
+        if (!string.IsNullOrEmpty(request.subuser_name))
+    {
+               subuser.Name = request.subuser_name;
+     updatedFields.Add("Name");
          }
-
-  // Track which fields were updated
- var updatedFields = new List<string>();
-
-   // ✅ ONLY THESE 5 FIELDS CAN BE UPDATED
- if (!string.IsNullOrEmpty(request.Name))
-        {
+        else if (!string.IsNullOrEmpty(request.Name))
+{
         subuser.Name = request.Name;
-  updatedFields.Add("Name");
+   updatedFields.Add("Name");
+             }
+
+    // Phone field
+                if (!string.IsNullOrEmpty(request.subuser_phone))
+       {
+            subuser.Phone = request.subuser_phone;
+  updatedFields.Add("Phone");
+    }
+     else if (!string.IsNullOrEmpty(request.Phone))
+    {
+         subuser.Phone = request.Phone;
+         updatedFields.Add("Phone");
+      }
+
+       // Department field (only camelCase supported)
+                if (!string.IsNullOrEmpty(request.Department))
+                {
+     subuser.Department = request.Department;
+ updatedFields.Add("Department");
         }
 
-   if (!string.IsNullOrEmpty(request.Phone))
-       {
-   subuser.Phone = request.Phone;
-           updatedFields.Add("Phone");
-                }
+   // Role field
+     if (!string.IsNullOrEmpty(request.subuser_role))
+     {
+      subuser.Role = request.subuser_role;
+           updatedFields.Add("Role");
+           }
+     else if (!string.IsNullOrEmpty(request.Role))
+        {
+   subuser.Role = request.Role;
+ updatedFields.Add("Role");
+}
 
-                if (!string.IsNullOrEmpty(request.Department))
-   {
-          subuser.Department = request.Department;
-         updatedFields.Add("Department");
+     // Status field (only camelCase supported)
+          if (!string.IsNullOrEmpty(request.Status))
+                {
+      subuser.status = request.Status;
+        updatedFields.Add("Status");
      }
 
-    if (!string.IsNullOrEmpty(request.Role))
-      {
-            subuser.Role = request.Role;
-     updatedFields.Add("Role");
+  // Check if at least one field was provided
+       if (updatedFields.Count == 0)
+     {
+         return BadRequest(new {
+         success = false,
+             message = "No fields to update. Provide at least one field in the request body.",
+          acceptedFields = new {
+      camelCase = new[] { "Name", "Phone", "Department", "Role", "Status" },
+          snake_case = new[] { "subuser_name", "subuser_phone", "subuser_role" }
+   },
+          example1_camelCase = new {
+Name = "John Smith",
+   Phone = "1234567890",
+   Department = "IT",
+          Role = "Manager",
+          Status = "active"
+ },
+         example2_snake_case = new {
+      subuser_name = "John Smith",
+     subuser_phone = "1234567890",
+          subuser_role = "Manager"
+           }
+          });
            }
 
-   if (!string.IsNullOrEmpty(request.Status))
-         {
-     subuser.status = request.Status;
-               updatedFields.Add("Status");
-     }
-
-  // Update audit fields
-   var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+          // Update audit fields
+       var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
         if (parentUser != null)
-         {
-     subuser.UpdatedBy = parentUser.user_id;
-        }
-              subuser.UpdatedAt = DateTime.UtcNow;
+    {
+ subuser.UpdatedBy = parentUser.user_id;
+  }
+             subuser.UpdatedAt = DateTime.UtcNow;
 
-         // Save changes
-    _context.Entry(subuser).State = EntityState.Modified;
-        await _context.SaveChangesAsync();
+      // Save changes
+       _context.Entry(subuser).State = EntityState.Modified;
+    await _context.SaveChangesAsync();
 
       return Ok(new { 
-  success = true,
-          message = "Subuser updated successfully",
-   parent_email = parentEmail,
-             subuser_email = subuserEmail,
- updatedFields = updatedFields,
-            updatedBy = currentUserEmail,
-          updatedAt = subuser.UpdatedAt,
-         // Return updated data - ONLY the 5 allowed fields
-      subuser = new {
-        subuser_email = subuser.subuser_email,
-     user_email = subuser.user_email,
-     name = subuser.Name,
-       phone = subuser.Phone,
+       success = true,
+       message = "Subuser updated successfully",
+          parent_email = parentEmail,
+          subuser_email = subuserEmail,
+      updatedFields = updatedFields,
+        updatedBy = currentUserEmail,
+       updatedAt = subuser.UpdatedAt,
+     // Return updated data - ONLY the 5 allowed fields
+        subuser = new {
+   subuser_email = subuser.subuser_email,
+              user_email = subuser.user_email,
+        name = subuser.Name,
+     phone = subuser.Phone,
       department = subuser.Department,
-         role = subuser.Role,
-    status = subuser.status
-    }
-    });
-         }
-         catch (Exception ex)
-        {
-        return StatusCode(500, new { 
-              success = false,
-     message = "Error updating subuser", 
-  error = ex.Message 
-           });
+          role = subuser.Role,
+   status = subuser.status
+              }
+      });
             }
- }
+    catch (Exception ex)
+            {
+      return StatusCode(500, new { 
+     success = false,
+         message = "Error updating subuser", 
+                error = ex.Message 
+            });
+      }
+        }
+
         /// <summary>
         /// Delete subuser
         /// </summary>
@@ -779,23 +832,35 @@ var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email ==
  /// <summary>
     /// DTO for updating subuser via by-parent endpoint
     /// ONLY allows updating: name, phone, department, role, status
+    /// Supports both camelCase (Name, Phone) and snake_case (subuser_name, subuser_phone) for compatibility
     /// </summary>
     public class UpdateSubuserByParentDto
     {
-        [MaxLength(100)]
-        public string? Name { get; set; }
+        // ✅ CamelCase properties (standard C# naming)
+ [MaxLength(100)]
+    public string? Name { get; set; }
         
         [MaxLength(20)]
         public string? Phone { get; set; }
-        
+  
         [MaxLength(100)]
-    public string? Department { get; set; }
+        public string? Department { get; set; }
   
   [MaxLength(50)]
         public string? Role { get; set; }
-        
-        [MaxLength(50)]
+    
+[MaxLength(50)]
         public string? Status { get; set; }
+
+        // ✅ snake_case properties (for API compatibility)
+        [MaxLength(100)]
+        public string? subuser_name { get; set; }
+   
+        [MaxLength(20)]
+        public string? subuser_phone { get; set; }
+     
+        [MaxLength(50)]
+        public string? subuser_role { get; set; }
     }
 
     #endregion
