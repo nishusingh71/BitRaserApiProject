@@ -21,17 +21,20 @@ namespace BitRaserApiProject.Controllers
         private readonly IConfiguration _configuration;
         private readonly IRoleBasedAuthService _roleService;
         private readonly ILogger<RoleBasedAuthController> _logger;
+        private readonly IHttpClientFactory _httpClientFactory;
 
         public RoleBasedAuthController(
             ApplicationDbContext context, 
             IConfiguration configuration,
             IRoleBasedAuthService roleService,
-            ILogger<RoleBasedAuthController> logger)
+            ILogger<RoleBasedAuthController> logger,
+            IHttpClientFactory httpClientFactory)
         {
             _context = context;
             _configuration = configuration;
             _roleService = roleService;
             _logger = logger;
+            _httpClientFactory = httpClientFactory;
         }
 
         public class RoleBasedLoginRequest
@@ -83,6 +86,37 @@ namespace BitRaserApiProject.Controllers
             public List<string> RoleNames { get; set; } = new List<string>();
         }
 
+        #region Helper Methods
+
+        /// <summary>
+        /// Get server time from TimeController
+        /// </summary>
+        private async Task<DateTime> GetServerTimeAsync()
+        {
+            try
+            {
+                var client = _httpClientFactory.CreateClient();
+                client.BaseAddress = new Uri($"{Request.Scheme}://{Request.Host}");
+                
+                var response = await client.GetAsync("/api/Time/server-time");
+                if (response.IsSuccessStatusCode)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    var json = System.Text.Json.JsonDocument.Parse(content);
+                    var serverTimeStr = json.RootElement.GetProperty("server_time").GetString();
+                    return DateTime.Parse(serverTimeStr!);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to get server time, using UTC now");
+            }
+
+            return DateTime.UtcNow;
+        }
+
+        #endregion
+
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] RoleBasedLoginRequest request)
         {
@@ -121,53 +155,59 @@ namespace BitRaserApiProject.Controllers
   if (userEmail == null)
          {
             return Unauthorized(new { message = "Invalid credentials" });
-           }
+    }
 
-    // Get last logout time from users/subusers table or sessions
+    // ✅ Get server time for login
+  var loginTime = await GetServerTimeAsync();
+
+// Get last logout time from users/subusers table or sessions
  DateTime? lastLogoutTime = null;
-                if (isSubuser && subuserData != null)
-     {
+     if (isSubuser && subuserData != null)
+   {
     lastLogoutTime = subuserData.last_logout;
-             }
-           else if (mainUser != null)
-         {
+          }
+        else if (mainUser != null)
+     {
       lastLogoutTime = mainUser.last_logout;
-       }
+  }
         
-                // Fallback to sessions table if not in user table
+        // Fallback to sessions table if not in user table
    if (!lastLogoutTime.HasValue)
    {
-          var lastSession = await _context.Sessions
-            .Where(s => s.user_email == userEmail && s.logout_time != null)
-         .OrderByDescending(s => s.logout_time)
+  var lastSession = await _context.Sessions
+      .Where(s => s.user_email == userEmail && s.logout_time != null)
+   .OrderByDescending(s => s.logout_time)
  .FirstOrDefaultAsync();
-          lastLogoutTime = lastSession?.logout_time;
-          }
+      lastLogoutTime = lastSession?.logout_time;
+     }
 
-  // Create session entry for tracking
-          var loginTime = DateTime.UtcNow;
+  // Create session entry for tracking using server time
      var session = new Sessions
-       {
+     {
   user_email = userEmail,
-          login_time = loginTime,
+     login_time = loginTime,  // ✅ Use server time
         ip_address = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
   device_info = Request.Headers["User-Agent"].ToString(),
          session_status = "active"
-        };
+      };
 
  _context.Sessions.Add(session);
 
-    // Update last_login in users or subusers table
-         if (isSubuser && subuserData != null)
-                {
-    subuserData.last_login = loginTime;
-                subuserData.LastLoginIp = session.ip_address;
-        _context.Entry(subuserData).State = EntityState.Modified;
+    // ✅ Update last_login, last_logout, activity_status using server time
+   if (isSubuser && subuserData != null)
+              {
+    subuserData.last_login = loginTime;  // ✅ Server time
+    subuserData.last_logout = null;  // Clear logout on new login
+          subuserData.LastLoginIp = session.ip_address;
+      subuserData.activity_status = "online";  // ✅ Set online
+      _context.Entry(subuserData).State = EntityState.Modified;
  }
-       else if (mainUser != null)
-                {
-      mainUser.last_login = loginTime;
-          _context.Entry(mainUser).State = EntityState.Modified;
+  else if (mainUser != null)
+   {
+    mainUser.last_login = loginTime;  // ✅ Server time
+          mainUser.last_logout = null;  // Clear logout on new login
+      mainUser.activity_status = "online";  // ✅ Set online
+  _context.Entry(mainUser).State = EntityState.Modified;
          }
 
      await _context.SaveChangesAsync();
@@ -583,36 +623,39 @@ response.ParentUserEmail = subuserData.user_email;
         public async Task<IActionResult> Logout()
         {
        try
-       {
+   {
          var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-     var userType = User.FindFirst("user_type")?.Value;
+   var userType = User.FindFirst("user_type")?.Value;
 
-      if (string.IsNullOrEmpty(userEmail))
+  if (string.IsNullOrEmpty(userEmail))
     {
          return Unauthorized(new { message = "Invalid token" });
        }
 
       var isSubuser = userType == "subuser";
-   var logoutTime = DateTime.UtcNow;
+   
+   // ✅ Get server time for logout
+   var logoutTime = await GetServerTimeAsync();
 
       // End all active sessions for this user
      var activeSessions = await _context.Sessions
-     .Where(s => s.user_email == userEmail && s.session_status == "active")
-        .ToListAsync();
+   .Where(s => s.user_email == userEmail && s.session_status == "active")
+     .ToListAsync();
 
-            foreach (var session in activeSessions)
-     {
-   session.logout_time = logoutTime;
-         session.session_status = "closed";
-       }
+     foreach (var session in activeSessions)
+   {
+   session.logout_time = logoutTime;  // ✅ Use server time
+     session.session_status = "closed";
+  }
 
-        // Update last_logout in users or subusers table
+        // ✅ Update last_logout and activity_status using server time
      if (isSubuser)
   {
-    var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+  var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == userEmail);
    if (subuser != null)
-       {
-  subuser.last_logout = logoutTime;
+    {
+  subuser.last_logout = logoutTime;  // ✅ Server time
+  subuser.activity_status = "offline";  // ✅ Set offline
  _context.Entry(subuser).State = EntityState.Modified;
         }
        }
@@ -621,26 +664,29 @@ response.ParentUserEmail = subuserData.user_email;
     var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
       if (user != null)
 {
- user.last_logout = logoutTime;
+ user.last_logout = logoutTime;  // ✅ Server time
+  user.activity_status = "offline";  // ✅ Set offline
         _context.Entry(user).State = EntityState.Modified;
-      }
+}
   }
 
      await _context.SaveChangesAsync();
 
-_logger.LogInformation("User logout: {Email} ({UserType})", userEmail, isSubuser ? "subuser" : "user");
+_logger.LogInformation("User logout: {Email} ({UserType}) at {LogoutTime}", 
+       userEmail, isSubuser ? "subuser" : "user", logoutTime);
 
       // Set response headers to help clear token from browser/Swagger
       Response.Headers["Clear-Site-Data"] = "\"storage\"";
       Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
 
      return Ok(new
-            {
+   {
      success = true,
   message = "Logout successful - JWT token cleared, user logged out automatically",
       email = userEmail,
  userType = isSubuser ? "subuser" : "user",
-       logoutTime = logoutTime,
+  logoutTime = logoutTime,
+    activity_status = "offline",  // ✅ Confirm offline
   sessionsEnded = activeSessions.Count,
        // Add Swagger UI clearing instructions
     clearToken = true,

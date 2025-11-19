@@ -99,30 +99,33 @@ namespace BitRaserApiProject.Models
         public int? license_allocation { get; set; } // Number of licenses - OPTIONAL
         
      [MaxLength(50)]
-     public string? status { get; set; } // User status - OPTIONAL (default handled in controller)
+     public string? status { get; set; } // Account status - OPTIONAL (active, inactive, suspended, banned)
+        
+        [MaxLength(50)]
+        public string? activity_status { get; set; } // Online/Offline status - OPTIONAL (online, offline)
         
         // Timezone Support
         [MaxLength(100)]
         public string? timezone { get; set; } // User's timezone (e.g., "Asia/Kolkata", "America/New_York")
+ 
+   // Domain-related fields
+        [MaxLength(255)]
+        public string? domain { get; set; } // Domain name for organization (e.g., "company.com")
     
-        // Domain-related fields
         [MaxLength(255)]
- public string? domain { get; set; } // Domain name for organization (e.g., "company.com")
+ public string? organization_name { get; set; } // Organization/Company name
         
-        [MaxLength(255)]
-        public string? organization_name { get; set; } // Organization/Company name
+      public bool? is_domain_admin { get; set; } = false; // Is this user a domain admin?
         
-        public bool? is_domain_admin { get; set; } = false; // Is this user a domain admin?
-        
-     // Existing fields
-   public string? payment_details_json { get; set; } // JSON storing payment details
+        // Existing fields
+        public string? payment_details_json { get; set; } // JSON storing payment details
         public string? license_details_json { get; set; } // JSON storing license details
-   
+
         public DateTime created_at { get; set; } = DateTime.UtcNow; // Account creation date
-        public DateTime updated_at { get; set; } = DateTime.UtcNow; // Last update date
+   public DateTime updated_at { get; set; } = DateTime.UtcNow; // Last update date
   
         // Navigation properties for role-based system - ignore in JSON to prevent circular references
-  [JsonIgnore]
+   [JsonIgnore]
         public ICollection<UserRole>? UserRoles { get; set; } = new List<UserRole>();
     }
 
@@ -158,7 +161,7 @@ namespace BitRaserApiProject.Models
         [Required, MaxLength(255)]
         public string subuser_email { get; set; } // Email of the subuser
       
-        [Required, MaxLength(255)]
+     [Required, MaxLength(255)]
       public string subuser_password { get; set; } // Hashed password
      
         public string user_email { get; set; } // ID of the parent user
@@ -192,14 +195,18 @@ public string? Department { get; set; }
  public int? GroupId { get; set; }
         
      [MaxLength(100)]
-        public string? subuser_group { get; set; } // Group name or identifier (string format)
+    public string? subuser_group { get; set; } // Group name or identifier (string format)
         
     public int? license_allocation { get; set; } = 0; // Number of licenses allocated to subuser
   
-     // Status & Activity Fields (ONLY LOWERCASE - Database Mapped)
+     // Status & Activity Fields
    [MaxLength(50)]
-     public string? status { get; set; } = "active"; // active, inactive, suspended
-     public DateTime? last_login { get; set; } // Last login timestamp
+   public string? status { get; set; } = "active"; // Account status: active, inactive, suspended
+        
+        [MaxLength(50)]
+        public string? activity_status { get; set; } // Online/Offline status: online, offline
+        
+        public DateTime? last_login { get; set; } // Last login timestamp
    public DateTime? last_logout { get; set; } // Last logout timestamp
    
     [MaxLength(100)]
@@ -209,7 +216,7 @@ public string? Department { get; set; }
         [MaxLength(255)]
         public string? domain { get; set; } // Domain inherited from parent user
    
-      [MaxLength(255)]
+ [MaxLength(255)]
         public string? organization_name { get; set; } // Organization name inherited from parent
 
      // Permissions Flags
@@ -234,12 +241,12 @@ public string? Department { get; set; }
      public int CreatedBy { get; set; }
   public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? UpdatedAt { get; set; }
-        public int? UpdatedBy { get; set; }
+      public int? UpdatedBy { get; set; }
   
         [MaxLength(500)]
   public string? Notes { get; set; }
 
-        // Navigation properties for role-based system - ignore in JSON to prevent circular references
+  // Navigation properties for role-based system - ignore in JSON to prevent circular references
      [JsonIgnore]
         public ICollection<SubuserRole> SubuserRoles { get; set; } = new List<SubuserRole>();
     }

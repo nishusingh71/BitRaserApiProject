@@ -14,6 +14,7 @@ namespace BitRaserApiProject.Controllers
     /// <summary>
     /// Enhanced User Activity Tracking Controller - Hierarchical monitoring with real-time status
     /// Supports Users, Subusers, and Manager hierarchy with email-based filtering
+    /// UPDATED: Now uses TimeController server time for accurate login/logout tracking
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
@@ -24,18 +25,506 @@ namespace BitRaserApiProject.Controllers
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
         private readonly ILogger<UserActivityController> _logger;
+        private readonly IHttpClientFactory _httpClientFactory;
 
         public UserActivityController(
             ApplicationDbContext context,
             IRoleBasedAuthService authService,
             IUserDataService userDataService,
-            ILogger<UserActivityController> logger)
+            ILogger<UserActivityController> logger,
+   IHttpClientFactory httpClientFactory)
         {
-          _context = context;
-          _authService = authService;
-     _userDataService = userDataService;
-          _logger = logger;
+        _context = context;
+            _authService = authService;
+            _userDataService = userDataService;
+            _logger = logger;
+     _httpClientFactory = httpClientFactory;
      }
+
+   #region Server Time & Status Helpers
+
+        /// <summary>
+        /// Get current server time from TimeController
+      /// </summary>
+      private async Task<DateTime> GetServerTimeAsync()
+ {
+        try
+         {
+      var client = _httpClientFactory.CreateClient();
+        client.BaseAddress = new Uri($"{Request.Scheme}://{Request.Host}");
+    
+       var response = await client.GetAsync("/api/Time/server-time");
+                if (response.IsSuccessStatusCode)
+         {
+      var content = await response.Content.ReadAsStringAsync();
+       var json = System.Text.Json.JsonDocument.Parse(content);
+                  var serverTimeStr = json.RootElement.GetProperty("server_time").GetString();
+            return DateTime.Parse(serverTimeStr!);
+   }
+       }
+catch (Exception ex)
+      {
+                _logger.LogWarning(ex, "Failed to get server time from TimeController, using UTC now");
+          }
+            
+            return DateTime.UtcNow;
+     }
+
+        /// <summary>
+        /// Calculate online/offline status based on last activity
+        /// User is considered online if last_login is within last 5 minutes and no logout
+  /// </summary>
+      private string CalculateUserStatus(DateTime? lastLogin, DateTime? lastLogout, DateTime serverTime)
+        {
+            // If never logged in, offline
+            if (lastLogin == null)
+         return "offline";
+
+        // If logged out after last login, offline
+     if (lastLogout.HasValue && lastLogout > lastLogin)
+     return "offline";
+
+ // If last login was within 5 minutes and no logout after, online
+       var minutesSinceLogin = (serverTime - lastLogin.Value).TotalMinutes;
+            return minutesSinceLogin <= 5 ? "online" : "offline";
+      }
+
+        #endregion
+
+      #region NEW: Login/Logout Tracking Endpoints
+
+        /// <summary>
+        /// Record user login - Updates last_login timestamp using server time
+   /// POST /api/UserActivity/record-login
+        /// </summary>
+        [HttpPost("record-login")]
+        public async Task<IActionResult> RecordLogin(
+       [FromQuery] string? email = null,
+  [FromQuery] string? userType = "user")
+        {
+       try
+            {
+      var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+          var targetEmail = email ?? currentUserEmail;
+
+     if (string.IsNullOrEmpty(targetEmail))
+   {
+             return BadRequest(new { success = false, message = "Email is required" });
+ }
+
+    var serverTime = await GetServerTimeAsync();
+    var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+  if (userType?.ToLower() == "subuser")
+            {
+         // Update subuser last_login
+ var subuser = await _context.subuser
+       .FirstOrDefaultAsync(s => s.subuser_email == targetEmail);
+
+   if (subuser == null)
+       {
+             return NotFound(new { success = false, message = "Subuser not found" });
+       }
+
+  subuser.last_login = serverTime;
+ subuser.LastLoginIp = ipAddress;
+   // subuser.activity_status = "online"; // TODO: Uncomment when field added to subuser table
+// Fallback: Use status if activity_status not available
+  subuser.status = "online"; // ⚠️ Temporary: Update status until activity_status column added
+  _context.Entry(subuser).State = EntityState.Modified;
+      }
+   else
+           {
+           // Update user last_login
+        var user = await _context.Users
+        .FirstOrDefaultAsync(u => u.user_email == targetEmail);
+
+  if (user == null)
+     {
+    return NotFound(new { success = false, message = "User not found" });
+         }
+
+       user.last_login = serverTime;
+       // user.last_login_ip = ipAddress; // TODO: Uncomment when field added to users table
+      // user.activity_status = "online"; // TODO: Uncomment when field added to users table
+      // Fallback: Use status if activity_status not available
+  user.status = "online"; // ⚠️ Temporary: Update status until activity_status column added
+      
+    _context.Entry(user).State = EntityState.Modified;
+    }
+
+       await _context.SaveChangesAsync();
+
+    _logger.LogInformation("Login recorded for {UserType}: {Email} at {Time}", 
+     userType, targetEmail, serverTime);
+
+         return Ok(new
+      {
+           success = true,
+   message = "Login recorded successfully",
+            email = targetEmail,
+        userType = userType,
+    last_login = serverTime,
+    server_time = serverTime,
+         status = "online",
+       ip_address = ipAddress
+        });
+   }
+ catch (Exception ex)
+         {
+     _logger.LogError(ex, "Error recording login");
+     return StatusCode(500, new { success = false, message = "Error recording login", error = ex.Message });
+     }
+        }
+
+        /// <summary>
+        /// Record user logout - Updates last_logout timestamp using server time
+        /// POST /api/UserActivity/record-logout
+   /// </summary>
+        [HttpPost("record-logout")]
+        public async Task<IActionResult> RecordLogout(
+            [FromQuery] string? email = null,
+[FromQuery] string? userType = "user")
+        {
+            try
+   {
+   var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+      var targetEmail = email ?? currentUserEmail;
+
+       if (string.IsNullOrEmpty(targetEmail))
+       {
+      return BadRequest(new { success = false, message = "Email is required" });
+         }
+
+ var serverTime = await GetServerTimeAsync();
+
+            if (userType?.ToLower() == "subuser")
+      {
+   // Update subuser last_logout
+      var subuser = await _context.subuser
+            .FirstOrDefaultAsync(s => s.subuser_email == targetEmail);
+
+        if (subuser == null)
+      {
+        return NotFound(new { success = false, message = "Subuser not found" });
+       }
+
+              subuser.last_logout = serverTime;
+    // subuser.activity_status = "offline"; // TODO: Uncomment when field added to subuser table
+   // Fallback: Use status if activity_status not available
+        subuser.status = "offline"; // ⚠️ Temporary: Update status until activity_status column added
+  
+     _context.Entry(subuser).State = EntityState.Modified;
+       }
+   else
+           {
+            // Update user last_logout
+         var user = await _context.Users
+      .FirstOrDefaultAsync(u => u.user_email == targetEmail);
+
+if (user == null)
+     {
+       return NotFound(new { success = false, message = "User not found" });
+     }
+
+        user.last_logout = serverTime;
+  // user.activity_status = "offline"; // TODO: Uncomment when field added to users table
+        // Fallback: Use status if activity_status not available
+     user.status = "offline"; // ⚠️ Temporary: Update status until activity_status column added
+ 
+ _context.Entry(user).State = EntityState.Modified;
+       }
+
+     await _context.SaveChangesAsync();
+
+     _logger.LogInformation("Logout recorded for {UserType}: {Email} at {Time}", 
+   userType, targetEmail, serverTime);
+
+         return Ok(new
+           {
+          success = true,
+   message = "Logout recorded successfully",
+            email = targetEmail,
+         userType = userType,
+      last_logout = serverTime,
+    server_time = serverTime,
+     status = "offline"
+    });
+  }
+            catch (Exception ex)
+            {
+         _logger.LogError(ex, "Error recording logout");
+                return StatusCode(500, new { success = false, message = "Error recording logout", error = ex.Message });
+      }
+        }
+
+        /// <summary>
+      /// Get user status with login/logout times
+        /// GET /api/UserActivity/status/{email}
+        /// </summary>
+        [HttpGet("status/{email}")]
+      public async Task<IActionResult> GetUserStatus(string email, [FromQuery] string? userType = null)
+        {
+            try
+  {
+  var serverTime = await GetServerTimeAsync();
+            
+// Auto-detect user type if not provided
+   if (string.IsNullOrEmpty(userType))
+      {
+         userType = await _userDataService.SubuserExistsAsync(email) ? "subuser" : "user";
+      }
+
+   if (userType.ToLower() == "subuser")
+             {
+     var subuser = await _context.subuser
+              .FirstOrDefaultAsync(s => s.subuser_email == email);
+
+          if (subuser == null)
+        {
+     return NotFound(new { success = false, message = "Subuser not found" });
+           }
+
+            var status = CalculateUserStatus(subuser.last_login, subuser.last_logout, serverTime);
+
+ return Ok(new
+      {
+     success = true,
+          email = subuser.subuser_email,
+     name = subuser.Name,
+  userType = "subuser",
+       parent_email = subuser.user_email,
+       last_login = subuser.last_login,
+             last_logout = subuser.last_logout,
+   last_login_ip = subuser.LastLoginIp,
+    status = status,
+         server_time = serverTime
+           });
+        }
+  else
+         {
+      var user = await _context.Users
+  .FirstOrDefaultAsync(u => u.user_email == email);
+
+   if (user == null)
+ {
+             return NotFound(new { success = false, message = "User not found" });
+           }
+
+        var status = CalculateUserStatus(user.last_login, user.last_logout, serverTime);
+
+  return Ok(new
+    {
+   success = true,
+      email = user.user_email,
+   name = user.user_name,
+             userType = "user",
+    last_login = user.last_login,
+  last_logout = user.last_logout,
+      // last_login_ip = user.last_login_ip, // TODO: Uncomment when field added
+   status = status,
+server_time = serverTime
+        });
+           }
+    }
+catch (Exception ex)
+            {
+        _logger.LogError(ex, "Error getting user status");
+           return StatusCode(500, new { success = false, message = "Error getting user status", error = ex.Message });
+  }
+        }
+
+        /// <summary>
+        /// Get all users online/offline status
+        /// GET /api/UserActivity/all-users-status
+      /// </summary>
+        [HttpGet("all-users-status")]
+        public async Task<IActionResult> GetAllUsersStatus()
+        {
+       try
+            {
+     var serverTime = await GetServerTimeAsync();
+       var users = await _context.Users.ToListAsync();
+
+    var userStatuses = users.Select(u => new
+    {
+        email = u.user_email,
+    name = u.user_name,
+         userType = "user",
+     last_login = u.last_login,
+         last_logout = u.last_logout,
+   // last_login_ip = u.last_login_ip, // TODO: Uncomment when field added
+   status = CalculateUserStatus(u.last_login, u.last_logout, serverTime)
+}).ToList();
+
+           return Ok(new
+       {
+        success = true,
+    server_time = serverTime,
+   total_users = userStatuses.Count,
+    online_users = userStatuses.Count(u => u.status == "online"),
+     offline_users = userStatuses.Count(u => u.status == "offline"),
+      users = userStatuses
+        });
+ }
+            catch (Exception ex)
+   {
+          _logger.LogError(ex, "Error getting all users status");
+    return StatusCode(500, new { success = false, message = "Error getting all users status", error = ex.Message });
+}
+        }
+
+/// <summary>
+        /// Get all subusers online/offline status
+     /// GET /api/UserActivity/all-subusers-status
+        /// </summary>
+  [HttpGet("all-subusers-status")]
+        public async Task<IActionResult> GetAllSubusersStatus()
+      {
+            try
+            {
+       var serverTime = await GetServerTimeAsync();
+     var subusers = await _context.subuser.ToListAsync();
+
+           var subuserStatuses = subusers.Select(s => new
+     {
+                    email = s.subuser_email,
+                 name = s.Name,
+             userType = "subuser",
+     parent_email = s.user_email,
+     last_login = s.last_login,
+      last_logout = s.last_logout,
+        last_login_ip = s.LastLoginIp,
+              status = CalculateUserStatus(s.last_login, s.last_logout, serverTime)
+          }).ToList();
+
+            return Ok(new
+           {
+       success = true,
+          server_time = serverTime,
+        total_subusers = subuserStatuses.Count,
+       online_subusers = subuserStatuses.Count(s => s.status == "online"),
+         offline_subusers = subuserStatuses.Count(s => s.status == "offline"),
+        subusers = subuserStatuses
+     });
+          }
+    catch (Exception ex)
+     {
+       _logger.LogError(ex, "Error getting all subusers status");
+         return StatusCode(500, new { success = false, message = "Error getting all subusers status", error = ex.Message });
+    }
+        }
+
+    /// <summary>
+        /// Get parent user's subusers status
+        /// GET /api/UserActivity/parent/{parentEmail}/subusers-status
+      /// </summary>
+        [HttpGet("parent/{parentEmail}/subusers-status")]
+        public async Task<IActionResult> GetParentSubusersStatus(string parentEmail)
+    {
+            try
+     {
+var serverTime = await GetServerTimeAsync();
+    var subusers = await _context.subuser
+         .Where(s => s.user_email == parentEmail)
+          .ToListAsync();
+
+           var subuserStatuses = subusers.Select(s => new
+           {
+  email = s.subuser_email,
+ name = s.Name,
+       role = s.Role,
+       department = s.Department,
+                    last_login = s.last_login,
+           last_logout = s.last_logout,
+ last_login_ip = s.LastLoginIp,
+   status = CalculateUserStatus(s.last_login, s.last_logout, serverTime)
+     }).ToList();
+
+         return Ok(new
+        {
+       success = true,
+          parent_email = parentEmail,
+        server_time = serverTime,
+       total_subusers = subuserStatuses.Count,
+         online_subusers = subuserStatuses.Count(s => s.status == "online"),
+        offline_subusers = subuserStatuses.Count(s => s.status == "offline"),
+   subusers = subuserStatuses
+          });
+          }
+            catch (Exception ex)
+            {
+          _logger.LogError(ex, "Error getting parent subusers status");
+    return StatusCode(500, new { success = false, message = "Error getting parent subusers status", error = ex.Message });
+      }
+        }
+
+        /// <summary>
+        /// Update online/offline status for all users/subusers based on last activity
+        /// POST /api/UserActivity/update-all-status
+        /// </summary>
+        [HttpPost("update-all-status")]
+        public async Task<IActionResult> UpdateAllStatus()
+  {
+    try
+            {
+             var serverTime = await GetServerTimeAsync();
+      var updatedUsers = 0;
+        var updatedSubusers = 0;
+
+      // Update all users status
+     var users = await _context.Users.ToListAsync();
+          foreach (var user in users)
+          {
+    var newStatus = CalculateUserStatus(user.last_login, user.last_logout, serverTime);
+  
+   // if (user.activity_status != newStatus) // TODO: Uncomment when activity_status field added
+ if (user.status != newStatus) // ⚠️ Temporary: Use status until activity_status added
+ {
+    // user.activity_status = newStatus; // TODO: Uncomment when activity_status field added
+       user.status = newStatus; // ⚠️ Temporary: Update status until activity_status added
+      updatedUsers++;
+  }
+  }
+
+      // Update all subusers status
+       var subusers = await _context.subuser.ToListAsync();
+          foreach (var subuser in subusers)
+  {
+    var newStatus = CalculateUserStatus(subuser.last_login, subuser.last_logout, serverTime);
+      
+    // if (subuser.activity_status != newStatus) // TODO: Uncomment when activity_status field added
+   if (subuser.status != newStatus) // ⚠️ Temporary: Use status until activity_status added
+     {
+     // subuser.activity_status = newStatus; // TODO: Uncomment when activity_status field added
+        subuser.status = newStatus; // ⚠️ Temporary: Update status until activity_status added
+   updatedSubusers++;
+ }
+    }
+
+    await _context.SaveChangesAsync();
+
+   _logger.LogInformation("Status updated for {Users} users and {Subusers} subusers", 
+       updatedUsers, updatedSubusers);
+
+         return Ok(new
+  {
+            success = true,
+         message = "Status updated successfully",
+      server_time = serverTime,
+    updated_users = updatedUsers,
+        updated_subusers = updatedSubusers,
+     total_updated = updatedUsers + updatedSubusers
+});
+          }
+ catch (Exception ex)
+            {
+     _logger.LogError(ex, "Error updating all status");
+      return StatusCode(500, new { success = false, message = "Error updating status", error = ex.Message });
+          }
+        }
+
+        #endregion
 
         /// <summary>
         /// Get user activity by email with login/logout time and status
