@@ -1,1 +1,11 @@
-﻿Documentation/
+﻿# Documentation folder
+Documentation/
+
+# PowerShell scripts
+*.ps1
+
+# Markdown documentation files
+*.md
+
+# SQL database files
+*.sql
