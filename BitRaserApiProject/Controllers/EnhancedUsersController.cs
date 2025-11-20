@@ -36,110 +36,118 @@ namespace BitRaserApiProject.Controllers
         /// </summary>
         [HttpGet]
         [RequirePermission("READ_ALL_USERS")]
-        public async Task<ActionResult<IEnumerable<object>>> GetUsers([FromQuery] UserFilterRequest? filter)
+     public async Task<ActionResult<IEnumerable<object>>> GetUsers([FromQuery] UserFilterRequest? filter)
         {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
+   var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+   
             IQueryable<users> query = _context.Users;
 
-            // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_USERS"))
-            {
-                // Users can only see their own profile unless they have elevated permissions
-                if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_MANAGED_USERS"))
-                {
-                    // Get users this person can manage
-                    var managedUserEmails = await GetManagedUserEmailsAsync(currentUserEmail!);
-                    query = query.Where(u => managedUserEmails.Contains(u.user_email));
-                }
-                else
-                {
-                    // Only show own profile
-                    query = query.Where(u => u.user_email == currentUserEmail);
-                }
-            }
+ // ✅ HIERARCHICAL FILTERING: Apply role-based access control
+     if (await _authService.IsSuperAdminAsync(currentUserEmail!, false))
+      {
+     // SuperAdmin sees all users - no filtering
+     }
+     else if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_USERS"))
+  {
+    // Has READ_ALL_USERS permission - can see manageable users
+     var managedUserEmails = await _authService.GetManagedUserEmailsAsync(currentUserEmail!);
+   
+       // Filter to only show users at lower hierarchy level
+  query = query.Where(u => managedUserEmails.Contains(u.user_email) || u.user_email == currentUserEmail);
+   }
+      else if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_MANAGED_USERS"))
+   {
+     // Get users this person can manage
+      var managedUserEmails = await _authService.GetManagedUserEmailsAsync(currentUserEmail!);
+    query = query.Where(u => managedUserEmails.Contains(u.user_email));
+ }
+  else
+       {
+    // Only show own profile
+     query = query.Where(u => u.user_email == currentUserEmail);
+  }
 
             // Apply additional filters if provided
-            if (filter != null)
-            {
-                if (!string.IsNullOrEmpty(filter.UserEmail))
-                    query = query.Where(u => u.user_email.Contains(filter.UserEmail));
+       if (filter != null)
+      {
+     if (!string.IsNullOrEmpty(filter.UserEmail))
+    query = query.Where(u => u.user_email.Contains(filter.UserEmail));
 
-                if (!string.IsNullOrEmpty(filter.UserName))
-                    query = query.Where(u => u.user_name.Contains(filter.UserName));
+         if (!string.IsNullOrEmpty(filter.UserName))
+   query = query.Where(u => u.user_name.Contains(filter.UserName));
 
-                if (!string.IsNullOrEmpty(filter.PhoneNumber))
-                    query = query.Where(u => u.phone_number != null && u.phone_number.Contains(filter.PhoneNumber));
+     if (!string.IsNullOrEmpty(filter.PhoneNumber))
+           query = query.Where(u => u.phone_number != null && u.phone_number.Contains(filter.PhoneNumber));
 
-                // NEW FIELD FILTERS
-                if (!string.IsNullOrEmpty(filter.Department))
-                    query = query.Where(u => u.department != null && u.department.Contains(filter.Department));
+       // NEW FIELD FILTERS
+     if (!string.IsNullOrEmpty(filter.Department))
+    query = query.Where(u => u.department != null && u.department.Contains(filter.Department));
 
-                if (!string.IsNullOrEmpty(filter.UserGroup))
-                    query = query.Where(u => u.user_group != null && u.user_group.Contains(filter.UserGroup));
+          if (!string.IsNullOrEmpty(filter.UserGroup))
+query = query.Where(u => u.user_group != null && u.user_group.Contains(filter.UserGroup));
 
-                if (!string.IsNullOrEmpty(filter.UserRole))
-                    query = query.Where(u => u.user_role != null && u.user_role.Contains(filter.UserRole));
+     if (!string.IsNullOrEmpty(filter.UserRole))
+ query = query.Where(u => u.user_role != null && u.user_role.Contains(filter.UserRole));
 
-                if (!string.IsNullOrEmpty(filter.Status))
-                    query = query.Where(u => u.status == filter.Status);
+   if (!string.IsNullOrEmpty(filter.Status))
+      query = query.Where(u => u.status == filter.Status);
 
-                if (filter.MinLicenseAllocation.HasValue)
-                    query = query.Where(u => u.license_allocation >= filter.MinLicenseAllocation.Value);
+        if (filter.MinLicenseAllocation.HasValue)
+     query = query.Where(u => u.license_allocation >= filter.MinLicenseAllocation.Value);
 
-                if (filter.MaxLicenseAllocation.HasValue)
-                    query = query.Where(u => u.license_allocation <= filter.MaxLicenseAllocation.Value);
+     if (filter.MaxLicenseAllocation.HasValue)
+       query = query.Where(u => u.license_allocation <= filter.MaxLicenseAllocation.Value);
 
-                if (filter.LastLoginFrom.HasValue)
-                    query = query.Where(u => u.last_login >= filter.LastLoginFrom.Value);
+    if (filter.LastLoginFrom.HasValue)
+         query = query.Where(u => u.last_login >= filter.LastLoginFrom.Value);
 
-                if (filter.LastLoginTo.HasValue)
-                    query = query.Where(u => u.last_login <= filter.LastLoginTo.Value);
+         if (filter.LastLoginTo.HasValue)
+      query = query.Where(u => u.last_login <= filter.LastLoginTo.Value);
 
-                // EXISTING FILTERS
-                if (filter.CreatedFrom.HasValue)
-                    query = query.Where(u => u.created_at >= filter.CreatedFrom.Value);
+    // EXISTING FILTERS
+       if (filter.CreatedFrom.HasValue)
+      query = query.Where(u => u.created_at >= filter.CreatedFrom.Value);
 
-                if (filter.CreatedTo.HasValue)
-                    query = query.Where(u => u.created_at <= filter.CreatedTo.Value);
+        if (filter.CreatedTo.HasValue)
+   query = query.Where(u => u.created_at <= filter.CreatedTo.Value);
 
-                if (filter.HasLicenses.HasValue)
-                {
-                    if (filter.HasLicenses.Value)
-                        query = query.Where(u => !string.IsNullOrEmpty(u.license_details_json) && u.license_details_json != "{}");
-                    else
-                        query = query.Where(u => string.IsNullOrEmpty(u.license_details_json) || u.license_details_json == "{}");
-                }
-            }
+   if (filter.HasLicenses.HasValue)
+  {
+    if (filter.HasLicenses.Value)
+    query = query.Where(u => !string.IsNullOrEmpty(u.license_details_json) && u.license_details_json != "{}");
+          else
+        query = query.Where(u => string.IsNullOrEmpty(u.license_details_json) || u.license_details_json == "{}");
+      }
+  }
 
-            var users = await query
-                .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-                .OrderByDescending(u => u.created_at)
-                .Take(filter?.PageSize ?? 100)
-                .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-                .Select(u => new {
-                    userEmail = u.user_email,
-                    userName = u.user_name,
-                    phoneNumber = u.phone_number,
-                    // NEW FIELDS
-                    department = u.department,
-                    userGroup = u.user_group,
-                    lastLogin = u.last_login,
-                    userRole = u.user_role,
-                    licenseAllocation = u.license_allocation,
-                    status = u.status,
-                    // EXISTING FIELDS
-                    createdAt = u.created_at,
-                    updatedAt = u.updated_at,
-                    roles = u.UserRoles.Select(ur => ur.Role.RoleName).ToList(),
-                    hasLicenses = !string.IsNullOrEmpty(u.license_details_json) && u.license_details_json != "{}",
-                    hasPaymentDetails = !string.IsNullOrEmpty(u.payment_details_json) && u.payment_details_json != "{}"
-                })
-                .ToListAsync();
+       var users = await query
+     .Include(u => u.UserRoles)
+     .ThenInclude(ur => ur.Role)
+  .OrderByDescending(u => u.created_at)
+        .Take(filter?.PageSize ?? 100)
+     .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+    .Select(u => new {
+      userEmail = u.user_email,
+     userName = u.user_name,
+         phoneNumber = u.phone_number,
+     // NEW FIELDS
+       department = u.department,
+   userGroup = u.user_group,
+   lastLogin = u.last_login,
+       userRole = u.user_role,
+    licenseAllocation = u.license_allocation,
+    status = u.status,
+         // EXISTING FIELDS
+    createdAt = u.created_at,
+    updatedAt = u.updated_at,
+ roles = u.UserRoles.Select(ur => ur.Role.RoleName).ToList(),
+    hasLicenses = !string.IsNullOrEmpty(u.license_details_json) && u.license_details_json != "{}",
+           hasPaymentDetails = !string.IsNullOrEmpty(u.payment_details_json) && u.payment_details_json != "{}"
+ })
+     .ToListAsync();
 
-            return Ok(users);
-        }
+        return Ok(users);
+     }
 
         /// <summary>
         /// Get user by email with comprehensive details
@@ -204,68 +212,79 @@ namespace BitRaserApiProject.Controllers
         [HttpPost]
         [RequirePermission("CREATE_USER")]
         public async Task<ActionResult<object>> CreateUser([FromBody] UserCreateRequest request)
-        {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
+     {
+    var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+   
             if (!await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_USER"))
-                return StatusCode(403,new { error = "Insufficient permissions to create users" });
+     return StatusCode(403,new { error = "Insufficient permissions to create users" });
 
-            // Validate input
-            if (string.IsNullOrEmpty(request.UserEmail) || string.IsNullOrEmpty(request.UserName) || string.IsNullOrEmpty(request.Password))
-                return BadRequest("User email, name, and password are required");
+        // Validate input
+     if (string.IsNullOrEmpty(request.UserEmail) || string.IsNullOrEmpty(request.UserName) || string.IsNullOrEmpty(request.Password))
+  return BadRequest("User email, name, and password are required");
 
-            // Check if user already exists
-            var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.UserEmail);
-            if (existingUser != null)
-                return Conflict($"User with email {request.UserEmail} already exists");
+   // Check if user already exists
+     var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.UserEmail);
+     if (existingUser != null)
+       return Conflict($"User with email {request.UserEmail} already exists");
 
-            // Create user with both plain text and hashed password
-            var newUser = new users
+       // ✅ VALIDATE: Role assignment hierarchy
+            var roleToAssign = request.DefaultRole ?? "SuperAdmin";
+   
+       // ✅ CHECK: Can current user assign this role?
+   if (!await _authService.CanAssignRoleAsync(currentUserEmail!, roleToAssign))
+     {
+       return StatusCode(403, new {
+       success = false,
+         message = $"You cannot create user with role '{roleToAssign}'",
+    detail = "You can only assign roles with lower privilege than your own. Admins cannot create SuperAdmin users."
+       });
+   }
+
+    // Create user with both plain text and hashed password
+     var newUser = new users
             {
-                user_email = request.UserEmail,
-                user_name = request.UserName,
-                user_password = request.Password,  // Plain text
-                hash_password = BCrypt.Net.BCrypt.HashPassword(request.Password),  // Hashed
-                phone_number = request.PhoneNumber ?? "",
-                // NEW FIELDS - All optional, use provided values or null
-                department = request.Department,
-                user_group = request.UserGroup,
-                last_login = null, // Will be set on first login
-                user_role = request.UserRole,
-                license_allocation = request.LicenseAllocation,
-                status = request.Status ?? "active", // Default to "active" if not provided
-                // EXISTING FIELDS
-                payment_details_json = request.PaymentDetailsJson ?? "{}",
-                license_details_json = request.LicenseDetailsJson ?? "{}",
-                created_at = DateTime.UtcNow,
-                updated_at = DateTime.UtcNow
-            };
+       user_email = request.UserEmail,
+   user_name = request.UserName,
+       user_password = request.Password,  // Plain text
+         hash_password = BCrypt.Net.BCrypt.HashPassword(request.Password),  // Hashed
+      phone_number = request.PhoneNumber ?? "",
+       // NEW FIELDS - All optional, use provided values or null
+    department = request.Department,
+   user_group = request.UserGroup,
+ last_login = null, // Will be set on first login
+       user_role = request.UserRole,
+license_allocation = request.LicenseAllocation,
+    status = request.Status ?? "active", // Default to "active" if not provided
+     // EXISTING FIELDS
+       payment_details_json = request.PaymentDetailsJson ?? "{}",
+     license_details_json = request.LicenseDetailsJson ?? "{}",
+    created_at = DateTime.UtcNow,
+     updated_at = DateTime.UtcNow
+  };
 
-            _context.Users.Add(newUser);
-            await _context.SaveChangesAsync();
+       _context.Users.Add(newUser);
+  await _context.SaveChangesAsync();
 
-            // ✅ CHANGED: By default assign SuperAdmin role (highest privilege)
-      // Priority: DefaultRole > "SuperAdmin" (default)
-  var roleToAssign = request.DefaultRole ?? "SuperAdmin";  // Changed from "User" to "SuperAdmin"
+   // ✅ Assign role (already validated above)
        var roleAssigned = await AssignRoleToUserAsync(request.UserEmail, roleToAssign, currentUserEmail!);
 
      var response = new {
-            userEmail = newUser.user_email,
+  userEmail = newUser.user_email,
     userName = newUser.user_name,
-                // NEW FIELDS
+              // NEW FIELDS
        department = newUser.department,
         userGroup = newUser.user_group,
       userRole = newUser.user_role,
        licenseAllocation = newUser.license_allocation,
       status = newUser.status,
-            // EXISTING FIELDS
+   // EXISTING FIELDS
  createdAt = newUser.created_at,
-                assignedRole = roleToAssign,
-              roleAssignedToRBAC = roleAssigned,
+ assignedRole = roleToAssign,
+         roleAssignedToRBAC = roleAssigned,
            message = roleAssigned ? $"User created successfully with {roleToAssign} role assigned to RBAC" : $"User created successfully ({roleToAssign} role assignment to RBAC failed)"
-         };
+   };
 
-            return CreatedAtAction(nameof(GetUser), new { email = newUser.user_email }, response);
+       return CreatedAtAction(nameof(GetUser), new { email = newUser.user_email }, response);
         }
 
         /// <summary>

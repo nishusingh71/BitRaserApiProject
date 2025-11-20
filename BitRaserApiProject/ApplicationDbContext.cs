@@ -635,20 +635,26 @@ namespace BitRaserApiProject
                 new RolePermission { RoleId = 2, PermissionId = 5 },
                 new RolePermission { RoleId = 2, PermissionId = 6 },
                 new RolePermission { RoleId = 2, PermissionId = 7 },
-                
+                // ✅ Admin gets CREATE_SUBUSER permission
+                new RolePermission { RoleId = 2, PermissionId = 32 },
+       
                 // Manager gets limited permissions
                 new RolePermission { RoleId = 3, PermissionId = 3 },
                 new RolePermission { RoleId = 3, PermissionId = 4 },
                 new RolePermission { RoleId = 3, PermissionId = 5 },
-                
-                // Support gets support-related permissions
+     // ✅ Manager gets CREATE_SUBUSER permission
+      new RolePermission { RoleId = 3, PermissionId = 32 },
+       
+       // Support gets support-related permissions
                 new RolePermission { RoleId = 4, PermissionId = 3 },
                 new RolePermission { RoleId = 4, PermissionId = 5 },
-                new RolePermission { RoleId = 4, PermissionId = 7 },
+  new RolePermission { RoleId = 4, PermissionId = 7 },
+       // ✅ Support gets CREATE_SUBUSER permission
+new RolePermission { RoleId = 4, PermissionId = 32 },
     
-                // User gets only view access
-                new RolePermission { RoleId = 5, PermissionId = 5 }
-            );
+         // User gets only view access (NO CREATE_SUBUSER)
+   new RolePermission { RoleId = 5, PermissionId = 5 }
+       );
 
             // ✅ ForgotPasswordRequest table configuration
             modelBuilder.Entity<ForgotPasswordRequest>()

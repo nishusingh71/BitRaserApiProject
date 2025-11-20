@@ -39,29 +39,39 @@ _context = context;
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetAllSubusers(
       [FromQuery] string? userEmail = null,
-            [FromQuery] string? subuserEmail = null,
+         [FromQuery] string? subuserEmail = null,
        [FromQuery] string? name = null,
 [FromQuery] string? status = null,
-            [FromQuery] string? role = null,
+        [FromQuery] string? role = null,
           [FromQuery] int page = 0,
             [FromQuery] int pageSize = 100)
-        {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+      {
+   var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
   var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
        
       IQueryable<subuser> query = _context.subuser
       .Include(s => s.SubuserRoles)
-           .ThenInclude(sr => sr.Role);
+    .ThenInclude(sr => sr.Role);
 
-            // Apply role-based filtering
- if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser))
+            // ✅ HIERARCHICAL FILTERING: Users can only see subusers they can manage
+ if (await _authService.IsSuperAdminAsync(currentUserEmail!, isCurrentUserSubuser))
             {
-     // Users can only see their own subusers
-         query = query.Where(s => s.user_email == currentUserEmail);
+     // SuperAdmin sees all subusers - no filtering
             }
+   else if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser))
+    {
+   // Has READ_ALL_SUBUSERS permission - can see all manageable subusers
+         var managedEmails = await _authService.GetManagedUserEmailsAsync(currentUserEmail!);
+      query = query.Where(s => managedEmails.Contains(s.subuser_email) || managedEmails.Contains(s.user_email));
+        }
+            else
+     {
+   // Default: Users can only see their own subusers
+query = query.Where(s => s.user_email == currentUserEmail);
+      }
 
-            // Apply filters
-            if (!string.IsNullOrEmpty(userEmail))
+      // Apply filters
+  if (!string.IsNullOrEmpty(userEmail))
         query = query.Where(s => s.user_email.Contains(userEmail));
 
  if (!string.IsNullOrEmpty(subuserEmail))
@@ -71,7 +81,7 @@ _context = context;
        query = query.Where(s => s.Name != null && s.Name.Contains(name));
 
        if (!string.IsNullOrEmpty(status))
-       query = query.Where(s => s.status != null && s.status.Contains(status));
+   query = query.Where(s => s.status != null && s.status.Contains(status));
 
   if (!string.IsNullOrEmpty(role))
      query = query.Where(s => s.Role.Contains(role));
@@ -80,7 +90,7 @@ _context = context;
  .OrderByDescending(s => s.CreatedAt)
       .Skip(page * pageSize)
         .Take(pageSize)
-           .ToListAsync();
+    .ToListAsync();
 
      var subuserDetails = subusers.Select(s => new {
    s.subuser_id,
@@ -89,14 +99,14 @@ _context = context;
     name = s.Name ?? "N/A",
 phone = s.Phone ?? "N/A",
       department = s.Department ?? "N/A",
-      role = s.Role ?? "N/A",
+  role = s.Role ?? "N/A",
     status = s.status ?? "active",
     last_login = s.last_login,
-  subuser_group = s.subuser_group ?? "No Group", // ✅ Fixed: Use string field directly
+  subuser_group = s.subuser_group ?? "No Group",
 isEmailVerified = s.IsEmailVerified,
   assignedMachines = s.AssignedMachines ?? 0,
 maxMachines = s.MaxMachines ?? 5,
-        license_allocation = s.license_allocation ?? 0, // ✅ Added
+        license_allocation = s.license_allocation ?? 0,
      // Roles from SubuserRoles relationship
      roles = s.SubuserRoles.Select(sr => new {
  roleId = sr.RoleId,
@@ -152,7 +162,7 @@ subuser.subuser_id,
     role = subuser.Role ?? "N/A",
     status = subuser.status ?? "active",
     last_login = subuser.last_login,
-    subuser_group = subuser.subuser_group ?? "No Group", // ✅ Fixed: Use string field directly
+    subuser_group = subuser.subuser_group ?? "No Group",
        isEmailVerified = subuser.IsEmailVerified,
  // Detailed roles information
   roles = subuser.SubuserRoles.Select(sr => new {
@@ -172,7 +182,7 @@ description = sr.Role.Description,
   // Machine and license info
    assignedMachines = subuser.AssignedMachines ?? 0,
         maxMachines = subuser.MaxMachines ?? 5,
-    license_allocation = subuser.license_allocation ?? 0, // ✅ Added
+    license_allocation = subuser.license_allocation ?? 0,
   groupId = subuser.GroupId,
 
 // Permissions flags
@@ -232,7 +242,7 @@ emailNotifications = subuser.EmailNotifications,
   role = s.Role ?? "N/A",
        status = s.status ?? "active",
  last_login = s.last_login,
-   subuser_group = s.subuser_group ?? "No Group", // ✅ Fixed: Use string field directly
+   subuser_group = s.subuser_group ?? "No Group",
  // Roles information
        roles = s.SubuserRoles.Select(sr => new {
   roleId = sr.RoleId,
@@ -253,31 +263,80 @@ emailNotifications = subuser.EmailNotifications,
         /// </summary>
         [HttpPost]
       [RequirePermission("CREATE_SUBUSER")]
-        public async Task<ActionResult<object>> CreateSubuser([FromBody] CreateSubuserDto request)
+    public async Task<ActionResult<object>> CreateSubuser([FromBody] CreateSubuserDto request)
         {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
-         if (!await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSER", isCurrentUserSubuser))
+ var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+   var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+        
+      // ✅ CHECK: Can user create subusers?
+ if (!await _authService.CanCreateSubusersAsync(currentUserEmail!))
+      {
+       return StatusCode(403, new { 
+     success = false,
+  message = "You cannot create subusers",
+    detail = "Users with 'User' role are not allowed to create subusers"
+    });
+       }
+
+       if (!await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSER", isCurrentUserSubuser))
        return StatusCode(403, new { error = "Insufficient permissions to create subusers" });
 
-       // Check if subuser already exists
+   // Check if subuser already exists
      var existingSubuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
-        if (existingSubuser != null)
+  if (existingSubuser != null)
      return Conflict($"Subuser with email {request.Email} already exists");
 
-            // Get parent user
-            var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
-      if (parentUser == null)
-           return BadRequest("Parent user not found");
+      // ✅ SMART PARENT EMAIL RESOLUTION
+        string parentUserEmail;
+  int parentUserId;
 
-            // Create subuser with name
+     if (isCurrentUserSubuser)
+    {
+// ✅ If SUBUSER is creating: Find their parent user
+     var currentSubuser = await _context.subuser
+   .FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+
+      if (currentSubuser == null)
+return BadRequest("Current subuser not found");
+
+ // Use the subuser's parent as the parent for new subuser
+            parentUserEmail = currentSubuser.user_email;
+      parentUserId = currentSubuser.superuser_id ?? 0;
+      }
+    else
+   {
+          // ✅ If REGULAR USER is creating: Use their email as parent
+ var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+   if (parentUser == null)
+   return BadRequest("Parent user not found");
+
+  parentUserEmail = parentUser.user_email;
+ parentUserId = parentUser.user_id;
+        }
+
+        // ✅ FIXED: No additional permission check needed
+   // Subusers create for their parent (allowed)
+        // Regular users create for themselves (allowed)
+        // Only block if trying to create for someone else
+    if (!isCurrentUserSubuser && parentUserEmail != currentUserEmail)
+        {
+     // Regular user trying to create for someone else
+      if (!await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSERS_FOR_OTHERS", isCurrentUserSubuser))
+            {
+    return StatusCode(403, new { 
+          success = false,
+ error = "You can only create subusers for yourself" 
+     });
+      }
+        }
+
+       // Create subuser with name
  var newSubuser = new subuser
       {
 subuser_email = request.Email,
   subuser_password = BCrypt.Net.BCrypt.HashPassword(request.Password),
-      user_email = currentUserEmail!,
-   superuser_id = parentUser.user_id,
+  user_email = parentUserEmail,
+ superuser_id = parentUserId,
   Name = request.Name,
   Phone = request.Phone ?? "",
     Department = request.Department ?? "",
@@ -286,14 +345,14 @@ subuser_email = request.Email,
     IsEmailVerified = false,
    MaxMachines = request.MaxMachines ?? 5,
    GroupId = request.GroupId,
-        license_allocation = request.LicenseAllocation ?? 0, // ✅ Added
+    license_allocation = request.LicenseAllocation ?? 0,
       CanCreateSubusers = request.CanCreateSubusers ?? false,
  CanViewReports = request.CanViewReports ?? true,
-        CanManageMachines = request.CanManageMachines ?? false,
+      CanManageMachines = request.CanManageMachines ?? false,
     CanAssignLicenses = request.CanAssignLicenses ?? false,
-    EmailNotifications = request.EmailNotifications ?? true,
+ EmailNotifications = request.EmailNotifications ?? true,
      SystemAlerts = request.SystemAlerts ?? true,
-       CreatedBy = parentUser.user_id,
+       CreatedBy = parentUserId,
        CreatedAt = DateTime.UtcNow,
    Notes = request.Notes
     };
@@ -301,31 +360,38 @@ subuser_email = request.Email,
    _context.subuser.Add(newSubuser);
             await _context.SaveChangesAsync();
 
-       // Assign default SubUser role
-   await AssignRoleToSubuserAsync(newSubuser.subuser_email, "SubUser", currentUserEmail!);
+     // ✅ Assign default SubUser role (or custom role if validated above)
+var roleToAssign = !string.IsNullOrEmpty(request.Role) && await _authService.CanAssignRoleAsync(currentUserEmail!, request.Role)
+   ? request.Role
+       : "SubUser";
+      
+       await AssignRoleToSubuserAsync(newSubuser.subuser_email, roleToAssign, currentUserEmail!);
 
-            // Reload with roles
-            var createdSubuser = await _context.subuser
+    // Reload with roles
+      var createdSubuser = await _context.subuser
    .Include(s => s.SubuserRoles)
-                .ThenInclude(sr => sr.Role)
+    .ThenInclude(sr => sr.Role)
        .FirstOrDefaultAsync(s => s.subuser_id == newSubuser.subuser_id);
 
-          var response = new {
-      subuser_id = createdSubuser!.subuser_id,
+       var response = new {
+ success = true,
+ subuser_id = createdSubuser!.subuser_id,
     subuser_email = createdSubuser.subuser_email,
-         name = createdSubuser.Name,
-       phone = createdSubuser.Phone,
-              department = createdSubuser.Department,
+    name = createdSubuser.Name,
+  phone = createdSubuser.Phone,
+     department = createdSubuser.Department,
       role = createdSubuser.Role,
-          roles = createdSubuser.SubuserRoles.Select(sr => new {
+   parentUserEmail = createdSubuser.user_email,
+roles = createdSubuser.SubuserRoles.Select(sr => new {
     roleName = sr.Role.RoleName,
-                    hierarchyLevel = sr.Role.HierarchyLevel
-                }).ToList(),
-        createdAt = createdSubuser.CreatedAt,
+            hierarchyLevel = sr.Role.HierarchyLevel
+      }).ToList(),
+  createdAt = createdSubuser.CreatedAt,
+   createdBy = isCurrentUserSubuser ? $"Subuser: {currentUserEmail}" : $"User: {currentUserEmail}",
        message = "Subuser created successfully"
  };
 
-          return CreatedAtAction(nameof(GetSubuserByEmail), new { email = newSubuser.subuser_email }, response);
+       return CreatedAtAction(nameof(GetSubuserByEmail), new { email = newSubuser.subuser_email }, response);
         }
 
    /// <summary>
