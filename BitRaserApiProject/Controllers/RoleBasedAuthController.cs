@@ -144,20 +144,20 @@ namespace BitRaserApiProject.Controllers
        {
 // Try to authenticate as subuser
         var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
-         if (subuser != null && BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
+     if (subuser != null && BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
  {
-      userEmail = request.Email;
+  userEmail = request.Email;
       isSubuser = true;
-           subuserData = subuser;
-    }
-      }
+         subuserData = subuser;
+ }
+}
 
   if (userEmail == null)
          {
-            return Unauthorized(new { message = "Invalid credentials" });
+   return Unauthorized(new { message = "Invalid credentials" });
     }
 
-    // ✅ Get server time for login
+    // ✅ Get server time for login (CONSISTENT FORMAT)
   var loginTime = await GetServerTimeAsync();
 
 // Get last logout time from users/subusers table or sessions
@@ -167,11 +167,11 @@ namespace BitRaserApiProject.Controllers
     lastLogoutTime = subuserData.last_logout;
           }
         else if (mainUser != null)
-     {
+   {
       lastLogoutTime = mainUser.last_logout;
   }
-        
-        // Fallback to sessions table if not in user table
+     
+   // Fallback to sessions table if not in user table
    if (!lastLogoutTime.HasValue)
    {
   var lastSession = await _context.Sessions
@@ -181,30 +181,30 @@ namespace BitRaserApiProject.Controllers
       lastLogoutTime = lastSession?.logout_time;
      }
 
-  // Create session entry for tracking using server time
+  // ✅ Create session entry using server time (CONSISTENT FORMAT)
      var session = new Sessions
      {
   user_email = userEmail,
-     login_time = loginTime,  // ✅ Use server time
+     login_time = loginTime,  // ✅ Server time format
         ip_address = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
   device_info = Request.Headers["User-Agent"].ToString(),
          session_status = "active"
-      };
+   };
 
  _context.Sessions.Add(session);
 
-    // ✅ Update last_login, last_logout, activity_status using server time
+    // ✅ Update last_login, last_logout, activity_status using server time (CONSISTENT FORMAT)
    if (isSubuser && subuserData != null)
-              {
-    subuserData.last_login = loginTime;  // ✅ Server time
+      {
+    subuserData.last_login = loginTime;  // ✅ Server time format
     subuserData.last_logout = null;  // Clear logout on new login
-          subuserData.LastLoginIp = session.ip_address;
-      subuserData.activity_status = "online";  // ✅ Set online
+  subuserData.LastLoginIp = session.ip_address;
+   subuserData.activity_status = "online";  // ✅ Set online
       _context.Entry(subuserData).State = EntityState.Modified;
  }
   else if (mainUser != null)
    {
-    mainUser.last_login = loginTime;  // ✅ Server time
+    mainUser.last_login = loginTime;  // ✅ Server time format
           mainUser.last_logout = null;  // Clear logout on new login
       mainUser.activity_status = "online";  // ✅ Set online
   _context.Entry(mainUser).State = EntityState.Modified;
@@ -213,100 +213,100 @@ namespace BitRaserApiProject.Controllers
      await _context.SaveChangesAsync();
 
         var token = await GenerateJwtTokenAsync(userEmail, isSubuser);
-          
+   
      // ✅ Get roles from RBAC system (UserRoles/SubuserRoles tables)
    var rolesFromRBAC = (await _roleService.GetUserRolesAsync(userEmail, isSubuser)).ToList();
          var permissions = await _roleService.GetUserPermissionsAsync(userEmail, isSubuser);
 
-                // ✅ ENHANCED: Build complete roles array
+      // ✅ ENHANCED: Build complete roles array
       var allRoles = new List<string>(rolesFromRBAC);
        
-        // ✅ Add user_role field to roles array if not already present and if it exists
+   // ✅ Add user_role field to roles array if not already present and if it exists
           if (isSubuser && subuserData != null)
-      {
+    {
       // For subusers: Add subuser.Role field if not empty and not already in roles
-            if (!string.IsNullOrEmpty(subuserData.Role) && !allRoles.Contains(subuserData.Role))
-                {
+       if (!string.IsNullOrEmpty(subuserData.Role) && !allRoles.Contains(subuserData.Role))
+             {
      allRoles.Add(subuserData.Role);
           }
-     }
+}
      else if (mainUser != null)
-          {
+       {
          // For main users: Add user.user_role field if not empty and not already in roles
     if (!string.IsNullOrEmpty(mainUser.user_role) && !allRoles.Contains(mainUser.user_role))
-       {
+    {
       allRoles.Add(mainUser.user_role);
-           }
-            }
-          
+      }
+ }
+      
         // ✅ If roles array is still empty, add "SuperAdmin" as default (matches CreateUser behavior)
-             if (!allRoles.Any())
+         if (!allRoles.Any())
      {
-           allRoles.Add("SuperAdmin");
+  allRoles.Add("SuperAdmin");
         }
 
    _logger.LogInformation("User login successful: {Email} ({UserType})", userEmail, isSubuser ? "subuser" : "user");
 
-   // Build enhanced response
-                var response = new RoleBasedLoginResponse
+   // ✅ Build enhanced response with server time format
+    var response = new RoleBasedLoginResponse
         {
    Token = token,
-              UserType = isSubuser ? "subuser" : "user",
+      UserType = isSubuser ? "subuser" : "user",
   Email = userEmail,
-         Roles = allRoles,  // ✅ Use enhanced roles array
-               Permissions = permissions,
-              ExpiresAt = DateTime.UtcNow.AddHours(8),
-          LoginTime = loginTime,
-     LastLogoutTime = lastLogoutTime
-   };
+   Roles = allRoles,  // ✅ Use enhanced roles array
+    Permissions = permissions,
+ ExpiresAt = loginTime.AddHours(8),  // ✅ Based on server time
+          LoginTime = loginTime,  // ✅ Server time format
+     LastLogoutTime = lastLogoutTime  // ✅ Existing time or null
+};
 
       // Add user-specific details
       if (isSubuser && subuserData != null)
       {
      response.UserName = subuserData.Name;
-          // ✅ Priority: First role from allRoles array (includes RBAC + field roles)
+    // ✅ Priority: First role from allRoles array (includes RBAC + field roles)
       response.UserRole = allRoles.FirstOrDefault() ?? "User";
           response.Department = subuserData.Department;
-       response.Phone = subuserData.Phone;
+     response.Phone = subuserData.Phone;
     response.Timezone = subuserData.timezone;
 response.ParentUserEmail = subuserData.user_email;
          response.UserId = subuserData.subuser_id;
             
-         // Get group name if GroupId exists
+  // Get group name if GroupId exists
   if (subuserData.GroupId.HasValue)
     {
          var group = await _context.Set<Group>().FindAsync(subuserData.GroupId.Value);
-         response.UserGroup = group?.name;
+ response.UserGroup = group?.name;
       }
   }
-                else if (mainUser != null)
-                {
+     else if (mainUser != null)
+  {
            response.UserName = mainUser.user_name;
-        // ✅ Priority: First role from allRoles array (includes RBAC + field roles + default)
-    response.UserRole = allRoles.FirstOrDefault() ?? "User";
+   // ✅ Priority: First role from allRoles array (includes RBAC + field roles + default)
+ response.UserRole = allRoles.FirstOrDefault() ?? "User";
     response.Department = mainUser.department;
          response.Phone = mainUser.phone_number;
         response.Timezone = mainUser.timezone;
-              response.UserId = mainUser.user_id;
-           
+    response.UserId = mainUser.user_id;
+         
     // Get group name if user_group exists
          if (!string.IsNullOrEmpty(mainUser.user_group))
      {
-              // Try to parse as int to get group from Groups table
+      // Try to parse as int to get group from Groups table
      if (int.TryParse(mainUser.user_group, out int groupId))
         {
          var group = await _context.Set<Group>().FindAsync(groupId);
-             response.UserGroup = group?.name ?? mainUser.user_group;
+         response.UserGroup = group?.name ?? mainUser.user_group;
    }
  else
-             {
+      {
      response.UserGroup = mainUser.user_group;
   }
+    }
         }
-            }
 
     return Ok(response);
-            }
+          }
     catch (Exception ex)
       {
   _logger.LogError(ex, "Error during login for {Email}", request.Email);
@@ -630,42 +630,42 @@ response.ParentUserEmail = subuserData.user_email;
         /// Updates last_logout timestamp in database
         /// </summary>
         [HttpPost("logout")]
-        [Authorize]
-        public async Task<IActionResult> Logout()
+    [Authorize]
+    public async Task<IActionResult> Logout()
         {
-       try
+ try
    {
-         var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+       var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
    var userType = User.FindFirst("user_type")?.Value;
 
   if (string.IsNullOrEmpty(userEmail))
-    {
-         return Unauthorized(new { message = "Invalid token" });
+ {
+ return Unauthorized(new { message = "Invalid token" });
        }
 
       var isSubuser = userType == "subuser";
    
-   // ✅ Get server time for logout
+   // ✅ Get server time for logout (CONSISTENT FORMAT)
    var logoutTime = await GetServerTimeAsync();
 
       // End all active sessions for this user
      var activeSessions = await _context.Sessions
    .Where(s => s.user_email == userEmail && s.session_status == "active")
-     .ToListAsync();
+.ToListAsync();
 
      foreach (var session in activeSessions)
    {
-   session.logout_time = logoutTime;  // ✅ Use server time
+   session.logout_time = logoutTime;  // ✅ Server time format
      session.session_status = "closed";
   }
 
-        // ✅ Update last_logout and activity_status using server time
+        // ✅ Update last_logout and activity_status using server time (CONSISTENT FORMAT)
      if (isSubuser)
   {
   var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == userEmail);
    if (subuser != null)
-    {
-  subuser.last_logout = logoutTime;  // ✅ Server time
+  {
+  subuser.last_logout = logoutTime;  // ✅ Server time format
   subuser.activity_status = "offline";  // ✅ Set offline
  _context.Entry(subuser).State = EntityState.Modified;
         }
@@ -675,7 +675,7 @@ response.ParentUserEmail = subuserData.user_email;
     var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
       if (user != null)
 {
- user.last_logout = logoutTime;  // ✅ Server time
+ user.last_logout = logoutTime;  // ✅ Server time format
   user.activity_status = "offline";  // ✅ Set offline
         _context.Entry(user).State = EntityState.Modified;
 }
@@ -696,7 +696,7 @@ _logger.LogInformation("User logout: {Email} ({UserType}) at {LogoutTime}",
   message = "Logout successful - JWT token cleared, user logged out automatically",
       email = userEmail,
  userType = isSubuser ? "subuser" : "user",
-  logoutTime = logoutTime,
+  logoutTime = logoutTime,// ✅ Server time format
     activity_status = "offline",  // ✅ Confirm offline
   sessionsEnded = activeSessions.Count,
        // Add Swagger UI clearing instructions
@@ -715,155 +715,157 @@ _logger.LogInformation("User logout: {Email} ({UserType}) at {LogoutTime}",
         /// Update user roles - Replace existing roles with new ones
         /// Supports both main users and subusers
         /// </summary>
-        [HttpPatch("update-roles")]
+   [HttpPatch("update-roles")]
         [RequirePermission("UserManagement")]
         public async Task<IActionResult> UpdateUserRoles([FromBody] UpdateUserRolesRequest request)
-        {
-            try
+     {
+   try
             {
-                var assignerEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                if (string.IsNullOrEmpty(assignerEmail))
-                    return Unauthorized(new { message = "Authentication required" });
+      var assignerEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(assignerEmail))
+      return Unauthorized(new { message = "Authentication required" });
 
-                // Validate email
-                if (string.IsNullOrEmpty(request.Email))
-                    return BadRequest(new { message = "Email is required" });
+ // Validate email
+            if (string.IsNullOrEmpty(request.Email))
+            return BadRequest(new { message = "Email is required" });
 
                 // Validate at least one role is provided
-                if (request.RoleNames == null || !request.RoleNames.Any())
-                    return BadRequest(new { message = "At least one role must be specified" });
+       if (request.RoleNames == null || !request.RoleNames.Any())
+return BadRequest(new { message = "At least one role must be specified" });
 
-                // Get assigner hierarchy level
-                var assignerLevel = await _roleService.GetUserHierarchyLevelAsync(assignerEmail, false);
+     // ✅ Get server time for role assignment (CONSISTENT FORMAT)
+    var assignmentTime = await GetServerTimeAsync();
 
-                int? targetUserId = null;
-                int? targetSubuserId = null;
+   // Get assigner hierarchy level
+        var assignerLevel = await _roleService.GetUserHierarchyLevelAsync(assignerEmail, false);
 
-                // Find target user/subuser and get current hierarchy level
-                if (request.IsSubuser)
-                {
-                    var subuser = await _context.subuser
-                        .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
-      
-                    if (subuser == null)
-                        return NotFound(new { message = "Subuser not found" });
+         int? targetUserId = null;
+  int? targetSubuserId = null;
 
-                    // Check if assigner can manage this subuser
-                    var canManage = await _roleService.CanManageUserAsync(assignerEmail, subuser.subuser_email, true);
-                    if (!canManage)
-                        return StatusCode(403, new { message = "You cannot manage this subuser" });
+        // Find target user/subuser and get current hierarchy level
+       if (request.IsSubuser)
+  {
+        var subuser = await _context.subuser
+       .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+  
+      if (subuser == null)
+       return NotFound(new { message = "Subuser not found" });
 
-                    targetSubuserId = subuser.subuser_id;
-                }
-                else
-                {
-                    var user = await _context.Users
-                        .FirstOrDefaultAsync(u => u.user_email == request.Email);
+               // Check if assigner can manage this subuser
+         var canManage = await _roleService.CanManageUserAsync(assignerEmail, subuser.subuser_email, true);
+ if (!canManage)
+            return StatusCode(403, new { message = "You cannot manage this subuser" });
+
+                targetSubuserId = subuser.subuser_id;
+       }
+        else
+  {
+             var user = await _context.Users
+        .FirstOrDefaultAsync(u => u.user_email == request.Email);
         
-                    if (user == null)
-                        return NotFound(new { message = "User not found" });
+        if (user == null)
+                return NotFound(new { message = "User not found" });
 
                     // Check if assigner can manage this user
-                    var canManage = await _roleService.CanManageUserAsync(assignerEmail, user.user_email, false);
-                    if (!canManage)
-                        return StatusCode(403, new { message = "You cannot manage this user" });
+        var canManage = await _roleService.CanManageUserAsync(assignerEmail, user.user_email, false);
+           if (!canManage)
+     return StatusCode(403, new { message = "You cannot manage this user" });
 
-                    targetUserId = user.user_id;
-                }
+           targetUserId = user.user_id;
+          }
 
-                // Validate and get role IDs from role names
-                var rolesToAssign = new List<Role>();
-                foreach (var roleName in request.RoleNames)
-                {
-                    var role = await _context.Roles
-                        .FirstOrDefaultAsync(r => r.RoleName == roleName);
+// Validate and get role IDs from role names
+         var rolesToAssign = new List<Role>();
+          foreach (var roleName in request.RoleNames)
+    {
+                  var role = await _context.Roles
+      .FirstOrDefaultAsync(r => r.RoleName == roleName);
 
-                    if (role == null)
-                        return BadRequest(new { message = $"Role '{roleName}' not found" });
+              if (role == null)
+             return BadRequest(new { message = $"Role '{roleName}' not found" });
 
-                    // Check if assigner can assign this role (must have higher privilege)
-                    if (assignerLevel >= role.HierarchyLevel)
-                        return StatusCode(403, new { message = $"You cannot assign role '{roleName}' - insufficient privileges" });
+          // Check if assigner can assign this role (must have higher privilege)
+              if (assignerLevel >= role.HierarchyLevel)
+          return StatusCode(403, new { message = $"You cannot assign role '{roleName}' - insufficient privileges" });
 
-                    rolesToAssign.Add(role);
-                }
+      rolesToAssign.Add(role);
+           }
 
-                // Remove all existing roles for the user
-                if (request.IsSubuser && targetSubuserId.HasValue)
-                {
-                    var existingRoles = await _context.SubuserRoles
-                .Where(sr => sr.SubuserId == targetSubuserId.Value)
+  // Remove all existing roles for the user
+      if (request.IsSubuser && targetSubuserId.HasValue)
+          {
+   var existingRoles = await _context.SubuserRoles
+     .Where(sr => sr.SubuserId == targetSubuserId.Value)
         .ToListAsync();
           
-        _context.SubuserRoles.RemoveRange(existingRoles);
-    }
-        else if (targetUserId.HasValue)
-             {
-          var existingRoles = await _context.UserRoles
-         .Where(ur => ur.UserId == targetUserId.Value)
-            .ToListAsync();
-        
-  _context.UserRoles.RemoveRange(existingRoles);
-            }
-
-       // Assign new roles
-        foreach (var role in rolesToAssign)
- {
-           if (request.IsSubuser && targetSubuserId.HasValue)
-         {
-        var subuserRole = new SubuserRole
+           _context.SubuserRoles.RemoveRange(existingRoles);
+           }
+  else if (targetUserId.HasValue)
      {
-      SubuserId = targetSubuserId.Value,
-         RoleId = role.RoleId,
-    AssignedByEmail = assignerEmail,
-    AssignedAt = DateTime.UtcNow
-             };
-_context.SubuserRoles.Add(subuserRole);
-     }
-     else if (targetUserId.HasValue)
-       {
-     var userRole = new UserRole
-{
-          UserId = targetUserId.Value,
-      RoleId = role.RoleId,
- AssignedByEmail = assignerEmail,
-   AssignedAt = DateTime.UtcNow
- };
-    _context.UserRoles.Add(userRole);
-   }
-            }
+   var existingRoles = await _context.UserRoles
+   .Where(ur => ur.UserId == targetUserId.Value)
+         .ToListAsync();
+        
+     _context.UserRoles.RemoveRange(existingRoles);
+                }
 
-      await _context.SaveChangesAsync();
-
-        // Get updated roles and permissions
-  var updatedRoles = await _roleService.GetUserRolesAsync(request.Email, request.IsSubuser);
-  var updatedPermissions = await _roleService.GetUserPermissionsAsync(request.Email, request.IsSubuser);
-
-         _logger.LogInformation("Roles updated for {UserType} {Email} by {Assigner}. New roles: {Roles}", 
-      request.IsSubuser ? "subuser" : "user", 
-       request.Email, 
-        assignerEmail,
-       string.Join(", ", updatedRoles));
-
-     return Ok(new
-       {
- success = true,
-     message = "Roles updated successfully",
-    email = request.Email,
-      userType = request.IsSubuser ? "subuser" : "user",
-     roles = updatedRoles,
-      permissions = updatedPermissions,
-      updatedBy = assignerEmail,
-    updatedAt = DateTime.UtcNow
-         });
-  }
-    catch (Exception ex)
-        {
-    _logger.LogError(ex, "Error updating roles for {Email}", request.Email);
-         return StatusCode(500, new { message = "An error occurred while updating roles", error = ex.Message });
+             // Assign new roles with server time
+     foreach (var role in rolesToAssign)
+      {
+  if (request.IsSubuser && targetSubuserId.HasValue)
+     {
+             var subuserRole = new SubuserRole
+            {
+    SubuserId = targetSubuserId.Value,
+            RoleId = role.RoleId,
+          AssignedByEmail = assignerEmail,
+             AssignedAt = assignmentTime  // ✅ Server time format
+   };
+     _context.SubuserRoles.Add(subuserRole);
          }
- }
+else if (targetUserId.HasValue)
+        {
+       var userRole = new UserRole
+ {
+  UserId = targetUserId.Value,
+         RoleId = role.RoleId,
+       AssignedByEmail = assignerEmail,
+     AssignedAt = assignmentTime  // ✅ Server time format
+  };
+   _context.UserRoles.Add(userRole);
+               }
+}
 
+        await _context.SaveChangesAsync();
+
+  // Get updated roles and permissions
+      var updatedRoles = await _roleService.GetUserRolesAsync(request.Email, request.IsSubuser);
+        var updatedPermissions = await _roleService.GetUserPermissionsAsync(request.Email, request.IsSubuser);
+
+    _logger.LogInformation("Roles updated for {UserType} {Email} by {Assigner}. New roles: {Roles}", 
+        request.IsSubuser ? "subuser" : "user", 
+      request.Email, 
+       assignerEmail,
+    string.Join(", ", updatedRoles));
+
+                return Ok(new
+  {
+          success = true,
+   message = "Roles updated successfully",
+  email = request.Email,
+     userType = request.IsSubuser ? "subuser" : "user",
+     roles = updatedRoles,
+         permissions = updatedPermissions,
+updatedBy = assignerEmail,
+   updatedAt = assignmentTime  // ✅ Server time format
+    });
+ }
+          catch (Exception ex)
+            {
+           _logger.LogError(ex, "Error updating roles for {Email}", request.Email);
+              return StatusCode(500, new { message = "An error occurred while updating roles", error = ex.Message });
+     }
+        }
         /// <summary>
         /// Update timezone for user or subuser
      /// User can update their own timezone, admins can update any user's timezone
@@ -879,7 +881,7 @@ _context.SubuserRoles.Add(subuserRole);
       return Unauthorized(new { message = "Authentication required" });
 
   // If no email provided, update current user's timezone
-        var targetEmail = string.IsNullOrEmpty(request.Email) ? currentUserEmail : request.Email;
+      var targetEmail = string.IsNullOrEmpty(request.Email) ? currentUserEmail : request.Email;
       var isCurrentUser = targetEmail == currentUserEmail;
 
   // Validate timezone format (basic validation)
@@ -887,7 +889,7 @@ _context.SubuserRoles.Add(subuserRole);
            return BadRequest(new { message = "Timezone is required" });
 
       // If updating someone else's timezone, check permissions
-          if (!isCurrentUser)
+        if (!isCurrentUser)
   {
    var currentIsSubuser = await _context.subuser.AnyAsync(s => s.subuser_email == currentUserEmail);
    var hasPermission = await _roleService.HasPermissionAsync(currentUserEmail, "UPDATE_USER", currentIsSubuser);
@@ -896,14 +898,17 @@ if (!hasPermission)
    return StatusCode(403, new { message = "You don't have permission to update other users' timezones" });
          }
 
+ // ✅ Get server time for update timestamp (CONSISTENT FORMAT)
+      var updateTime = await GetServerTimeAsync();
+
        // Check if target is subuser or user
 var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == targetEmail);
         if (subuser != null)
     {
     subuser.timezone = request.Timezone;
-      subuser.UpdatedAt = DateTime.UtcNow;
+    subuser.UpdatedAt = updateTime;  // ✅ Server time format
   _context.Entry(subuser).State = EntityState.Modified;
-       await _context.SaveChangesAsync();
+    await _context.SaveChangesAsync();
 
   _logger.LogInformation("Timezone updated for subuser {Email} to {Timezone}", targetEmail, request.Timezone);
 
@@ -915,36 +920,36 @@ var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email ==
   userType = "subuser",
    timezone = request.Timezone,
   updatedBy = currentUserEmail,
-   updatedAt = DateTime.UtcNow
+   updatedAt = updateTime  // ✅ Server time format
      });
    }
 
-    var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == targetEmail);
+var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == targetEmail);
     if (user != null)
         {
        user.timezone = request.Timezone;
-  user.updated_at = DateTime.UtcNow;
+  user.updated_at = updateTime;  // ✅ Server time format
      _context.Entry(user).State = EntityState.Modified;
    await _context.SaveChangesAsync();
 
-         _logger.LogInformation("Timezone updated for user {Email} to {Timezone}", targetEmail, request.Timezone);
+   _logger.LogInformation("Timezone updated for user {Email} to {Timezone}", targetEmail, request.Timezone);
 
           return Ok(new
   {
    success = true,
-        message = "Timezone updated successfully",
+  message = "Timezone updated successfully",
     email = targetEmail,
   userType = "user",
         timezone = request.Timezone,
      updatedBy = currentUserEmail,
-  updatedAt = DateTime.UtcNow
+  updatedAt = updateTime  // ✅ Server time format
     });
-     }
+  }
 
    return NotFound(new { message = "User or subuser not found" });
       }
       catch (Exception ex)
-     {
+   {
     _logger.LogError(ex, "Error updating timezone for {Email}", request.Email);
     return StatusCode(500, new { message = "An error occurred while updating timezone", error = ex.Message });
 }
@@ -1018,23 +1023,26 @@ try
    [Authorize]
    public async Task<IActionResult> AddPermissionToRole(string roleName, [FromBody] AddPermissionRequest request)
         {
-       try
-        {
+   try
+  {
     var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
         if (string.IsNullOrEmpty(currentUserEmail))
   return Unauthorized();
 
      // Validate request
-                if (string.IsNullOrEmpty(request.PermissionName))
+         if (string.IsNullOrEmpty(request.PermissionName))
           return BadRequest(new { message = "Permission name is required" });
 
-       // Check if user can modify this role's permissions
+   // ✅ Get server time for modification timestamp (CONSISTENT FORMAT)
+    var modificationTime = await GetServerTimeAsync();
+
+  // Check if user can modify this role's permissions
            if (!await _roleService.CanModifyRolePermissionsAsync(currentUserEmail, roleName))
 {
-       return StatusCode(403, new {
+     return StatusCode(403, new {
        message = $"You cannot modify permissions for role '{roleName}'",
-     detail = "Only SuperAdmin and Admin can modify role permissions, and only for roles below their level"
-          });
+detail = "Only SuperAdmin and Admin can modify role permissions, and only for roles below their level"
+  });
           }
 
        var success = await _roleService.AddPermissionToRoleAsync(roleName, request.PermissionName, currentUserEmail);
@@ -1042,17 +1050,17 @@ try
         if (success)
        {
   return Ok(new {
-      success = true,
-          message = $"Permission '{request.PermissionName}' added to role '{roleName}'",
+   success = true,
+       message = $"Permission '{request.PermissionName}' added to role '{roleName}'",
    roleName = roleName,
   permissionName = request.PermissionName,
           modifiedBy = currentUserEmail,
-    modifiedAt = DateTime.UtcNow
+    modifiedAt = modificationTime  // ✅ Server time format
       });
          }
       else
       {
-      return BadRequest(new { message = "Failed to add permission to role" });
+ return BadRequest(new { message = "Failed to add permission to role" });
          }
   }
    catch (Exception ex)
@@ -1064,7 +1072,7 @@ try
 
  /// <summary>
  /// Remove permission from a role (SuperAdmin/Admin only)
-        /// </summary>
+   /// </summary>
         [HttpDelete("roles/{roleName}/permissions/{permissionName}")]
         [Authorize]
     public async Task<IActionResult> RemovePermissionFromRole(string roleName, string permissionName)
@@ -1075,41 +1083,44 @@ try
        if (string.IsNullOrEmpty(currentUserEmail))
      return Unauthorized();
 
-     // Check if user can modify this role's permissions
+       // ✅ Get server time for modification timestamp (CONSISTENT FORMAT)
+  var modificationTime = await GetServerTimeAsync();
+
+   // Check if user can modify this role's permissions
    if (!await _roleService.CanModifyRolePermissionsAsync(currentUserEmail, roleName))
-          {
+     {
      return StatusCode(403, new {
-           message = $"You cannot modify permissions for role '{roleName}'",
-             detail = "Only SuperAdmin and Admin can modify role permissions, and only for roles below their level"
-                });
+         message = $"You cannot modify permissions for role '{roleName}'",
+ detail = "Only SuperAdmin and Admin can modify role permissions, and only for roles below their level"
+        });
         }
 
        var success = await _roleService.RemovePermissionFromRoleAsync(roleName, permissionName, currentUserEmail);
 
-          if (success)
+ if (success)
       {
-             return Ok(new {
+   return Ok(new {
        success = true,
      message = $"Permission '{permissionName}' removed from role '{roleName}'",
    roleName = roleName,
-        permissionName = permissionName,
+    permissionName = permissionName,
      modifiedBy = currentUserEmail,
-         modifiedAt = DateTime.UtcNow
-         });
+         modifiedAt = modificationTime  // ✅ Server time format
+  });
       }
-       else
+   else
     {
           return BadRequest(new { message = "Failed to remove permission from role" });
   }
     }
-          catch (Exception ex)
+  catch (Exception ex)
      {
      _logger.LogError(ex, "Error removing permission from role");
-           return StatusCode(500, new { message = "Error removing permission from role" });
+        return StatusCode(500, new { message = "Error removing permission from role" });
    }
         }
 
-        /// <summary>
+  /// <summary>
         /// Update all permissions for a role (replace existing)
     /// SuperAdmin/Admin only
       /// </summary>
@@ -1117,40 +1128,43 @@ try
         [Authorize]
         public async Task<IActionResult> UpdateRolePermissions(string roleName, [FromBody] UpdateRolePermissionsRequest request)
     {
-            try
-            {
-          var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+  try
+          {
+       var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
  if (string.IsNullOrEmpty(currentUserEmail))
     return Unauthorized();
 
      // Validate request
           if (request.PermissionNames == null || !request.PermissionNames.Any())
         {
-      return BadRequest(new { message = "At least one permission must be specified" });
+    return BadRequest(new { message = "At least one permission must be specified" });
              }
+
+   // ✅ Get server time for modification timestamp (CONSISTENT FORMAT)
+    var modificationTime = await GetServerTimeAsync();
 
        // Check if user can modify this role's permissions
     if (!await _roleService.CanModifyRolePermissionsAsync(currentUserEmail, roleName))
      {
-          return StatusCode(403, new {
-        message = $"You cannot modify permissions for role '{roleName}'",
+      return StatusCode(403, new {
+    message = $"You cannot modify permissions for role '{roleName}'",
               detail = "Only SuperAdmin and Admin can modify role permissions, and only for roles below their level"
-            });
-         }
+  });
+       }
 
  var success = await _roleService.UpdateRolePermissionsAsync(roleName, request.PermissionNames, currentUserEmail);
 
           if (success)
          {
-      var updatedPermissions = await _roleService.GetRolePermissionsAsync(roleName);
+   var updatedPermissions = await _roleService.GetRolePermissionsAsync(roleName);
     
       return Ok(new {
-             success = true,
-        message = $"Permissions updated for role '{roleName}'",
+ success = true,
+     message = $"Permissions updated for role '{roleName}'",
       roleName = roleName,
-     permissions = updatedPermissions,
+permissions = updatedPermissions,
   modifiedBy = currentUserEmail,
-modifiedAt = DateTime.UtcNow
+modifiedAt = modificationTime  // ✅ Server time format
             });
     }
 else
@@ -1158,10 +1172,10 @@ else
      return BadRequest(new { message = "Failed to update role permissions" });
    }
       }
-            catch (Exception ex)
-       {
+      catch (Exception ex)
+   {
  _logger.LogError(ex, "Error updating role permissions");
-           return StatusCode(500, new { message = "Error updating role permissions" });
+    return StatusCode(500, new { message = "Error updating role permissions" });
       }
    }
 
@@ -1170,18 +1184,18 @@ else
    /// <summary>
         /// Unified Password Change - Works for both Users and Subusers
      /// Automatically detects user type and updates password
-        /// Requires current password verification for security
+   /// Requires current password verification for security
    /// Self-service only - User can only change their own password
 /// </summary>
       [HttpPatch("change-password")]
    [Authorize]
-        public async Task<IActionResult> UnifiedChangePassword([FromBody] SelfServicePasswordChangeRequest request)
+   public async Task<IActionResult> UnifiedChangePassword([FromBody] SelfServicePasswordChangeRequest request)
  {
         try
       {
 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 if (string.IsNullOrEmpty(currentUserEmail))
-           return Unauthorized(new { message = "Authentication required" });
+return Unauthorized(new { message = "Authentication required" });
 
      // Validate request
  if (string.IsNullOrEmpty(request.CurrentPassword))
@@ -1190,26 +1204,29 @@ if (string.IsNullOrEmpty(currentUserEmail))
          if (string.IsNullOrEmpty(request.NewPassword))
      return BadRequest(new { message = "New password is required" });
 
-        if (request.NewPassword.Length < 8)
-      return BadRequest(new { message = "New password must be at least 8 characters" });
+   if (request.NewPassword.Length < 8)
+   return BadRequest(new { message = "New password must be at least 8 characters" });
+
+    // ✅ Get server time for update timestamp (CONSISTENT FORMAT)
+   var updateTime = await GetServerTimeAsync();
 
     // Try to find as subuser first
     var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
-        if (subuser != null)
-     {
+ if (subuser != null)
+  {
       // Verify current password
-   if (string.IsNullOrEmpty(subuser.subuser_password))
+ if (string.IsNullOrEmpty(subuser.subuser_password))
      return BadRequest(new { message = "Subuser password not set" });
 
    bool isCurrentPasswordValid = BCrypt.Net.BCrypt.Verify(
   request.CurrentPassword, 
       subuser.subuser_password
-      );
+    );
 
    if (!isCurrentPasswordValid)
      {
  _logger.LogWarning(
-           "Failed password change attempt for subuser {Email} - incorrect current password", 
+     "Failed password change attempt for subuser {Email} - incorrect current password", 
     currentUserEmail
    );
   return BadRequest(new { message = "Current password is incorrect" });
@@ -1227,17 +1244,17 @@ if (string.IsNullOrEmpty(currentUserEmail))
  // Update password
         string newHashedPassword = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
   subuser.subuser_password = newHashedPassword;
-    subuser.UpdatedAt = DateTime.UtcNow;
+    subuser.UpdatedAt = updateTime;  // ✅ Server time format
 
    // Mark entity as modified
        _context.Entry(subuser).State = EntityState.Modified;
     _context.Entry(subuser).Property(s => s.subuser_password).IsModified = true;
 
-      // Save changes
+ // Save changes
  int rowsAffected = await _context.SaveChangesAsync();
 
   if (rowsAffected == 0)
-        {
+      {
   _logger.LogError(
          "SaveChanges returned 0 rows affected for subuser {Email}", 
  currentUserEmail
@@ -1259,23 +1276,23 @@ if (string.IsNullOrEmpty(currentUserEmail))
       message = "Password changed successfully", 
  email = currentUserEmail,
      userType = "subuser",
-  changedAt = DateTime.UtcNow,
+  changedAt = updateTime,  // ✅ Server time format
   rowsAffected = rowsAffected
-            });
+      });
    }
 
     // Try to find as main user
-             var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+   var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
   if (user != null)
-      {
+    {
    // Verify current password
 if (string.IsNullOrEmpty(user.hash_password))
-     return BadRequest(new { message = "User password not set" });
+ return BadRequest(new { message = "User password not set" });
 
       bool isCurrentPasswordValid = BCrypt.Net.BCrypt.Verify(
       request.CurrentPassword, 
      user.hash_password
-        );
+ );
 
     if (!isCurrentPasswordValid)
  {
@@ -1295,10 +1312,10 @@ if (string.IsNullOrEmpty(user.hash_password))
    if (isSamePassword)
    return BadRequest(new { message = "New password must be different from current password" });
 
-        // Update both password fields for users
+    // Update both password fields for users
      user.user_password = request.NewPassword; // Plain text (if required)
       user.hash_password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword); // Hashed
-  user.updated_at = DateTime.UtcNow;
+  user.updated_at = updateTime;  // ✅ Server time format
 
          // Mark entity as modified
        _context.Entry(user).State = EntityState.Modified;
@@ -1311,8 +1328,8 @@ _context.Entry(user).Property(u => u.hash_password).IsModified = true;
      if (rowsAffected == 0)
        {
    _logger.LogError(
-    "SaveChanges returned 0 rows affected for user {Email}", 
-       currentUserEmail
+  "SaveChanges returned 0 rows affected for user {Email}", 
+     currentUserEmail
   );
        return StatusCode(500, new { 
 message = "Failed to save password changes to database",
@@ -1329,9 +1346,9 @@ message = "Failed to save password changes to database",
  return Ok(new { 
    success = true,
       message = "Password changed successfully", 
-        email = currentUserEmail,
+   email = currentUserEmail,
    userType = "user",
-          changedAt = DateTime.UtcNow,
+          changedAt = updateTime,  // ✅ Server time format
    rowsAffected = rowsAffected
       });
  }
@@ -1350,12 +1367,12 @@ message = "Failed to save password changes to database",
        }
   catch (Exception ex)
   {
-      var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown";
+ var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown";
   _logger.LogError(ex, "Error changing password for {Email}", userEmail);
    return StatusCode(500, new { 
         success = false,
    message = "Error changing password",
-           error = ex.Message
+   error = ex.Message
    });
        }
   }
