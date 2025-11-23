@@ -5,6 +5,7 @@ using BitRaserApiProject;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Repositories;  // ✅ ADD: For Forgot Password Repository
 using BitRaserApiProject.BackgroundServices;  // ✅ ADD: For Background Services
+using BitRaserApiProject.Middleware;// ✅ ADD: For DatabaseContextMiddleware
 using BitRaserApiProject.Swagger;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
@@ -310,6 +311,9 @@ builder.Services.AddHostedService<KeepAliveBackgroundService>();
 // ✅ PRIVATE CLOUD DATABASE SERVICE
 builder.Services.AddScoped<IPrivateCloudService, PrivateCloudService>();
 
+// ✅ DATABASE CONTEXT FACTORY - Multi-tenant database routing
+builder.Services.AddScoped<IDatabaseContextFactory, DatabaseContextFactory>();
+
 // Add memory cache
 builder.Services.AddMemoryCache();
 
@@ -532,6 +536,10 @@ app.Use(async (context, next) =>
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// ✅ PRIVATE CLOUD: Automatic database context routing middleware
+// This middleware automatically detects user from JWT and injects appropriate DB context
+app.UseDatabaseContextMiddleware();
 
 // Enhanced request logging in development
 if (app.Environment.IsDevelopment())

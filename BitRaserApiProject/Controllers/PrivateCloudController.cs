@@ -69,56 +69,190 @@ public async Task<ActionResult<PrivateCloudDatabase>> GetConfig()
      [HttpPost("setup")]
         public async Task<ActionResult> SetupPrivateDatabase([FromBody] PrivateCloudDatabaseDto dto)
       {
-     try
+   try
  {
         // ✅ FIX: Use ClaimTypes.NameIdentifier
-                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                if (string.IsNullOrEmpty(userEmail))
-        {
-            _logger.LogWarning("Unauthorized setup attempt - no user email in claims");
-          return Unauthorized(new { message = "User email not found in token" });
-             }
+        var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+     if (string.IsNullOrEmpty(userEmail))
+    {
+        _logger.LogWarning("Unauthorized setup attempt - no user email in claims");
+     return Unauthorized(new { message = "User email not found in token" });
+    }
 
-                // Check if user has private cloud enabled
+           // Check if user has private cloud enabled
       var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
-        if (user == null || user.is_private_cloud != true)
+     if (user == null || user.is_private_cloud != true)
      {
-       return BadRequest(new 
-               { 
-          message = "Private cloud feature not enabled for this user",
+    return BadRequest(new 
+     { 
+  message = "Private cloud feature not enabled for this user",
     hint = "Please contact administrator to enable private cloud access"
    });
         }
 
        dto.UserEmail = userEmail;
 
-        var success = await _privateCloudService.SetupPrivateDatabaseAsync(dto);
+        // ✅ ENHANCED: Call service and capture detailed error
+   _logger.LogInformation("Setting up private database for user: {Email}, DatabaseType: {Type}, Host: {Host}", 
+ userEmail, dto.DatabaseType, dto.ServerHost);
+
+  var success = await _privateCloudService.SetupPrivateDatabaseAsync(dto);
 
     if (success)
  {
-           return Ok(new 
-    { 
+   _logger.LogInformation("Private database setup successful for {Email}", userEmail);
+    return Ok(new 
+  { 
  message = "Private database configured successfully",
   nextStep = "Test the connection using /test endpoint"
-         });
+  });
       }
 
-  return BadRequest(new { message = "Failed to configure private database" });
-            }
-            catch (Exception ex)
+    // ✅ ENHANCED: Return more detailed error
+   _logger.LogWarning("Failed to configure private database for {Email}", userEmail);
+  return BadRequest(new { 
+    message = "Failed to configure private database",
+     detail = "Please check the logs for more information or verify your database credentials",
+  userEmail = userEmail,
+       databaseType = dto.DatabaseType,
+      serverHost = dto.ServerHost
+      });
+       }
+          catch (Exception ex)
      {
-  _logger.LogError(ex, "Error setting up private database");
-           return StatusCode(500, new { message = "Error during setup", error = ex.Message });
-            }
+  _logger.LogError(ex, "Error setting up private database for {Email}. Error: {Error}", 
+      User.FindFirst(ClaimTypes.NameIdentifier)?.Value, ex.Message);
+ return StatusCode(500, new { 
+       message = "Error during setup", 
+     error = ex.Message,
+  stackTrace = ex.StackTrace,
+   innerError = ex.InnerException?.Message
+    });
+  }
+    }
+
+ /// <summary>
+        /// Setup private cloud - SIMPLIFIED VERSION (Connection String Only)
+        /// User provides only connection string, backend auto-parses and processes
+        /// </summary>
+   [HttpPost("setup-simple")]
+        public async Task<ActionResult> SetupPrivateDatabaseSimple([FromBody] SimplePrivateCloudSetupDto dto)
+  {
+         try
+     {
+         // Get user email from JWT token
+      var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+  if (string.IsNullOrEmpty(userEmail))
+  {
+     _logger.LogWarning("Unauthorized setup attempt - no user email in claims");
+  return Unauthorized(new { message = "User email not found in token" });
+  }
+
+   // Check if user has private cloud enabled
+var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+     if (user == null || user.is_private_cloud != true)
+ {
+ _logger.LogWarning("Private cloud not enabled for user: {Email}", userEmail);
+  return BadRequest(new
+     {
+   message = "Private cloud feature not enabled for this user",
+  hint = "Please contact administrator to enable private cloud access",
+       userEmail = userEmail,
+       isPrivateCloud = user?.is_private_cloud
+       });
+     }
+
+     _logger.LogInformation("🔧 Simplified setup for user: {Email}", userEmail);
+      _logger.LogInformation("📋 Connection string length: {Length}", dto.ConnectionString?.Length ?? 0);
+      _logger.LogInformation("📋 Database type: {Type}", dto.DatabaseType ?? "Auto-detect");
+
+       // Validate connection string
+        if (string.IsNullOrWhiteSpace(dto.ConnectionString))
+   {
+     return BadRequest(new
+    {
+     message = "Connection string is required",
+      detail = "Please provide a valid connection string"
+      });
+        }
+
+// Call service to parse and setup
+        _logger.LogInformation("📞 Calling SetupPrivateDatabaseFromConnectionStringAsync...");
+        
+  bool success;
+        try
+        {
+            success = await _privateCloudService.SetupPrivateDatabaseFromConnectionStringAsync(
+     userEmail,
+     dto.ConnectionString,
+    dto.DatabaseType,
+        dto.Notes
+     );
+        }
+        catch (FormatException formatEx)
+     {
+      _logger.LogError(formatEx, "Format exception during setup");
+          return BadRequest(new
+            {
+          message = "Invalid connection string format",
+        error = formatEx.Message,
+     hint = "Expected format: mysql://user:pass@host:port/database or Server=...;Port=...;Database=...;User=...;Password=...;"
+  });
+  }
+   catch (Exception serviceEx)
+{
+      _logger.LogError(serviceEx, "Service exception during setup");
+            return StatusCode(500, new
+  {
+      message = "Error during database setup",
+       error = serviceEx.Message,
+           detail = serviceEx.InnerException?.Message,
+    stackTrace = serviceEx.StackTrace
+   });
+  }
+
+            if (success)
+   {
+       _logger.LogInformation("✅ Private database setup successful for {Email}", userEmail);
+     return Ok(new
+    {
+      message = "Private database configured successfully",
+   detail = "Connection string parsed and database configured",
+  nextStep = "Test the connection using /test endpoint",
+       userEmail = userEmail
+     });
+     }
+
+       _logger.LogWarning("❌ Setup returned false for {Email}", userEmail);
+     return BadRequest(new
+      {
+           message = "Failed to configure private database",
+       detail = "Please check the application logs for more details",
+  userEmail = userEmail,
+     hint = "Verify your connection string format and database credentials"
+     });
+    }
+   catch (Exception ex)
+    {
+        _logger.LogError(ex, "Unexpected error in simplified setup for {Email}", 
+      User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+       return StatusCode(500, new
+      {
+         message = "Unexpected error during setup",
+  error = ex.Message,
+    detail = ex.InnerException?.Message,
+   stackTrace = ex.StackTrace
+ });
+         }
         }
 
   /// <summary>
         /// Test database connection
-        /// </summary>
+   /// </summary>
         [HttpPost("test")]
-        public async Task<ActionResult<DatabaseTestResult>> TestConnection()
-        {
-       try
+ public async Task<ActionResult<DatabaseTestResult>> TestConnection()
+    {
+  try
         {
            // ✅ FIX: Use ClaimTypes.NameIdentifier
        var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;

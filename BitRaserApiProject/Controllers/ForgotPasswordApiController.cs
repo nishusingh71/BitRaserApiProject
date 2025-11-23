@@ -77,6 +77,62 @@ _logger = logger;
         }
 
         /// <summary>
+        /// Step 1.5: Resend OTP
+  /// Expires previous OTP and generates new one
+        /// Useful when user doesn't receive OTP or OTP expires
+        /// </summary>
+/// <remarks>
+     /// Sample request:
+        /// 
+   ///     POST /api/forgot/resend-otp
+        ///     {
+        ///         "email": "user@example.com"
+        ///     }
+ ///     
+ /// Sample response:
+/// 
+  ///     {
+        ///      "success": true,
+   ///   "message": "New OTP generated successfully. Previous OTP has been expired.",
+        ///         "otp": "789456",
+///    "resetLink": "http://localhost:5000/reset-password?token=xyz789...",
+        ///     "resetToken": "xyz789...",
+    ///   "expiresAt": "2025-01-15T11:45:00Z",
+ ///    "expiryMinutes": 10
+        ///   }
+  /// 
+  /// **Note:** This will EXPIRE all previous active OTPs for this email.
+      /// </remarks>
+        [HttpPost("resend-otp")]
+   [AllowAnonymous]
+[ProducesResponseType(typeof(ForgotPasswordResponseDto), 200)]
+        [ProducesResponseType(400)]
+  [ProducesResponseType(500)]
+  public async Task<ActionResult<ForgotPasswordResponseDto>> ResendOtp(
+   [FromBody] ForgotPasswordRequestDto dto)
+  {
+      if (!ModelState.IsValid)
+     {
+   return BadRequest(ModelState);
+ }
+
+       var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var userAgent = Request.Headers["User-Agent"].ToString();
+
+       _logger.LogInformation("🔄 Resend OTP request from IP: {IP} for email: {Email}", 
+     ipAddress, dto.Email);
+
+  var result = await _service.ResendOtpAsync(dto, ipAddress, userAgent);
+
+            if (!result.Success)
+      {
+     return BadRequest(result);
+  }
+
+     return Ok(result);
+        }
+
+        /// <summary>
         /// Step 2: Validate reset link/token
  /// Check if reset link is still valid
         /// </summary>

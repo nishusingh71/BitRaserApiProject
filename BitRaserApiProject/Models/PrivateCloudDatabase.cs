@@ -89,8 +89,8 @@ namespace BitRaserApiProject.Models
         /// <summary>
         /// Connection test status: success, failed, pending
   /// </summary>
-      [MaxLength(50)]
-        [Column("test_status")]
+      [MaxLength(50)
+        , Column("test_status")]
         public string TestStatus { get; set; } = "pending";
 
         /// <summary>
@@ -115,35 +115,23 @@ namespace BitRaserApiProject.Models
  /// Database version for migration tracking
         /// </summary>
     [MaxLength(50)]
-    [Column("schema_version")]
+  [Column("schema_version")]
         public string SchemaVersion { get; set; } = "1.0.0";
 
         /// <summary>
-        /// Total storage used (in MB)
-   /// </summary>
-        [Column("storage_used_mb")]
-        public decimal StorageUsedMb { get; set; } = 0;
-
-        /// <summary>
-        /// Storage limit (in MB), null = unlimited
-        /// </summary>
-        [Column("storage_limit_mb")]
-     public decimal? StorageLimitMb { get; set; }
-
-  /// <summary>
         /// Configuration created date
-        /// </summary>
+     /// </summary>
         [Column("created_at")]
-   public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+ public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         /// <summary>
-        /// Last updated date
-        /// </summary>
+ /// Last updated date
+     /// </summary>
         [Column("updated_at")]
         public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-   /// <summary>
-        /// Who created this configuration
+ /// <summary>
+      /// Who created this configuration
  /// </summary>
   [MaxLength(255)]
      [Column("created_by")]
@@ -151,17 +139,17 @@ namespace BitRaserApiProject.Models
 
    /// <summary>
         /// Additional settings (JSON)
-        /// </summary>
+    /// </summary>
         [Column("settings_json")]
         public string? SettingsJson { get; set; }
 
         /// <summary>
   /// Notes/comments about this database
         /// </summary>
-        [Column("notes")]
-        public string? Notes { get; set; }
+   [Column("notes")]
+      public string? Notes { get; set; }
 
-        // Navigation property
+   // Navigation property
         [ForeignKey("UserId")]
    public virtual users? User { get; set; }
     }
@@ -171,8 +159,8 @@ namespace BitRaserApiProject.Models
     /// </summary>
     public class PrivateCloudDatabaseDto
     {
-        [Required]
-        public string UserEmail { get; set; } = string.Empty;
+     [Required]
+ public string UserEmail { get; set; } = string.Empty;
 
         [Required]
         public string DatabaseType { get; set; } = "mysql";
@@ -180,19 +168,44 @@ namespace BitRaserApiProject.Models
         [Required]
       public string ServerHost { get; set; } = string.Empty;
 
-        [Required]
-        public int ServerPort { get; set; } = 3306;
+ [Required]
+  public int ServerPort { get; set; } = 3306;
 
-        [Required]
+    [Required]
         public string DatabaseName { get; set; } = string.Empty;
 
         [Required]
-        public string DatabaseUsername { get; set; } = string.Empty;
+   public string DatabaseUsername { get; set; } = string.Empty;
 
-        [Required]
+ [Required]
         public string DatabasePassword { get; set; } = string.Empty;
 
-        public decimal? StorageLimitMb { get; set; }
+        public string? Notes { get; set; }
+    }
+
+    /// <summary>
+    /// Simplified DTO - User provides only connection string
+    /// Backend automatically parses and processes
+    /// </summary>
+    public class SimplePrivateCloudSetupDto
+    {
+        /// <summary>
+        /// Connection string in any format:
+    /// - MySQL URI: mysql://user:pass@host:port/db
+ /// - Standard: Server=host;Port=port;Database=db;User=user;Password=pass;
+        /// </summary>
+        [Required(ErrorMessage = "Connection string is required")]
+        public string ConnectionString { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Optional: Database type (auto-detected from connection string if not provided)
+        /// Supported: mysql, postgresql, sqlserver
+        /// </summary>
+        public string? DatabaseType { get; set; }
+
+        /// <summary>
+        /// Optional: Notes about this database
+        /// </summary>
         public string? Notes { get; set; }
     }
 
@@ -202,12 +215,12 @@ namespace BitRaserApiProject.Models
     public class DatabaseTestResult
     {
         public bool Success { get; set; }
- public string Message { get; set; } = string.Empty;
+    public string Message { get; set; } = string.Empty;
         public string? Error { get; set; }
         public DateTime TestedAt { get; set; } = DateTime.UtcNow;
         public int ResponseTimeMs { get; set; }
         public string? ServerVersion { get; set; }
-        public bool SchemaExists { get; set; }
+      public bool SchemaExists { get; set; }
         public List<string> MissingTables { get; set; } = new();
     }
 }
