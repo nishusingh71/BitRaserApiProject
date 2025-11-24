@@ -1,5 +1,6 @@
 using BitRaserApiProject.Models.DTOs;
 using BitRaserApiProject.Services;
+using BitRaserApiProject.Helpers;  // ✅ ADD: For DateTimeHelper
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;  // ✅ ADD: For ToListAsync()
@@ -294,31 +295,33 @@ _logger = logger;
         /// </summary>
         [HttpGet("admin/active-requests")]
         [Authorize(Roles = "SuperAdmin")]
-[ProducesResponseType(200)]
+        [ProducesResponseType(200)]
         [ProducesResponseType(401)]
         [ProducesResponseType(403)]
-        public async Task<ActionResult> GetActiveRequests([FromServices] ApplicationDbContext context)
+     public async Task<ActionResult> GetActiveRequests([FromServices] ApplicationDbContext context)
         {
+      // ✅ Use DateTimeHelper for UTC time comparison
             var requests = await context.ForgotPasswordRequests
-       .Where(f => !f.IsUsed && f.ExpiresAt > DateTime.UtcNow)
-      .OrderByDescending(f => f.CreatedAt)
-       .Select(f => new
-                {
-  f.Id,
-         f.Email,
- f.Otp,
-               f.ResetToken,
-      f.ExpiresAt,
-    f.CreatedAt,
-           RemainingMinutes = (int)(f.ExpiresAt - DateTime.UtcNow).TotalMinutes
-  })
+      .Where(f => !f.IsUsed && f.ExpiresAt > DateTimeHelper.GetUtcNow())
+       .OrderByDescending(f => f.CreatedAt)
+             .Select(f => new
+       {
+            f.Id,
+       f.Email,
+          f.Otp,
+    f.ResetToken,
+       ExpiresAt = DateTimeHelper.ToIso8601String(f.ExpiresAt),  // ✅ Format as ISO 8601
+     CreatedAt = DateTimeHelper.ToIso8601String(f.CreatedAt),  // ✅ Format as ISO 8601
+        RemainingMinutes = DateTimeHelper.GetRemainingMinutes(f.ExpiresAt)  // ✅ Use DateTimeHelper
+    })
      .ToListAsync();
 
-            return Ok(new
-     {
-  totalCount = requests.Count,
-     requests
-      });
-        }
+   return Ok(new
+            {
+     serverTime = DateTimeHelper.ToIso8601String(DateTimeHelper.GetUtcNow()),  // ✅ Add server time
+                totalCount = requests.Count,
+        requests
+     });
+      }
     }
 }

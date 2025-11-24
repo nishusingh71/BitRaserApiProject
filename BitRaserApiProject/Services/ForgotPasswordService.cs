@@ -3,6 +3,7 @@ using System.Text;
 using BitRaserApiProject.Models;
 using BitRaserApiProject.Models.DTOs;
 using BitRaserApiProject.Repositories;
+using BitRaserApiProject.Helpers;  // ✅ ADD: For DateTimeHelper
 using Microsoft.EntityFrameworkCore;
 
 namespace BitRaserApiProject.Services
@@ -95,8 +96,8 @@ namespace BitRaserApiProject.Services
                 // Step 4: Generate unique reset token (GUID + random bytes)
                 string resetToken = GenerateResetToken();
 
-                // Step 5: Calculate expiry (10 minutes from now)
-                DateTime expiresAt = DateTime.UtcNow.AddMinutes(10);  // ✅ Changed from 5 to 10 minutes
+                // ✅ Step 5: Calculate expiry using DateTimeHelper
+                DateTime expiresAt = DateTimeHelper.AddMinutesFromNow(10);
 
                 // Step 6: Create forgot password request
                 var request = new ForgotPasswordRequest
@@ -108,7 +109,7 @@ namespace BitRaserApiProject.Services
                     ResetToken = resetToken,
                     IsUsed = false,
                     ExpiresAt = expiresAt,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = DateTimeHelper.GetUtcNow(),  // ✅ Use DateTimeHelper
                     IpAddress = ipAddress,
                     UserAgent = userAgent
                 };
@@ -182,8 +183,9 @@ namespace BitRaserApiProject.Services
                 }
 
                 // Step 2: Expire all previous active requests for this email
+                // ✅ Step 2: Expire all previous active requests using DateTimeHelper
                 var previousRequests = await _context.ForgotPasswordRequests
-                    .Where(f => f.Email == dto.Email && !f.IsUsed && f.ExpiresAt > DateTime.UtcNow)
+                    .Where(f => f.Email == dto.Email && !f.IsUsed && f.ExpiresAt > DateTimeHelper.GetUtcNow())
                     .ToListAsync();
 
                 if (previousRequests.Any())
@@ -194,7 +196,7 @@ namespace BitRaserApiProject.Services
                     foreach (var oldRequest in previousRequests)
                     {
                         oldRequest.IsUsed = true;  // Mark as used to expire
-                        oldRequest.ExpiresAt = DateTime.UtcNow;  // Set expiry to now
+                        oldRequest.ExpiresAt = DateTimeHelper.GetUtcNow();  // ✅ Use DateTimeHelper
                     }
 
                     await _context.SaveChangesAsync();
@@ -202,10 +204,10 @@ namespace BitRaserApiProject.Services
                         previousRequests.Count, dto.Email);
                 }
 
-                // Step 3: Generate new OTP and token
+                // ✅ Step 3: Generate new OTP and token with DateTimeHelper
                 string newOtp = GenerateOtp();
                 string newResetToken = GenerateResetToken();
-                DateTime expiresAt = DateTime.UtcNow.AddMinutes(10);
+                DateTime expiresAt = DateTimeHelper.AddMinutesFromNow(10);
 
                 // Step 4: Create new request
                 var newRequest = new ForgotPasswordRequest
@@ -217,7 +219,7 @@ namespace BitRaserApiProject.Services
                     ResetToken = newResetToken,
                     IsUsed = false,
                     ExpiresAt = expiresAt,
-                    CreatedAt = DateTime.UtcNow,
+                    CreatedAt = DateTimeHelper.GetUtcNow(),  // ✅ Use DateTimeHelper
                     IpAddress = ipAddress,
                     UserAgent = userAgent
                 };
@@ -394,18 +396,18 @@ namespace BitRaserApiProject.Services
                 // Step 4: Hash new password using BCrypt
                 string hashedPassword = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
 
-                // Step 5: Update password
+                // ✅ Step 5: Update password with DateTimeHelper
                 if (user != null)
                 {
                     user.user_password = dto.NewPassword;  // Plain text (as per your current schema)
                     user.hash_password = hashedPassword;  // BCrypt hashed
-                    user.updated_at = DateTime.UtcNow;
+                    user.updated_at = DateTimeHelper.GetUtcNow();  // ✅ Use DateTimeHelper
                     _context.Entry(user).State = EntityState.Modified;
                 }
                 else
                 {
                     subuser!.subuser_password = hashedPassword;  // BCrypt hashed
-                    subuser.UpdatedAt = DateTime.UtcNow;
+                    subuser.UpdatedAt = DateTimeHelper.GetUtcNow();  // ✅ Use DateTimeHelper
                     _context.Entry(subuser).State = EntityState.Modified;
                 }
 
@@ -422,7 +424,7 @@ namespace BitRaserApiProject.Services
                 {
                     Success = true,
                     Message = $"Password reset successfully for {userType}. You can now log in with your new password.",
-                    ResetAt = DateTime.UtcNow
+                    ResetAt = DateTimeHelper.GetUtcNow()  // ✅ Use DateTimeHelper
                 };
             }
             catch (Exception ex)

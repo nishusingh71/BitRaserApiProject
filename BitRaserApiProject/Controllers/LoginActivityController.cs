@@ -3,14 +3,16 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using BitRaserApiProject.Models;
+using BitRaserApiProject.Helpers;  // ✅ ADD: For DateTimeHelper
 
 namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Login Activity Controller - Automatic login/logout tracking for Users and Subusers
     /// ✅ UPDATES: activity_status field directly in database (online/offline)
-    /// ✅ UPDATES: last_login, last_logout, LastLoginIp
+    /// ✅ UPDATES: last_login, last_logout, LastLoginIp in ISO 8601 format
     /// ❌ NEVER TOUCHES: status field (account status)
+    /// ✅ FORMAT: All DateTime values as ISO 8601 (2025-11-24T05:07:11.3895396Z)
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
@@ -34,41 +36,41 @@ namespace BitRaserApiProject.Controllers
   #region Helper Methods
 
         /// <summary>
-        /// Get server time from TimeController
-        /// </summary>
-        private async Task<DateTime> GetServerTimeAsync()
-     {
-         try
+        /// Get server time from TimeController with fallback to DateTimeHelper
+      /// </summary>
+    private async Task<DateTime> GetServerTimeAsync()
         {
-       var client = _httpClientFactory.CreateClient();
-  client.BaseAddress = new Uri($"{Request.Scheme}://{Request.Host}");
-    
-      var response = await client.GetAsync("/api/Time/server-time");
-      if (response.IsSuccessStatusCode)
-   {
-         var content = await response.Content.ReadAsStringAsync();
-     var json = System.Text.Json.JsonDocument.Parse(content);
-      var serverTimeStr = json.RootElement.GetProperty("server_time").GetString();
-        return DateTime.Parse(serverTimeStr!);
-  }
-            }
-            catch (Exception ex)
+        try
  {
-           _logger.LogWarning(ex, "Failed to get server time, using UTC now");
-     }
+        var client = _httpClientFactory.CreateClient();
+       client.BaseAddress = new Uri($"{Request.Scheme}://{Request.Host}");
+    
+        var response = await client.GetAsync("/api/Time/server-time");
+   if (response.IsSuccessStatusCode)
+     {
+            var content = await response.Content.ReadAsStringAsync();
+ var json = System.Text.Json.JsonDocument.Parse(content);
+        var serverTimeStr = json.RootElement.GetProperty("server_time").GetString();
+      return DateTimeHelper.ParseIso8601(serverTimeStr!);  // ✅ Use DateTimeHelper
+         }
+            }
+          catch (Exception ex)
+            {
+      _logger.LogWarning(ex, "Failed to get server time, using DateTimeHelper.GetUtcNow()");
+            }
             
-      return DateTime.UtcNow;
+       return DateTimeHelper.GetUtcNow();  // ✅ Use DateTimeHelper instead of DateTime.UtcNow
         }
 
         /// <summary>
-        /// Get client IP address
-  /// </summary>
-        private string GetClientIpAddress()
-    {
-   return HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
+     /// Get client IP address
+        /// </summary>
+   private string GetClientIpAddress()
+        {
+            return HttpContext.Connection.RemoteIpAddress?.ToString() ?? "Unknown";
       }
 
-    #endregion
+        #endregion
 
         #region User Login/Logout
 
@@ -507,21 +509,21 @@ offline_count = activities.Count(a => a.activity_status == "offline"),
 
         #region Private Helpers
 
-        /// <summary>
-        /// Calculate activity status based on last login/logout
+  /// <summary>
+   /// Calculate activity status based on last login/logout
         /// Online if: last_login exists AND (no logout OR logout before login) AND within 5 mins
-      /// </summary>
-private string CalculateActivityStatus(DateTime? lastLogin, DateTime? lastLogout, DateTime serverTime)
-   {
+        /// </summary>
+        private string CalculateActivityStatus(DateTime? lastLogin, DateTime? lastLogout, DateTime serverTime)
+        {
             if (lastLogin == null) return "offline";
 
-            if (lastLogout.HasValue && lastLogout > lastLogin) return "offline";
+      if (lastLogout.HasValue && lastLogout > lastLogin) return "offline";
             
-    var minutesSinceLogin = (serverTime - lastLogin.Value).TotalMinutes;
+var minutesSinceLogin = (serverTime - lastLogin.Value).TotalMinutes;
             return minutesSinceLogin <= 5 ? "online" : "offline";
         }
 
- #endregion
+    #endregion
     }
 
     /// <summary>
@@ -529,6 +531,6 @@ private string CalculateActivityStatus(DateTime? lastLogin, DateTime? lastLogout
     /// </summary>
     public class LoginRequest
     {
-   public string Email { get; set; } = string.Empty;
-  }
+        public string Email { get; set; } = string.Empty;
+    }
 }

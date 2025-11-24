@@ -1,5 +1,6 @@
 using BitRaserApiProject.Models;
 using BitRaserApiProject.Services;
+using BitRaserApiProject.Helpers;  // ✅ ADD: For DateTimeHelper
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -14,7 +15,7 @@ namespace BitRaserApiProject.Controllers
     /// <summary>
     /// Enhanced User Activity Tracking Controller - Hierarchical monitoring with real-time status
     /// Supports Users, Subusers, and Manager hierarchy with email-based filtering
-    /// UPDATED: Now uses TimeController server time for accurate login/logout tracking
+    /// UPDATED: Now uses DateTimeHelper for ISO 8601 format (2025-11-24T05:07:11.3895396Z)
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
@@ -44,7 +45,7 @@ namespace BitRaserApiProject.Controllers
    #region Server Time & Status Helpers
 
         /// <summary>
-        /// Get current server time from TimeController
+        /// Get current server time from TimeController with fallback to DateTimeHelper
       /// </summary>
       private async Task<DateTime> GetServerTimeAsync()
  {
@@ -59,15 +60,15 @@ namespace BitRaserApiProject.Controllers
       var content = await response.Content.ReadAsStringAsync();
        var json = System.Text.Json.JsonDocument.Parse(content);
                   var serverTimeStr = json.RootElement.GetProperty("server_time").GetString();
-            return DateTime.Parse(serverTimeStr!);
+              return DateTimeHelper.ParseIso8601(serverTimeStr!);  // ✅ Use DateTimeHelper
    }
        }
 catch (Exception ex)
       {
-                _logger.LogWarning(ex, "Failed to get server time from TimeController, using UTC now");
+                _logger.LogWarning(ex, "Failed to get server time from TimeController, using DateTimeHelper.GetUtcNow()");
           }
             
-            return DateTime.UtcNow;
+            return DateTimeHelper.GetUtcNow();  // ✅ Use DateTimeHelper instead of DateTime.UtcNow
      }
 
         /// <summary>

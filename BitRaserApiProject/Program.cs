@@ -3,10 +3,11 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using BitRaserApiProject;
 using BitRaserApiProject.Services;
-using BitRaserApiProject.Repositories;  // ✅ ADD: For Forgot Password Repository
-using BitRaserApiProject.BackgroundServices;  // ✅ ADD: For Background Services
-using BitRaserApiProject.Middleware;// ✅ ADD: For DatabaseContextMiddleware
+using BitRaserApiProject.Repositories;
+using BitRaserApiProject.BackgroundServices;
+using BitRaserApiProject.Middleware;
 using BitRaserApiProject.Swagger;
+using BitRaserApiProject.Converters;  // ✅ ADD: Custom DateTime Converters
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -329,7 +330,11 @@ builder.Services.AddControllers()
     options.JsonSerializerOptions.WriteIndented = builder.Environment.IsDevelopment();
     options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
     
-    // Add custom converters for better serialization
+    // ✅ ADD: Custom DateTime converters for ISO 8601 format with UTC
+ options.JsonSerializerOptions.Converters.Add(new Iso8601DateTimeConverter());
+    options.JsonSerializerOptions.Converters.Add(new Iso8601NullableDateTimeConverter());
+    
+    // Add enum converter
     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
 
