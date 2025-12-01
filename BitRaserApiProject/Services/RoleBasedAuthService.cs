@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using BitRaserApiProject.Models;
+using BitRaserApiProject.Factories;
 
 namespace BitRaserApiProject.Services
 {
@@ -7,66 +8,102 @@ namespace BitRaserApiProject.Services
     {
         private readonly ApplicationDbContext _context;
         private readonly ILogger<RoleBasedAuthService> _logger;
+        private readonly ITenantConnectionService _tenantService;
+        private readonly DynamicDbContextFactory _contextFactory;
 
-        public RoleBasedAuthService(ApplicationDbContext context, ILogger<RoleBasedAuthService> logger)
+        public RoleBasedAuthService(
+            ApplicationDbContext context,
+            ILogger<RoleBasedAuthService> logger,
+            ITenantConnectionService tenantService,
+            DynamicDbContextFactory contextFactory)
         {
             _context = context;
             _logger = logger;
+            _tenantService = tenantService;
+            _contextFactory = contextFactory;
         }
 
-        public async Task<bool> HasPermissionAsync(string email, string permissionName, bool isSubuser = false)
+        /// <summary>
+        /// Get the correct context (main or private cloud) for current user
+        /// </summary>
+        private async Task<ApplicationDbContext> GetContextAsync()
         {
             try
             {
-                if (isSubuser)
+                // Check if current user is private cloud user
+                bool isPrivateCloud = await _tenantService.IsPrivateCloudUserAsync();
+
+                if (isPrivateCloud)
                 {
-                    var subuser = await _context.subuser
-                        .Include(s => s.SubuserRoles)
-                        .ThenInclude(sr => sr.Role)
-                        .ThenInclude(r => r.RolePermissions)
-                        .ThenInclude(rp => rp.Permission)
-                        .FirstOrDefaultAsync(s => s.subuser_email == email);
-
-                    if (subuser == null) return false;
-
-                    return subuser.SubuserRoles
-                        .SelectMany(sr => sr.Role.RolePermissions)
-                        .Any(rp => rp.Permission.PermissionName == permissionName || rp.Permission.PermissionName == "FullAccess");
-                }
-                else
-                {
-                    var user = await _context.Users
-                        .Include(u => u.UserRoles)
-                        .ThenInclude(ur => ur.Role)
-                        .ThenInclude(r => r.RolePermissions)
-                        .ThenInclude(rp => rp.Permission)
-                        .FirstOrDefaultAsync(u => u.user_email == email);
-
-                    if (user == null) return false;
-
-                    // If no roles assigned, treat as SuperAdmin (first user created gets SuperAdmin by default)
-                    if (!user.UserRoles.Any())
-                    {
-                        await AssignDefaultSuperAdminRoleAsync(user);
-                        user = await _context.Users
-                            .Include(u => u.UserRoles)
-                            .ThenInclude(ur => ur.Role)
-                            .ThenInclude(r => r.RolePermissions)
-                            .ThenInclude(rp => rp.Permission)
-                            .FirstOrDefaultAsync(u => u.user_email == email);
-                    }
-
-                    return user.UserRoles
-                        .SelectMany(ur => ur.Role.RolePermissions)
-                        .Any(rp => rp.Permission.PermissionName == permissionName || rp.Permission.PermissionName == "FullAccess");
+                    // Use private cloud database
+                    return await _contextFactory.CreateDbContextAsync();
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error checking permission {Permission} for user {Email}", permissionName, email);
-                return false;
+                _logger.LogWarning(ex, "Failed to get private cloud context, using main context");
             }
+
+            // Default: use main context
+            return _context;
         }
+
+        public async Task<bool> HasPermissionAsync(string email, string permissionName, bool isSubuser = false)
+        {
+        try
+ {
+        // ✅ ALWAYS use Main DB for roles/permissions (not Private Cloud DB)
+      var context = _context; // Always use main context for roles
+        
+     if (isSubuser)
+{
+       var subuser = await context.subuser
+     .Include(s => s.SubuserRoles)
+        .ThenInclude(sr => sr.Role)
+       .ThenInclude(r => r.RolePermissions)
+         .ThenInclude(rp => rp.Permission)
+    .FirstOrDefaultAsync(s => s.subuser_email == email);
+
+       if (subuser == null) return false;
+
+         return subuser.SubuserRoles
+     .SelectMany(sr => sr.Role.RolePermissions)
+     .Any(rp => rp.Permission.PermissionName == permissionName || rp.Permission.PermissionName == "FullAccess");
+ }
+     else
+      {
+       var user = await context.Users
+   .Include(u => u.UserRoles)
+    .ThenInclude(ur => ur.Role)
+   .ThenInclude(r => r.RolePermissions)
+       .ThenInclude(rp => rp.Permission)
+          .FirstOrDefaultAsync(u => u.user_email == email);
+
+if (user == null) return false;
+
+        // If no roles assigned, treat as SuperAdmin (first user created gets SuperAdmin by default)
+     if (!user.UserRoles.Any())
+    {
+    await AssignDefaultSuperAdminRoleAsync(user);
+   user = await context.Users
+   .Include(u => u.UserRoles)
+   .ThenInclude(ur => ur.Role)
+   .ThenInclude(r => r.RolePermissions)
+  .ThenInclude(rp => rp.Permission)
+        .FirstOrDefaultAsync(u => u.user_email == email);
+}
+
+  return user.UserRoles
+       .SelectMany(ur => ur.Role.RolePermissions)
+              .Any(rp => rp.Permission.PermissionName == permissionName || rp.Permission.PermissionName == "FullAccess");
+   }
+}
+     catch (Exception ex)
+      {
+   _logger.LogError(ex, "Error checking permission {Permission} for user {Email}", permissionName, email);
+       return false;
+   }
+      }
 
         public async Task<bool> CanAccessRouteAsync(string email, string routePath, string httpMethod, bool isSubuser = false)
         {
@@ -104,94 +141,240 @@ namespace BitRaserApiProject.Services
 
         public async Task<IEnumerable<string>> GetUserPermissionsAsync(string email, bool isSubuser = false)
         {
-            try
-            {
-                if (isSubuser)
-                {
-                    var subuser = await _context.subuser
-                        .Include(s => s.SubuserRoles)
-                        .ThenInclude(sr => sr.Role)
-                        .ThenInclude(r => r.RolePermissions)
-                        .ThenInclude(rp => rp.Permission)
-                        .FirstOrDefaultAsync(s => s.subuser_email == email);
+     try
+    {
+   // ✅ ALWAYS use Main DB for roles/permissions (not Private Cloud DB)
+     var context = _context; // Always use main context for roles
+     
+      if (isSubuser)
+  {
+         var subuser = await context.subuser
+ .Include(s => s.SubuserRoles)
+      .ThenInclude(sr => sr.Role)
+ .ThenInclude(r => r.RolePermissions)
+     .ThenInclude(rp => rp.Permission)
+      .FirstOrDefaultAsync(s => s.subuser_email == email);
 
-                    if (subuser == null) return new List<string>();
+   if (subuser == null) return new List<string>();
 
-                    return subuser.SubuserRoles
-                        .SelectMany(sr => sr.Role.RolePermissions)
-                        .Select(rp => rp.Permission.PermissionName)
-                        .Distinct()
-                        .ToList();
-                }
-                else
-                {
-                    var user = await _context.Users
-                        .Include(u => u.UserRoles)
-                        .ThenInclude(ur => ur.Role)
-                        .ThenInclude(r => r.RolePermissions)
-                        .ThenInclude(rp => rp.Permission)
-                        .FirstOrDefaultAsync(u => u.user_email == email);
+          return subuser.SubuserRoles
+      .SelectMany(sr => sr.Role.RolePermissions)
+ .Select(rp => rp.Permission.PermissionName)
+     .Distinct()
+    .ToList();
+ }
+else
+         {
+        var user = await context.Users
+  .Include(u => u.UserRoles)
+      .ThenInclude(ur => ur.Role)
+     .ThenInclude(r => r.RolePermissions)
+  .ThenInclude(rp => rp.Permission)
+      .FirstOrDefaultAsync(u => u.user_email == email);
 
-                    if (user == null) return new List<string>();
+   if (user == null) return new List<string>();
 
-                    // If no roles assigned, assign SuperAdmin to first user
-                    if (!user.UserRoles.Any())
-                    {
-                        await AssignDefaultSuperAdminRoleAsync(user);
-                        user = await _context.Users
-                            .Include(u => u.UserRoles)
-                            .ThenInclude(ur => ur.Role)
-                            .ThenInclude(r => r.RolePermissions)
-                            .ThenInclude(rp => rp.Permission)
-                            .FirstOrDefaultAsync(u => u.user_email == email);
-                    }
+         // If no roles assigned, assign SuperAdmin to first user
+   if (!user.UserRoles.Any())
+ {
+      await AssignDefaultSuperAdminRoleAsync(user);
+      user = await context.Users
+    .Include(u => u.UserRoles)
+     .ThenInclude(ur => ur.Role)
+      .ThenInclude(r => r.RolePermissions)
+          .ThenInclude(rp => rp.Permission)
+ .FirstOrDefaultAsync(u => u.user_email == email);
+      }
 
-                    return user.UserRoles
-                        .SelectMany(ur => ur.Role.RolePermissions)
-                        .Select(rp => rp.Permission.PermissionName)
-                        .Distinct()
-                        .ToList();
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting permissions for user {Email}", email);
-                return new List<string>();
-            }
+     return user.UserRoles
+  .SelectMany(ur => ur.Role.RolePermissions)
+    .Select(rp => rp.Permission.PermissionName)
+   .Distinct()
+   .ToList();
+    }
+ }
+  catch (Exception ex)
+   {
+          _logger.LogError(ex, "Error getting permissions for user {Email}", email);
+     return new List<string>();
+ }
         }
 
         public async Task<IEnumerable<string>> GetUserRolesAsync(string email, bool isSubuser = false)
         {
+ try
+        {
+   // ✅ ALWAYS use Main DB for roles (not Private Cloud DB)
+   // Roles, UserRoles, SubuserRoles tables are ONLY in Main DB
+       var context = _context; // Always use main context for roles
+     
+       // ✅ NEW: Auto-assign Manager role if no roles exist (for Private Cloud users)
+  await EnsureUserHasRoleAsync(email, isSubuser, context);
+
+if (isSubuser)
+   {
+          var subuser = await context.subuser
+   .Include(s => s.SubuserRoles)
+   .ThenInclude(sr => sr.Role)
+ .FirstOrDefaultAsync(s => s.subuser_email == email);
+
+    if (subuser == null) 
+   {
+     _logger.LogWarning("⚠️ Subuser {Email} not found in database", email);
+      return new List<string>();
+         }
+
+            var roles = subuser.SubuserRoles.Select(sr => sr.Role.RoleName).ToList();
+   _logger.LogInformation("✅ Found {Count} roles for subuser {Email}: {Roles}", roles.Count, email, string.Join(", ", roles));
+   return roles;
+      }
+   else
+      {
+   var user = await context.Users
+       .Include(u => u.UserRoles)
+ .ThenInclude(ur => ur.Role)
+   .FirstOrDefaultAsync(u => u.user_email == email);
+
+      if (user == null)
+            {
+     _logger.LogWarning("⚠️ User {Email} not found in database", email);
+         return new List<string>();
+            }
+
+       var roles = user.UserRoles.Select(ur => ur.Role.RoleName).ToList();
+        _logger.LogInformation("✅ Found {Count} roles for user {Email}: {Roles}", roles.Count, email, string.Join(", ", roles));
+        return roles;
+     }
+   }
+  catch (Exception ex)
+  {
+    _logger.LogError(ex, "❌ Error getting roles for user {Email}", email);
+   return new List<string>();
+}
+        }
+
+  /// <summary>
+        /// ✅ UPDATED: Auto-assign roles from Main DB if user has none in current context
+  /// Copies user's existing roles from Main DB instead of defaulting to Manager
+        /// </summary>
+    private async Task<bool> EnsureUserHasRoleAsync(string userEmail, bool isSubuser, ApplicationDbContext context)
+        {
             try
-            {
-                if (isSubuser)
-                {
-                    var subuser = await _context.subuser
-                        .Include(s => s.SubuserRoles)
-                        .ThenInclude(sr => sr.Role)
-                        .FirstOrDefaultAsync(s => s.subuser_email == email);
+       {
+  if (isSubuser)
+  {
+            // Check if subuser has any roles in current context
+  var subuserEntity = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+   if (subuserEntity == null) 
+      {
+       _logger.LogWarning("⚠️ Subuser {Email} not found", userEmail);
+       return false;
+      }
 
-                    if (subuser == null) return new List<string>();
+       var hasRoles = await context.Set<SubuserRole>()
+.AnyAsync(sr => sr.SubuserId == subuserEntity.subuser_id);
 
-                    return subuser.SubuserRoles.Select(sr => sr.Role.RoleName).ToList();
-                }
-                else
-                {
-                    var user = await _context.Users
-                        .Include(u => u.UserRoles)
-                        .ThenInclude(ur => ur.Role)
-                        .FirstOrDefaultAsync(u => u.user_email == email);
+    if (!hasRoles)
+    {
+                _logger.LogInformation("🔍 Subuser {Email} has no roles in current context, checking Main DB...", userEmail);
+       
+   // ✅ Get roles from Main DB
+         var mainDbRoles = await _context.Set<SubuserRole>()
+       .Where(sr => sr.SubuserId == subuserEntity.subuser_id)
+            .Select(sr => sr.RoleId)
+         .ToListAsync();
+ 
+          if (mainDbRoles.Any())
+       {
+  // Copy all roles from Main DB to current context
+   foreach (var roleId in mainDbRoles)
+  {
+ var subuserRole = new SubuserRole
+          {
+   SubuserId = subuserEntity.subuser_id,
+           RoleId = roleId,
+AssignedByEmail = "System",
+        AssignedAt = DateTime.UtcNow
+   };
 
-                    if (user == null) return new List<string>();
-
-                    return user.UserRoles.Select(ur => ur.Role.RoleName).ToList();
-                }
+       context.Set<SubuserRole>().Add(subuserRole);
+      }
+     
+        await context.SaveChangesAsync();
+     
+       _logger.LogInformation("✅ Copied {Count} roles from Main DB for subuser: {Email}", 
+      mainDbRoles.Count, userEmail);
+    return true;
+     }
+      else
+ {
+    // ✅ NO FALLBACK - User has no roles in Main DB either
+        _logger.LogWarning("⚠️ Subuser {Email} has NO roles in Main DB. Please assign roles first.", userEmail);
+   return false;
+     }
+ }
+       }
+  else
+     {
+    // Check if user has any roles in current context
+   var userEntity = await context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+      if (userEntity == null) 
+  {
+          _logger.LogWarning("⚠️ User {Email} not found", userEmail);
+                return false;
             }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error getting roles for user {Email}", email);
-                return new List<string>();
-            }
+
+  var hasRoles = await context.Set<UserRole>()
+       .AnyAsync(ur => ur.UserId == userEntity.user_id);
+
+   if (!hasRoles)
+         {
+      _logger.LogInformation("🔍 User {Email} has no roles in current context, checking Main DB...", userEmail);
+      
+        // ✅ Get roles from Main DB
+    var mainDbRoles = await _context.Set<UserRole>()
+          .Where(ur => ur.UserId == userEntity.user_id)
+           .Select(ur => ur.RoleId)
+    .ToListAsync();
+      
+     if (mainDbRoles.Any())
+   {
+ // Copy all roles from Main DB to current context
+foreach (var roleId in mainDbRoles)
+   {
+         var userRole = new UserRole
+  {
+   UserId = userEntity.user_id,
+RoleId = roleId,
+       AssignedByEmail = "System",
+    AssignedAt = DateTime.UtcNow
+};
+        
+             context.Set<UserRole>().Add(userRole);
+  }
+    
+          await context.SaveChangesAsync();
+          
+     _logger.LogInformation("✅ Copied {Count} roles from Main DB for user: {Email}", 
+ mainDbRoles.Count, userEmail);
+    return true;
+ }
+              else
+     {
+           // ✅ NO FALLBACK - User has no roles in Main DB either
+       _logger.LogWarning("⚠️ User {Email} has NO roles in Main DB. Please assign roles first.", userEmail);
+    return false;
+ }
+  }
+ }
+
+  return false;
+       }
+catch (Exception ex)
+     {
+   _logger.LogError(ex, "Error ensuring user has role: {Email}", userEmail);
+       return false;
+      }
         }
 
         public async Task<bool> AssignRoleToUserAsync(int userId, int roleId, string assignedByEmail)
@@ -417,30 +600,42 @@ namespace BitRaserApiProject.Services
       /// </summary>
      public async Task<bool> CanCreateSubusersAsync(string userEmail)
         {
-        try
-       {
+ try
+      {
+   // ✅ ALWAYS use Main DB for role checking (not Private Cloud DB)
+   var context = _context; // Always use main context for roles
+  
    // ✅ First check if this is a subuser
- var isSubuser = await _context.subuser.AnyAsync(s => s.subuser_email == userEmail);
-        
+ var isSubuser = await context.subuser.AnyAsync(s => s.subuser_email == userEmail);
+     
       // ✅ Get roles based on user type
-        var roles = await GetUserRolesAsync(userEmail, isSubuser);
+     var roles = await GetUserRolesAsync(userEmail, isSubuser);
+     
+   _logger.LogInformation("🔍 Checking if {Email} (isSubuser: {IsSubuser}) can create subusers. Roles: {Roles}", 
+        userEmail, isSubuser, string.Join(", ", roles));
         
         // ✅ "User" role cannot create subusers (both for Users and Subusers)
     // If ONLY "User" role is assigned, deny permission
-     if (roles.Contains("User") && !roles.Any(r => r != "User"))
-            return false;
-        
+  if (roles.Contains("User") && !roles.Any(r => r != "User"))
+      {
+     _logger.LogWarning("⚠️ User {Email} has ONLY 'User' role, cannot create subusers", userEmail);
+          return false;
+  }
+      
         // ✅ All other roles can create subusers (Manager, Support, Admin, SuperAdmin, etc.)
         // Check if they have the required permission
-        return await HasPermissionAsync(userEmail, "UserManagement", isSubuser) ||
-       await HasPermissionAsync(userEmail, "CREATE_SUBUSER", isSubuser);
+      var hasPermission = await HasPermissionAsync(userEmail, "UserManagement", isSubuser) ||
+    await HasPermissionAsync(userEmail, "CREATE_SUBUSER", isSubuser);
+ 
+  _logger.LogInformation("✅ Permission check result for {Email}: {HasPermission}", userEmail, hasPermission);
+    return hasPermission;
  }
-            catch (Exception ex)
+      catch (Exception ex)
  {
-          _logger.LogError(ex, "Error checking if {User} can create subusers", userEmail);
+   _logger.LogError(ex, "❌ Error checking if {User} can create subusers", userEmail);
 return false;
-            }
-        }
+    }
+}
 
         /// <summary>
         /// Get all users/subusers that a manager can access
@@ -671,13 +866,13 @@ return new List<Permission>();
          //         Admin (level 2) CANNOT modify SuperAdmin (1) or Admin (2)
       
  // Special rule: Only SuperAdmin and Admin can modify permissions
-     if (userLevel > 2) // If not SuperAdmin or Admin
-       return false;
+        if (userLevel > 2) // If not SuperAdmin or Admin
+          return false;
 
       return userLevel < targetRole.HierarchyLevel;
       }
    catch (Exception ex)
-     {
+ {
            _logger.LogError(ex, "Error checking if {User} can modify permissions for role {Role}", userEmail, targetRoleName);
 return false;
     }

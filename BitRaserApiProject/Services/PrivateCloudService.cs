@@ -19,6 +19,7 @@ Task<bool> SetupPrivateDatabaseAsync(PrivateCloudDatabaseDto dto);
    Task<DbContext> GetUserDbContextAsync(string userEmail);
      Task<SchemaValidationResult> ValidateDatabaseSchemaAsync(string userEmail);
     Task<List<string>> GetRequiredTablesAsync();
+  Task<bool> DeletePrivateDatabaseConfigAsync(string userEmail);
     }
 
     public class PrivateCloudService : IPrivateCloudService
@@ -284,6 +285,7 @@ CREATE TABLE IF NOT EXISTS `groups` (
 }
 
           _logger.LogInformation("✅ User is marked as private cloud user");
+
 
 // Build connection string
      _logger.LogInformation("Building connection string...");
@@ -727,8 +729,50 @@ return context;
         /// Get list of required tables
    /// </summary>
         public async Task<List<string>> GetRequiredTablesAsync()
-        {
+      {
             return await Task.FromResult(_tableSchemas.Keys.ToList());
+        }
+
+        /// <summary>
+        /// Delete/deactivate private database configuration
+      /// </summary>
+        public async Task<bool> DeletePrivateDatabaseConfigAsync(string userEmail)
+        {
+      try
+            {
+                _logger.LogInformation("🗑️ Deleting private database configuration for {Email}", userEmail);
+
+        var config = await GetUserPrivateDatabaseAsync(userEmail);
+       if (config == null)
+    {
+                _logger.LogWarning("⚠️ No configuration found for {Email}", userEmail);
+          return false;
+    }
+
+       // Remove from cache if exists
+                if (_dbContextCache.ContainsKey(userEmail))
+        {
+var cachedContext = _dbContextCache[userEmail];
+await cachedContext.DisposeAsync();
+     _dbContextCache.Remove(userEmail);
+         _logger.LogInformation("✅ Removed cached context for {Email}", userEmail);
+    }
+
+       // Soft delete - set IsActive to false
+          config.IsActive = false;
+          config.UpdatedAt = DateTime.UtcNow;
+
+          _mainContext.Entry(config).State = EntityState.Modified;
+             await _mainContext.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Configuration deleted/deactivated for {Email}", userEmail);
+     return true;
+      }
+    catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error deleting configuration for {Email}", userEmail);
+ return false;
+            }
         }
 
         #region Private Helper Methods

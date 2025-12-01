@@ -7,115 +7,122 @@ using BitRaserApiProject.Services;
 using BitRaserApiProject.Attributes;
 using BCrypt.Net;
 using System.ComponentModel.DataAnnotations;
+using BitRaserApiProject.Factories;
 
 namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Enhanced Subuser management controller with email-based operations and role-based access control
     /// Supports user-friendly subuser management without strict permission requirements
+    /// ✅ UPDATED: Routes to Private Cloud if enabled
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class EnhancedSubuserController : ControllerBase
     {
-        private readonly ApplicationDbContext _context;
+ private readonly DynamicDbContextFactory _contextFactory;
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
-        private readonly ILogger<EnhancedSubuserController> _logger;
+    private readonly ILogger<EnhancedSubuserController> _logger;
 
-        public EnhancedSubuserController(
-            ApplicationDbContext context, 
-            IRoleBasedAuthService authService, 
-            IUserDataService userDataService,
-            ILogger<EnhancedSubuserController> logger)
-        {
-            _context = context;
-            _authService = authService;
-            _userDataService = userDataService;
-            _logger = logger;
+   public EnhancedSubuserController(
+          DynamicDbContextFactory contextFactory, 
+   IRoleBasedAuthService authService, 
+    IUserDataService userDataService,
+ ILogger<EnhancedSubuserController> logger)
+     {
+         _contextFactory = contextFactory;
+_authService = authService;
+    _userDataService = userDataService;
+    _logger = logger;
         }
 
         /// <summary>
-        /// Get all subusers with role-based filtering (email-based operations)
-        /// </summary>
-        [HttpGet]
+  /// Get all subusers with role-based filtering (email-based operations)
+        /// ✅ ROUTES TO PRIVATE CLOUD IF ENABLED
+ /// </summary>
+  [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetSubusers([FromQuery] SubuserFilterRequest? filter)
+      {
+    try
+            {
+       // ✅ Use dynamic context - routes to private cloud if enabled
+          using var context = await _contextFactory.CreateDbContextAsync();
+
+    var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+  if (string.IsNullOrEmpty(currentUserEmail))
+       {
+    return Unauthorized(new { message = "User not authenticated" });
+            }
+
+     var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+        
+ IQueryable<subuser> query = context.subuser;
+
+         // Check if user has admin-level permissions
+        bool hasAdminPermission = await _authService.HasPermissionAsync(
+       currentUserEmail, "READ_ALL_SUBUSERS", isCurrentUserSubuser);
+
+ if (!hasAdminPermission)
+     {
+ // Regular users can see their own subusers
+  if (isCurrentUserSubuser)
         {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            if (string.IsNullOrEmpty(currentUserEmail))
-            {
-                return Unauthorized(new { message = "User not authenticated" });
-            }
+// Subusers cannot see any subusers by default
+   return Ok(new List<object>());
+          }
+         
+     // Filter to only show current user's subusers
+    query = query.Where(s => s.user_email == currentUserEmail);
+    }
 
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
-            
-            IQueryable<subuser> query = _context.subuser;
+     // Apply additional filters if provided
+        if (filter != null)
+  {
+    if (!string.IsNullOrEmpty(filter.ParentUserEmail))
+   query = query.Where(s => s.user_email.Contains(filter.ParentUserEmail));
 
-            // Check if user has admin-level permissions
-            bool hasAdminPermission = await _authService.HasPermissionAsync(
-                currentUserEmail, "READ_ALL_SUBUSERS", isCurrentUserSubuser);
+if (!string.IsNullOrEmpty(filter.SubuserEmail))
+  query = query.Where(s => s.subuser_email.Contains(filter.SubuserEmail));
+ }
 
-            if (!hasAdminPermission)
-            {
-                // Regular users can see their own subusers
-                if (isCurrentUserSubuser)
-                {
-                    // Subusers cannot see any subusers by default
-                    return Ok(new List<object>());
-                }
-                
-                // Filter to only show current user's subusers
-                query = query.Where(s => s.user_email == currentUserEmail);
-            }
+ var subusers = await query
+ .Include(s => s.SubuserRoles)
+  .ThenInclude(sr => sr.Role)
+  .OrderByDescending(s => s.subuser_id)
+  .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+  .Take(filter?.PageSize ?? 100)
+.Select(s => new {
+      s.subuser_id,
+  s.subuser_email,
+        s.user_email,
+subuser_name = s.Name,
+      s.Department,
+         s.Role,
+   s.Phone,
+  s.subuser_group,
+  s.license_allocation,
+    s.status,
+    s.IsEmailVerified,
+   s.CreatedAt,
+   s.UpdatedAt,
+       roles = s.SubuserRoles.Select(sr => sr.Role.RoleName).ToList(),
+    hasPassword = !string.IsNullOrEmpty(s.subuser_password)
+})
+.ToListAsync();
 
-            // Apply additional filters if provided
-            if (filter != null)
-            {
-                if (!string.IsNullOrEmpty(filter.ParentUserEmail))
-                    query = query.Where(s => s.user_email.Contains(filter.ParentUserEmail));
-
-                if (!string.IsNullOrEmpty(filter.SubuserEmail))
-                    query = query.Where(s => s.subuser_email.Contains(filter.SubuserEmail));
-            }
-
-            try
-            {
-                var subusers = await query
-                    .Include(s => s.SubuserRoles)
-                    .ThenInclude(sr => sr.Role)
-                    .OrderByDescending(s => s.subuser_id)
-                    .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-                    .Take(filter?.PageSize ?? 100)
-                    .Select(s => new {
-                        s.subuser_id,
-                        s.subuser_email,
-                        s.user_email,
-                        subuser_name = s.Name,
-                        s.Department,
-                        s.Role,
-                        s.Phone,
-                        s.subuser_group,
-                        s.license_allocation,
-                        s.status,
-                        s.IsEmailVerified,
-                        s.CreatedAt,
-                        s.UpdatedAt,
-                        roles = s.SubuserRoles.Select(sr => sr.Role.RoleName).ToList(),
-                        hasPassword = !string.IsNullOrEmpty(s.subuser_password)
-                    })
-                    .ToListAsync();
-
-                return Ok(subusers);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error retrieving subusers for {Email}", currentUserEmail);
-                return StatusCode(500, new { 
-                    message = "Error retrieving subusers", 
-                    error = ex.Message 
-                });
-            }
+  _logger.LogInformation("Retrieved {Count} enhanced subusers for {Email}", subusers.Count, currentUserEmail);
+return Ok(subusers);
+  }
+  catch (Exception ex)
+    {
+         _logger.LogError(ex, "Error retrieving enhanced subusers");
+        return StatusCode(500, new { 
+ message = "Error retrieving subusers", 
+         error = ex.Message 
+     });
+  }
         }
 
         /// <summary>
@@ -123,1039 +130,1181 @@ namespace BitRaserApiProject.Controllers
         /// </summary>
         [HttpGet("{email}")]
         public async Task<ActionResult<object>> GetSubuser(string email)
-        {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
-            var subuser = await _context.subuser
-                .Include(s => s.SubuserRoles)
-                .ThenInclude(sr => sr.Role)
-                .ThenInclude(r => r.RolePermissions)
-                .ThenInclude(rp => rp.Permission)
-                .FirstOrDefaultAsync(s => s.subuser_email == email);
-            
-            if (subuser == null) return NotFound($"Subuser with email {email} not found");
+     {
+       try
+{
+      // ✅ Create context - routes to private cloud if enabled
+           using var context = await _contextFactory.CreateDbContextAsync();
+             
+        var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+         var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+        
+                var subuser = await context.subuser
+         .Include(s => s.SubuserRoles)
+              .ThenInclude(sr => sr.Role)
+          .ThenInclude(r => r.RolePermissions)
+        .ThenInclude(rp => rp.Permission)
+                  .FirstOrDefaultAsync(s => s.subuser_email == email);
+        
+  if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
-            // Check if user can view this subuser
-            bool canView = subuser.user_email == currentUserEmail ||
-                          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser);
+   // Check if user can view this subuser
+       bool canView = subuser.user_email == currentUserEmail ||
+           await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser);
 
-            if (!canView)
-            {
-                return StatusCode(403, new { error = "You can only view your own subusers" });
+         if (!canView)
+   {
+               return StatusCode(403, new { error = "You can only view your own subusers" });
+    }
+
+     var subuserDetails = new {
+           subuser.subuser_id,
+  subuser.subuser_email,
+   subuser.user_email,
+      subuser_name = subuser.Name,
+        subuser.Department,
+           subuser.Role,
+   subuser.Phone,
+             subuser.subuser_group,
+ subuser.license_allocation,
+      subuser.status,
+          subuser.IsEmailVerified,
+        subuser.CreatedAt,
+              subuser.UpdatedAt,
+       roles = subuser.SubuserRoles.Select(sr => new {
+     sr.Role.RoleName,
+            sr.Role.Description,
+             sr.AssignedAt,
+        sr.AssignedByEmail
+  }).ToList(),
+        permissions = subuser.SubuserRoles
+          .SelectMany(sr => sr.Role.RolePermissions)
+               .Select(rp => rp.Permission.PermissionName)
+           .Distinct()
+       .ToList(),
+         hasPassword = !string.IsNullOrEmpty(subuser.subuser_password)
+    };
+
+       _logger.LogInformation("✅ Retrieved subuser {Email}", email);
+      return Ok(subuserDetails);
             }
-
-            var subuserDetails = new {
-                subuser.subuser_id,
-                subuser.subuser_email,
-                subuser.user_email,
-                subuser_name = subuser.Name,
-                subuser.Department,
-                subuser.Role,
-                subuser.Phone,
-                subuser.subuser_group,
-                subuser.license_allocation,
-                subuser.status,
-                subuser.IsEmailVerified,
-                subuser.CreatedAt,
-                subuser.UpdatedAt,
-                roles = subuser.SubuserRoles.Select(sr => new {
-                    sr.Role.RoleName,
-                    sr.Role.Description,
-                    sr.AssignedAt,
-                    sr.AssignedByEmail
-                }).ToList(),
-                permissions = subuser.SubuserRoles
-                    .SelectMany(sr => sr.Role.RolePermissions)
-                    .Select(rp => rp.Permission.PermissionName)
-                    .Distinct()
-                    .ToList(),
-                hasPassword = !string.IsNullOrEmpty(subuser.subuser_password)
-            };
-
-            return Ok(subuserDetails);
+     catch (Exception ex)
+ {
+      _logger.LogError(ex, "Error retrieving subuser {Email}", email);
+     return StatusCode(500, new { message = "Error retrieving subuser", error = ex.Message });
+   }
         }
 
         /// <summary>
         /// Get subusers by parent user email with management hierarchy
         /// </summary>
         [HttpGet("by-parent/{parentEmail}")]
-        public async Task<ActionResult<IEnumerable<object>>> GetSubusersByParent(string parentEmail)
+  public async Task<ActionResult<IEnumerable<object>>> GetSubusersByParent(string parentEmail)
         {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
-            // Check if user can view subusers for this parent email
-            bool canView = parentEmail == currentUserEmail ||
-                          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser) ||
-                          await _authService.CanManageUserAsync(currentUserEmail!, parentEmail);
-
-            if (!canView)
+     try
             {
-                return StatusCode(403, new { error = "You can only view your own subusers or subusers of users you manage" });
-            }
+     // ✅ Create context - routes to private cloud if enabled
+  using var context = await _contextFactory.CreateDbContextAsync();
+      
+         var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+       var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+          
+      // Check if user can view subusers for this parent email
+          bool canView = parentEmail == currentUserEmail ||
+   await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser) ||
+           await _authService.CanManageUserAsync(currentUserEmail!, parentEmail);
 
-            var subusers = await _context.subuser
-                .Include(s => s.SubuserRoles)
-                .ThenInclude(sr => sr.Role)
-                .Where(s => s.user_email == parentEmail)
-                .OrderByDescending(s => s.subuser_id)
-                .Select(s => new {
-                    s.subuser_id,
-                    s.subuser_email,
-                    s.user_email,
-                    subuser_name = s.Name,
-                    s.Department,
-                    s.Role,
-                    s.Phone,
-                    s.subuser_group,
-                    s.license_allocation,
-                    s.status,
-                    s.IsEmailVerified,
-                    s.CreatedAt,
-                    s.UpdatedAt,
-                    roles = s.SubuserRoles.Select(sr => sr.Role.RoleName).ToList(),
-                    hasPassword = !string.IsNullOrEmpty(s.subuser_password)
-                })
-                .ToListAsync();
+           if (!canView)
+  {
+      return StatusCode(403, new { error = "You can only view your own subusers or subusers of users you manage" });
+   }
 
-            return Ok(subusers);
+        var subusers = await context.subuser
+      .Include(s => s.SubuserRoles)
+       .ThenInclude(sr => sr.Role)
+          .Where(s => s.user_email == parentEmail)
+ .OrderByDescending(s => s.subuser_id)
+   .Select(s => new {
+            s.subuser_id,
+     s.subuser_email,
+                  s.user_email,
+    subuser_name = s.Name,
+           s.Department,
+  s.Role,
+  s.Phone,
+        s.subuser_group,
+         s.license_allocation,
+      s.status,
+    s.IsEmailVerified,
+            s.CreatedAt,
+        s.UpdatedAt,
+        roles = s.SubuserRoles.Select(sr => sr.Role.RoleName).ToList(),
+               hasPassword = !string.IsNullOrEmpty(s.subuser_password)
+  })
+          .ToListAsync();
+
+       _logger.LogInformation("✅ Retrieved {Count} subusers for parent {ParentEmail}", subusers.Count, parentEmail);
+return Ok(subusers);
+      }
+        catch (Exception ex)
+            {
+   _logger.LogError(ex, "Error retrieving subusers for parent {ParentEmail}", parentEmail);
+             return StatusCode(500, new { message = "Error retrieving subusers", error = ex.Message });
+   }
         }
 
         /// <summary>
         /// Create a new subuser - Users can create subusers for themselves
+        /// ✅ Create new subuser - ROUTES TO PRIVATE CLOUD IF ENABLED
         /// </summary>
         [HttpPost]
-        public async Task<ActionResult<object>> CreateSubuser([FromBody] SubuserCreateRequest request)
+  public async Task<ActionResult<object>> CreateSubuser([FromBody] SubuserCreateRequest request)
         {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-  
-            // ✅ CHECK: Can user/subuser create subusers?
-      if (!await _authService.CanCreateSubusersAsync(currentUserEmail!))
+       try
      {
-      return StatusCode(403, new { 
-           success = false,
-          message = "You cannot create subusers",
-          detail = "Users with 'User' role are not allowed to create subusers"
-                });
+  // ✅ Use dynamic context - automatically routes to correct database
+   using var context = await _contextFactory.CreateDbContextAsync();
+
+ var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+      var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+    
+   // ✅ CHECK: Can user/subuser create subusers?
+   if (!await _authService.CanCreateSubusersAsync(currentUserEmail!))
+ {
+       // Get user's roles to provide better error message
+ var userRoles = await _authService.GetUserRolesAsync(currentUserEmail!, isCurrentUserSubuser);
+ var rolesString = string.Join(", ", userRoles);
+    
+            return StatusCode(403, new { 
+   success = false,
+ message = "You cannot create subusers",
+      detail = $"Your current role(s) ({rolesString}) do not have permission to create subusers. Required roles: Manager, Support, Admin, or SuperAdmin",
+  currentRoles = userRoles.ToList(),
+         requiredPermission = "CREATE_SUBUSER or UserManagement"
+      });
+    }
+
+        // Validate input - only email and password are required
+       if (string.IsNullOrEmpty(request.subuser_email) || string.IsNullOrEmpty(request.subuser_password))
+  return BadRequest("Subuser email and password are required");
+
+ // Check if subuser already exists
+     var existingSubuser = await context.subuser
+      .Where(s => s.subuser_email == request.subuser_email)
+.Select(s => new { s.subuser_email })
+ .FirstOrDefaultAsync();
+   
+       if (existingSubuser != null)
+        return Conflict($"Subuser with email {request.subuser_email} already exists");
+
+
+// ✅ SMART PARENT EMAIL RESOLUTION
+      string parentUserEmail;
+   int parentUserId;
+
+    if (isCurrentUserSubuser)
+     {
+   // ✅ If SUBUSER is creating: Find their parent user
+  var currentSubuser = await context.subuser
+ .FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+
+   if (currentSubuser == null)
+  return BadRequest("Current subuser not found");
+
+           // Use the subuser's parent as the parent for new subuser
+  parentUserEmail = currentSubuser.user_email;
+      parentUserId = currentSubuser.superuser_id ?? 0;
+
+     _logger.LogInformation(
+      "Subuser {SubuserEmail} creating subuser. Using parent {ParentEmail}", 
+   currentUserEmail, 
+    parentUserEmail
+         );
+      }
+      else
+     {
+        // ✅ If REGULAR USER is creating: Use their email as parent
+        parentUserEmail = request.parentUserEmail ?? currentUserEmail!;
+               
+        // ✅ FIX: Don't query Users table in private cloud
+      // Try to get parent info from subuser table first
+      var parentSubuser = await context.subuser
+ .Where(s => s.subuser_email == parentUserEmail)
+             .Select(s => new { s.superuser_id })
+            .FirstOrDefaultAsync();
+    
+               if (parentSubuser != null)
+  {
+     // Parent is also a subuser
+            parentUserId = parentSubuser.superuser_id ?? 0;
+          }
+           else
+      {
+    // Parent is a regular user - use a placeholder ID
+          // In private cloud, we don't have access to Users table
+         parentUserId = 0; // Default parent ID
+     }
+
+      _logger.LogInformation(
+ "User {UserEmail} creating subuser with parent {ParentEmail}", 
+   currentUserEmail, 
+ parentUserEmail
+   );
        }
 
-         // Validate input - only email and password are required
-     if (string.IsNullOrEmpty(request.subuser_email) || string.IsNullOrEmpty(request.subuser_password))
-          return BadRequest("Subuser email and password are required");
-
-     // Check if subuser already exists
-            var existingSubuser = await _context.subuser
-                .Where(s => s.subuser_email == request.subuser_email)
-     .Select(s => new { s.subuser_email })
-        .FirstOrDefaultAsync();
-     
-            if (existingSubuser != null)
-  return Conflict($"Subuser with email {request.subuser_email} already exists");
-
-        // Check if email is already used as a main user
-  var existingUser = await _context.Users
-       .Where(u => u.user_email == request.subuser_email)
-          .Select(u => new { u.user_email })
-      .FirstOrDefaultAsync();
- 
-            if (existingUser != null)
-           return Conflict($"Email {request.subuser_email} is already used as a main user account");
-
-          // ✅ SMART PARENT EMAIL RESOLUTION
-            string parentUserEmail;
-         int parentUserId;
-
-       if (isCurrentUserSubuser)
+      // Create subuser with all fields
+  var newSubuser = new subuser
     {
-                // ✅ If SUBUSER is creating: Find their parent user
-    var currentSubuser = await _context.subuser
-  .FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+     subuser_email = request.subuser_email,
+   subuser_password = BCrypt.Net.BCrypt.HashPassword(request.subuser_password),
+      user_email = parentUserEmail,
+      superuser_id = parentUserId > 0 ? parentUserId : null,
+       Name = request.subuser_name ?? request.subuser_email.Split('@')[0],
+ Department = request.department,
+         Role = request.role ?? "subuser",
+        Phone = request.phone,
+    subuser_group = request.subuser_group,
+  license_allocation = request.license_allocation ?? 0,
+        status = "active",
+     IsEmailVerified = false,
+    CreatedAt = DateTime.UtcNow,
+  CreatedBy = parentUserId // Use parentUserId directly (0 if no valid parent)
+         };
 
-      if (currentSubuser == null)
-           return BadRequest("Current subuser not found");
+    context.subuser.Add(newSubuser);
+         await context.SaveChangesAsync();
 
-       // Use the subuser's parent as the parent for new subuser
-       parentUserEmail = currentSubuser.user_email;
-        parentUserId = currentSubuser.superuser_id ?? 0;
-
- _logger.LogInformation(
-        "Subuser {SubuserEmail} creating subuser. Using parent {ParentEmail}", 
-         currentUserEmail, 
-         parentUserEmail
- );
-          }
-else
-            {
-    // ✅ If REGULAR USER is creating: Use their email as parent
-    parentUserEmail = request.parentUserEmail ?? currentUserEmail!;
-
-              // Validate parent user exists
-           var parentUser = await _context.Users
-          .FirstOrDefaultAsync(u => u.user_email == parentUserEmail);
-
-     if (parentUser == null)
-         return BadRequest($"Parent user with email {parentUserEmail} not found");
-
-     parentUserId = parentUser.user_id;
-
-  _logger.LogInformation(
-          "User {UserEmail} creating subuser with parent {ParentEmail}", 
-        currentUserEmail, 
-   parentUserEmail
-       );
+           // ✅ Assign role to rolebasedAuth system (SubuserRoles table)
+       var roleToAssign = request.role ?? "SubUser";
+   var roleAssigned = await AssignRoleToSubuserAsync(request.subuser_email, roleToAssign, currentUserEmail!, context);
+                
+      if (!roleAssigned)
+     {
+   _logger.LogWarning("Failed to assign role {RoleName} to subuser {Email} in RBAC system", roleToAssign, request.subuser_email);
   }
 
-         // ✅ FIXED: Check permission - Allow if user is subuser OR if creating for themselves
-            if (isCurrentUserSubuser)
-    {
-  // Subusers are always creating for their parent, which is allowed
-      // No additional permission check needed
-            }
-  else if (parentUserEmail != currentUserEmail)
-  {
-    // Regular users creating for someone else need special permission
-      if (!await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSERS_FOR_OTHERS", isCurrentUserSubuser))
-      {
-                    return StatusCode(403, new { error = "You can only create subusers for yourself" });
-  }
-          }
+          _logger.LogInformation("✅ Enhanced subuser created: ID={SubuserId}, Email={Email}", newSubuser.subuser_id, newSubuser.subuser_email);
 
-            // Create subuser with all fields
-    var newSubuser = new subuser
-            {
-        subuser_email = request.subuser_email,
-  subuser_password = BCrypt.Net.BCrypt.HashPassword(request.subuser_password),
-       user_email = parentUserEmail,
-          superuser_id = parentUserId,
-        Name = request.subuser_name ?? request.subuser_email.Split('@')[0],
-          Department = request.department,
-       Role = request.role ?? "subuser",
-                Phone = request.phone,
-           subuser_group = request.subuser_group,
-          license_allocation = request.license_allocation ?? 0,
-                status = "active",
-       IsEmailVerified = false,
-     CreatedAt = DateTime.UtcNow,
-                CreatedBy = parentUserId
-    };
-
-          _context.subuser.Add(newSubuser);
-            await _context.SaveChangesAsync();
-
-    // ✅ Assign role to rolebasedAuth system (SubuserRoles table)
-            var roleToAssign = request.role ?? "SubUser";
-            var roleAssigned = await AssignRoleToSubuserAsync(request.subuser_email, roleToAssign, currentUserEmail!);
-     
-            if (!roleAssigned)
-{
-     _logger.LogWarning("Failed to assign role {RoleName} to subuser {Email} in RBAC system", roleToAssign, request.subuser_email);
-            }
-
-         var response = new {
-                success = true,
-  subuserEmail = newSubuser.subuser_email,
-       subuserName = newSubuser.Name,
-                department = newSubuser.Department,
- role = newSubuser.Role,
-        phone = newSubuser.Phone,
-       subuser_group = newSubuser.subuser_group,
-    license_allocation = newSubuser.license_allocation,
- parentUserEmail = newSubuser.user_email,
-         subuserID = newSubuser.subuser_id,
-           status = newSubuser.status,
-       createdAt = newSubuser.CreatedAt,
-           createdBy = isCurrentUserSubuser ? $"Subuser: {currentUserEmail}" : $"User: {currentUserEmail}",
-      roleAssignedToRBAC = roleAssigned,
-     message = roleAssigned 
-   ? "Subuser created successfully with role assigned to RBAC" 
-          : "Subuser created successfully (role assignment to RBAC failed)"
-            };
+      var response = new {
+      success = true,
+ subuserEmail = newSubuser.subuser_email,
+subuserName = newSubuser.Name,
+       department = newSubuser.Department,
+role = newSubuser.Role,
+    phone = newSubuser.Phone,
+    subuser_group = newSubuser.subuser_group,
+       license_allocation = newSubuser.license_allocation,
+   parentUserEmail = newSubuser.user_email,
+     subuserID = newSubuser.subuser_id,
+     status = newSubuser.status,
+           createdAt = newSubuser.CreatedAt,
+      createdBy = isCurrentUserSubuser ? $"Subuser: {currentUserEmail}" : $"User: {currentUserEmail}",
+   roleAssignedToRBAC = roleAssigned,
+    message = roleAssigned 
+  ? "Subuser created successfully with role assigned to RBAC" 
+       : "Subuser created successfully (role assignment to RBAC failed)"
+  };
 
    return CreatedAtAction(nameof(GetSubuser), new { email = newSubuser.subuser_email }, response);
-        }
+       }
+    catch (Exception ex)
+   {
+        _logger.LogError(ex, "Error creating enhanced subuser");
+     return StatusCode(500, new { 
+        message = "Error creating subuser", 
+       error = ex.Message 
+     });
+  }
+     }
 
         /// <summary>
         /// Update subuser information by email
+        /// ✅ ROUTES TO PRIVATE CLOUD IF ENABLED
         /// </summary>
-        [HttpPut("{email}")]
+ [HttpPut("{email}")]
         public async Task<IActionResult> UpdateSubuser(string email, [FromBody] SubuserUpdateRequest request)
-        {
-            if (email != request.SubuserEmail)
-                return BadRequest("Email mismatch in request");
+      {
+try
+     {
+      // ✅ Create context - routes to private cloud if enabled
+      using var context = await _contextFactory.CreateDbContextAsync();
+      
+      if (email != request.SubuserEmail)
+          return BadRequest("Email mismatch in request");
 
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
-            
-            if (subuser == null) return NotFound($"Subuser with email {email} not found");
+     var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+            var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+      
+   if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
-            // Check if user can update this subuser
+      // Check if user can update this subuser
             bool canUpdate = subuser.user_email == currentUserEmail ||
-                           await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
+    await _authService.HasPermissionAsync(currentUserEmail!, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
 
-            if (!canUpdate)
-            {
-                return StatusCode(403, new { error = "You can only update your own subusers" });
-            }
+   if (!canUpdate)
+    {
+         return StatusCode(403, new { error = "You can only update your own subusers" });
+   }
 
-            // Update all fields if provided
-       if (!string.IsNullOrEmpty(request.SubuserName))
-   {
-   subuser.Name = request.SubuserName;
- }
-    
-        if (request.Department != null)
+   // Update all fields if provided
+if (!string.IsNullOrEmpty(request.SubuserName))
   {
-  subuser.Department = string.IsNullOrEmpty(request.Department) ? null : request.Department;
+   subuser.Name = request.SubuserName;
+  }
+     
+ if (request.Department != null)
+        {
+   subuser.Department = string.IsNullOrEmpty(request.Department) ? null : request.Department;
+     }
+      
+         if (request.Role != null)
+    {
+     subuser.Role = string.IsNullOrEmpty(request.Role) ? "subuser" : request.Role;
   }
  
-  if (request.Role != null)
-          {
-    subuser.Role = string.IsNullOrEmpty(request.Role) ? "subuser" : request.Role;
-   }
-    
-     if (request.Phone != null)
- {
-    subuser.Phone = string.IsNullOrEmpty(request.Phone) ? null : request.Phone;
-  }
-    
-  if (request.SubuserGroup != null)
-{
-   subuser.subuser_group = string.IsNullOrEmpty(request.SubuserGroup) ? null : request.SubuserGroup;
- }
-  
-   if (request.LicenseAllocation.HasValue)
-            {
-     subuser.license_allocation = request.LicenseAllocation.Value;
- }
-      
-     if (!string.IsNullOrEmpty(request.Status))
-    {
-    subuser.status = request.Status;
-      }
-
-      // Update password if provided
-   if (!string.IsNullOrEmpty(request.NewPassword))
-     {
-       subuser.subuser_password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
-    }
-
-   // Update parent user if provided and user has permission
-      if (!string.IsNullOrEmpty(request.NewParentUserEmail) && 
-            request.NewParentUserEmail != subuser.user_email)
-    {
-     if (!await _authService.HasPermissionAsync(currentUserEmail!, "REASSIGN_SUBUSERS", isCurrentUserSubuser))
+if (request.Phone != null)
    {
-    return StatusCode(403, new { error = "Insufficient permissions to reassign subuser to different parent" });
+   subuser.Phone = string.IsNullOrEmpty(request.Phone) ? null : request.Phone;
+     }
+        
+     if (request.SubuserGroup != null)
+  {
+       subuser.subuser_group = string.IsNullOrEmpty(request.SubuserGroup) ? null : request.SubuserGroup;
+   }
+   
+     if (request.LicenseAllocation.HasValue)
+      {
+   subuser.license_allocation = request.LicenseAllocation.Value;
+    }
+          
+ if (!string.IsNullOrEmpty(request.Status))
+  {
+      subuser.status = request.Status;
+  }
+
+          // Update password if provided
+            if (!string.IsNullOrEmpty(request.NewPassword))
+   {
+   subuser.subuser_password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+  }
+
+         // Update parent user if provided and user has permission
+    if (!string.IsNullOrEmpty(request.NewParentUserEmail) && 
+   request.NewParentUserEmail != subuser.user_email)
+ {
+    if (!await _authService.HasPermissionAsync(currentUserEmail!, "REASSIGN_SUBUSERS", isCurrentUserSubuser))
+       {
+     return StatusCode(403, new { error = "Insufficient permissions to reassign subuser to different parent" });
          }
 
-       // Validate new parent user exists
-     var newParent = await _context.Users
-      .FirstOrDefaultAsync(u => u.user_email == request.NewParentUserEmail);
-     if (newParent == null)
-       return BadRequest($"Parent user with email {request.NewParentUserEmail} not found");
-
-subuser.user_email = request.NewParentUserEmail;
-       subuser.superuser_id = newParent.user_id;
-      }
+      // ✅ FIX: Don't query Users table in private cloud
+ // Try to find new parent in subuser table first
+  var newParentSubuser = await context.subuser
+    .Where(s => s.subuser_email == request.NewParentUserEmail)
+       .Select(s => new { s.superuser_id })
+    .FirstOrDefaultAsync();
+          
+ if (newParentSubuser != null)
+        {
+   // New parent is a subuser
+       subuser.user_email = request.NewParentUserEmail;
+       subuser.superuser_id = newParentSubuser.superuser_id ?? 0;
+    }
+   else
+         {
+   // New parent might be a regular user (not accessible in private cloud)
+      // Just update the email reference
+     subuser.user_email = request.NewParentUserEmail;
+        // Keep existing superuser_id or set to 0
+   }
+       }
 
       // Update timestamp
-   subuser.UpdatedAt = DateTime.UtcNow;
-     subuser.UpdatedBy = (await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail))?.user_id;
+  subuser.UpdatedAt = DateTime.UtcNow;
+ // ✅ FIX: Get updater ID from subuser table
+    var updaterSubuser = await context.subuser
+      .Where(s => s.subuser_email == currentUserEmail)
+    .Select(s => new { s.superuser_id })
+ .FirstOrDefaultAsync();
+    subuser.UpdatedBy = updaterSubuser?.superuser_id ?? null;
 
-  _context.Entry(subuser).State = EntityState.Modified;
-    await _context.SaveChangesAsync();
+context.Entry(subuser).State = EntityState.Modified;
+         await context.SaveChangesAsync();
 
-      return Ok(new { 
-  message = "Subuser updated successfully", 
-    subuserEmail = email,
-       subuser_name = subuser.Name,
-    department = subuser.Department,
-    role = subuser.Role,
+      _logger.LogInformation("✅ Subuser updated: {Email}", email);
+     
+  return Ok(new { 
+       message = "Subuser updated successfully", 
+       subuserEmail = email,
+subuser_name = subuser.Name,
+           department = subuser.Department,
+   role = subuser.Role,
        phone = subuser.Phone,
     subuser_group = subuser.subuser_group,
-      license_allocation = subuser.license_allocation,
+            license_allocation = subuser.license_allocation,
    status = subuser.status,
-           updatedAt = DateTime.UtcNow
-      });
-        }
+       updatedAt = DateTime.UtcNow
+   });
+            }
+   catch (Exception ex)
+     {
+       _logger.LogError(ex, "Error updating subuser {Email}", email);
+     return StatusCode(500, new { message = "Error updating subuser", error = ex.Message });
+     }
+      }
 
         /// <summary>
         /// PATCH: Flexible update for subuser - Update single or multiple fields
         /// Can find subuser by parent user email OR by subuser email
-        /// Supports partial updates - only fields provided will be updated
+    /// Supports partial updates - only fields provided will be updated
+        /// ✅ ROUTES TO PRIVATE CLOUD IF ENABLED
         /// </summary>
-        [HttpPatch("update")]
+[HttpPatch("update")]
         public async Task<IActionResult> PatchSubuser([FromBody] SubuserPatchRequest request)
-        {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-          if (string.IsNullOrEmpty(currentUserEmail))
-            {
-  return Unauthorized(new { message = "User not authenticated" });
-     }
-
-   var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
-
-            // Find subuser by subuser_email OR by parentUserEmail + subuser_email combination
-            subuser? targetSubuser = null;
-
-      if (!string.IsNullOrEmpty(request.subuser_email))
-            {
- // First try to find by subuser_email directly
- targetSubuser = await _context.subuser
-          .FirstOrDefaultAsync(s => s.subuser_email == request.subuser_email);
-
-       // If parentUserEmail is also provided, validate it matches
-          if (targetSubuser != null && !string.IsNullOrEmpty(request.parentUserEmail))
-                {
-    if (targetSubuser.user_email != request.parentUserEmail)
+      {
+        try
+{
+    // ✅ Create context - routes to private cloud if enabled
+       using var context = await _contextFactory.CreateDbContextAsync();
+       
+      var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(currentUserEmail))
     {
-       return BadRequest(new { 
-  message = "Subuser email and parent user email mismatch",
-              subuserEmail = request.subuser_email,
-     providedParent = request.parentUserEmail,
-     actualParent = targetSubuser.user_email
-         });
-  }
-    }
-            }
-          else if (!string.IsNullOrEmpty(request.parentUserEmail))
-    {
-           // If only parent email provided, we need more context
-      return BadRequest(new { 
-          message = "subuser_email is required for update. Provide subuser_email to identify which subuser to update" 
-          });
+       return Unauthorized(new { message = "User not authenticated" });
    }
-     else
-   {
+
+         var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+
+   // Find subuser by subuser_email OR by parentUserEmail + subuser_email combination
+     subuser? targetSubuser = null;
+
+ if (!string.IsNullOrEmpty(request.subuser_email))
+         {
+          // First try to find by subuser_email directly
+     targetSubuser = await context.subuser
+  .FirstOrDefaultAsync(s => s.subuser_email == request.subuser_email);
+
+ // If parentUserEmail is also provided, validate it matches
+      if (targetSubuser != null && !string.IsNullOrEmpty(request.parentUserEmail))
+     {
+     if (targetSubuser.user_email != request.parentUserEmail)
+       {
    return BadRequest(new { 
-        message = "Either subuser_email or both subuser_email and parentUserEmail are required" 
+      message = "Subuser email and parent user email mismatch",
+         subuserEmail = request.subuser_email,
+    providedParent = request.parentUserEmail,
+      actualParent = targetSubuser.user_email
   });
+       }
+      }
+     }
+    else if (!string.IsNullOrEmpty(request.parentUserEmail))
+   {
+    // If only parent email provided, we need more context
+     return BadRequest(new { 
+            message = "subuser_email is required for update. Provide subuser_email to identify which subuser to update" 
+  });
+ }
+    else
+      {
+        return BadRequest(new { 
+         message = "Either subuser_email or both subuser_email and parentUserEmail are required" 
+       });
+}
+
+   if (targetSubuser == null)
+      {
+         return NotFound(new { 
+    message = $"Subuser not found",
+   subuser_email = request.subuser_email
+        });
+   }
+
+      // Check if current user can update this subuser
+ bool canUpdate = targetSubuser.user_email == currentUserEmail ||
+ await _authService.HasPermissionAsync(currentUserEmail, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
+
+     if (!canUpdate)
+    {
+   return StatusCode(403, new { 
+         message = "You can only update your own subusers",
+     currentUser = currentUserEmail,
+       subuserParent = targetSubuser.user_email
+   });
+    }
+
+ var updatedFields = new List<string>();
+
+           // Update subuser_email if provided (email change)
+   if (!string.IsNullOrEmpty(request.new_subuser_email) && 
+      request.new_subuser_email != targetSubuser.subuser_email)
+      {
+        // Check if new email already exists
+         var emailExists = await context.subuser
+      .AnyAsync(s => s.subuser_email == request.new_subuser_email && s.subuser_id != targetSubuser.subuser_id);
+      
+    if (emailExists)
+   {
+      return Conflict(new { message = $"Email {request.new_subuser_email} is already in use" });
+    }
+
+  targetSubuser.subuser_email = request.new_subuser_email;
+    updatedFields.Add("subuser_email");
+  }
+
+           // Update password if provided
+   if (!string.IsNullOrEmpty(request.subuser_password))
+     {
+         targetSubuser.subuser_password = BCrypt.Net.BCrypt.HashPassword(request.subuser_password);
+     updatedFields.Add("subuser_password");
       }
 
-            if (targetSubuser == null)
-            {
-       return NotFound(new { 
-  message = $"Subuser not found",
-    subuser_email = request.subuser_email
-          });
-        }
-
- // Check if current user can update this subuser
-    bool canUpdate = targetSubuser.user_email == currentUserEmail ||
-             await _authService.HasPermissionAsync(currentUserEmail, "UPDATE_ALL_SUBUSERS", isCurrentUserSubuser);
-
-       if (!canUpdate)
-       {
-        return StatusCode(403, new { 
-              message = "You can only update your own subusers",
-      currentUser = currentUserEmail,
-      subuserParent = targetSubuser.user_email
-  });
-  }
-
-   var updatedFields = new List<string>();
-
-   // Update subuser_email if provided (email change)
-      if (!string.IsNullOrEmpty(request.new_subuser_email) && 
-        request.new_subuser_email != targetSubuser.subuser_email)
-            {
-    // Check if new email already exists
-          var emailExists = await _context.subuser
-        .AnyAsync(s => s.subuser_email == request.new_subuser_email && s.subuser_id != targetSubuser.subuser_id);
-          
-  if (emailExists)
-       {
-          return Conflict(new { message = $"Email {request.new_subuser_email} is already in use" });
-        }
-
-       targetSubuser.subuser_email = request.new_subuser_email;
-        updatedFields.Add("subuser_email");
-    }
-
- // Update password if provided
-     if (!string.IsNullOrEmpty(request.subuser_password))
-            {
-    targetSubuser.subuser_password = BCrypt.Net.BCrypt.HashPassword(request.subuser_password);
-       updatedFields.Add("subuser_password");
-  }
-
-            // Update subuser_name if provided
-   if (request.subuser_name != null) // Allow empty string to clear name
-        {
-     targetSubuser.Name = string.IsNullOrEmpty(request.subuser_name) ? null : request.subuser_name;
-                updatedFields.Add("subuser_name");
-   }
-
-       // Update department if provided
-    if (request.department != null)
-         {
-                targetSubuser.Department = string.IsNullOrEmpty(request.department) ? null : request.department;
-        updatedFields.Add("department");
-          }
-
-       // Update role if provided
-          if (request.role != null)
-            {
-    targetSubuser.Role = string.IsNullOrEmpty(request.role) ? "subuser" : request.role;
-  updatedFields.Add("role");
- }
-
-            // Update phone if provided
-         if (request.phone != null)
-            {
-        targetSubuser.Phone = string.IsNullOrEmpty(request.phone) ? null : request.phone;
-       updatedFields.Add("phone");
-     }
-
-      // Update subuser_group if provided
-            if (request.subuser_group != null)
-{
- // ✅ FIXED: Direct string assignment - no conversion to GroupId
-    targetSubuser.subuser_group = string.IsNullOrEmpty(request.subuser_group) ? null : request.subuser_group;
-   updatedFields.Add("subuser_group");
-     }
-
-     // Update parentUserEmail if provided (reassign subuser to different parent)
-    if (!string.IsNullOrEmpty(request.new_parentUserEmail) && 
-     request.new_parentUserEmail != targetSubuser.user_email)
-            {
-    // Check permission for reassignment
-            if (!await _authService.HasPermissionAsync(currentUserEmail, "REASSIGN_SUBUSERS", isCurrentUserSubuser))
-                {
-           return StatusCode(403, new { 
-           message = "Insufficient permissions to reassign subuser to different parent" 
-            });
-    }
-
-     // Validate new parent exists
-            var newParent = await _context.Users
-            .FirstOrDefaultAsync(u => u.user_email == request.new_parentUserEmail);
-                
-   if (newParent == null)
+      // Update subuser_name if provided
+     if (request.subuser_name != null)
    {
-           return BadRequest(new { message = $"Parent user {request.new_parentUserEmail} not found" });
-        }
-
-   targetSubuser.user_email = request.new_parentUserEmail;
- targetSubuser.superuser_id = newParent.user_id;
-             updatedFields.Add("parentUserEmail");
-         }
-
-   if (updatedFields.Count == 0)
-            {
-       return BadRequest(new { message = "No fields to update. Please provide at least one field to update" });
-    }
-
-            // Update timestamp
-            targetSubuser.UpdatedAt = DateTime.UtcNow;
-     targetSubuser.UpdatedBy = (await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail))?.user_id;
-
-            try
-    {
-           _context.Entry(targetSubuser).State = EntityState.Modified;
-       await _context.SaveChangesAsync();
-
-        _logger.LogInformation("Subuser {Email} updated by {UpdatedBy}. Fields: {Fields}", 
-           targetSubuser.subuser_email, currentUserEmail, string.Join(", ", updatedFields));
-
-       return Ok(new
-      {
-message = "Subuser updated successfully",
-           subuser_email = targetSubuser.subuser_email,
-       subuser_name = targetSubuser.Name,
-    department = targetSubuser.Department,
-role = targetSubuser.Role,
-        phone = targetSubuser.Phone,
-    subuser_group = targetSubuser.subuser_group, // ✅ Direct string field
-     parentUserEmail = targetSubuser.user_email,
-    license_allocation = targetSubuser.license_allocation,
-      status = targetSubuser.status,
-        updatedFields = updatedFields,
-    updatedAt = targetSubuser.UpdatedAt,
-updatedBy = currentUserEmail
-          });
+      targetSubuser.Name = string.IsNullOrEmpty(request.subuser_name) ? null : request.subuser_name;
+       updatedFields.Add("subuser_name");
    }
-    catch (DbUpdateConcurrencyException ex)
+
+ // Update department if provided
+     if (request.department != null)
     {
-       _logger.LogError(ex, "Concurrency error updating subuser {Email}", targetSubuser.subuser_email);
-         return StatusCode(409, new { message = "Concurrency error. The subuser was modified by another user. Please retry." });
-            }
- catch (Exception ex)
-         {
-  _logger.LogError(ex, "Error updating subuser {Email}", targetSubuser.subuser_email);
- return StatusCode(500, new { 
-        message = "Error updating subuser",
-      error = ex.Message
-         });
+      targetSubuser.Department = string.IsNullOrEmpty(request.department) ? null : request.department;
+        updatedFields.Add("department");
+       }
+
+   // Update role if provided
+    if (request.role != null)
+    {
+      targetSubuser.Role = string.IsNullOrEmpty(request.role) ? "subuser" : request.role;
+    updatedFields.Add("role");
  }
+
+  // Update phone if provided
+        if (request.phone != null)
+  {
+          targetSubuser.Phone = string.IsNullOrEmpty(request.phone) ? null : request.phone;
+       updatedFields.Add("phone");
+}
+
+   // Update subuser_group if provided
+      if (request.subuser_group != null)
+       {
+    targetSubuser.subuser_group = string.IsNullOrEmpty(request.subuser_group) ? null : request.subuser_group;
+      updatedFields.Add("subuser_group");
+      }
+
+  // Update parentUserEmail if provided (reassign subuser to different parent)
+     if (!string.IsNullOrEmpty(request.new_parentUserEmail) && 
+         request.new_parentUserEmail != targetSubuser.user_email)
+     {
+    // Check permission for reassignment
+    if (!await _authService.HasPermissionAsync(currentUserEmail, "REASSIGN_SUBUSERS", isCurrentUserSubuser))
+      {
+ return StatusCode(403, new { 
+       message = "Insufficient permissions to reassign subuser to different parent" 
+     });
+      }
+
+           // ✅ FIX: Don't query Users table - get from subuser table
+        var newParentSubuser = await context.subuser
+      .Where(s => s.subuser_email == request.new_parentUserEmail)
+          .Select(s => new { s.superuser_id })
+ .FirstOrDefaultAsync();
+ 
+ if (newParentSubuser != null)
+         {
+     targetSubuser.user_email = request.new_parentUserEmail;
+    targetSubuser.superuser_id = newParentSubuser.superuser_id ?? 0;
+        updatedFields.Add("parentUserEmail");
+     }
+ else
+   {
+       // Parent not found in subuser table - might be regular user
+     targetSubuser.user_email = request.new_parentUserEmail;
+        // Keep existing superuser_id
+    updatedFields.Add("parentUserEmail");
+}
+      }
+
+ if (updatedFields.Count == 0)
+  {
+        return BadRequest(new { message = "No fields to update. Please provide at least one field to update" });
+   }
+
+       // Update timestamp
+      targetSubuser.UpdatedAt = DateTime.UtcNow;
+   // ✅ FIX: Get updater ID from subuser table
+   var updaterSubuser = await context.subuser
+        .Where(s => s.subuser_email == currentUserEmail)
+ .Select(s => new { s.superuser_id })
+     .FirstOrDefaultAsync();
+     targetSubuser.UpdatedBy = updaterSubuser?.superuser_id ?? null;
+
+context.Entry(targetSubuser).State = EntityState.Modified;
+            await context.SaveChangesAsync();
+
+      _logger.LogInformation("✅ Subuser updated: {Email}, Fields: {Fields}", 
+      targetSubuser.subuser_email, string.Join(", ", updatedFields));
+
+           return Ok(new
+        {
+     message = "Subuser updated successfully",
+    subuser_email = targetSubuser.subuser_email,
+ subuser_name = targetSubuser.Name,
+        department = targetSubuser.Department,
+    role = targetSubuser.Role,
+    phone = targetSubuser.Phone,
+ subuser_group = targetSubuser.subuser_group,
+      parentUserEmail = targetSubuser.user_email,
+      license_allocation = targetSubuser.license_allocation,
+         status = targetSubuser.status,
+     updatedFields = updatedFields,
+        updatedAt = targetSubuser.UpdatedAt,
+      updatedBy = currentUserEmail
+     });
+ }
+       catch (DbUpdateConcurrencyException ex)
+      {
+      _logger.LogError(ex, "Concurrency error updating subuser");
+  return StatusCode(409, new { message = "Concurrency error. The subuser was modified by another user. Please retry." });
+   }
+           catch (Exception ex)
+  {
+       _logger.LogError(ex, "Error updating subuser");
+return StatusCode(500, new { 
+  message = "Error updating subuser",
+          error = ex.Message
+    });
+          }
         }
 
         /// <summary>
- /// Change subuser password by email - Requires current password verification
+        /// Change subuser password by email - Requires current password verification
+        /// ✅ ROUTES TO PRIVATE CLOUD IF ENABLED
         /// </summary>
    [HttpPatch("{email}/change-password")]
         public async Task<IActionResult> ChangeSubuserPassword(string email, [FromBody] ChangePasswordRequest request)
-     {
-     var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-    if (string.IsNullOrEmpty(currentUserEmail))
-  {
-  return Unauthorized(new { message = "User not authenticated" });
-       }
-
-var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
-            var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
-    
- if (subuser == null)
         {
-     return NotFound(new { message = $"Subuser with email {email} not found" });
-  }
+            try
+            {
+      // ✅ Create context - routes to private cloud if enabled
+       using var context = await _contextFactory.CreateDbContextAsync();
+                
+      var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+     if (string.IsNullOrEmpty(currentUserEmail))
+                {
+       return Unauthorized(new { message = "User not authenticated" });
+     }
 
-  // Check if user can change password for this subuser
+   var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+    var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+            
+          if (subuser == null)
+      {
+         return NotFound(new { message = $"Subuser with email {email} not found" });
+ }
+
+       // Check if user can change password for this subuser
          bool canChange = subuser.user_email == currentUserEmail ||
-       await _authService.HasPermissionAsync(currentUserEmail, "CHANGE_ALL_SUBUSER_PASSWORDS", isCurrentUserSubuser);
+     await _authService.HasPermissionAsync(currentUserEmail, "CHANGE_ALL_SUBUSER_PASSWORDS", isCurrentUserSubuser);
 
- if (!canChange)
-    {
- return StatusCode(403, new { message = "You can only change passwords for your own subusers" });
+     if (!canChange)
+  {
+       return StatusCode(403, new { message = "You can only change passwords for your own subusers" });
         }
 
-  // Validate request
-         if (string.IsNullOrEmpty(request.CurrentPassword))
- {
-      return BadRequest(new { message = "Current password is required" });
+ // Validate request
+   if (string.IsNullOrEmpty(request.CurrentPassword))
+      {
+       return BadRequest(new { message = "Current password is required" });
+ }
+
+    if (string.IsNullOrEmpty(request.NewPassword))
+     {
+    return BadRequest(new { message = "New password is required" });
       }
 
-      if (string.IsNullOrEmpty(request.NewPassword))
-   {
-  return BadRequest(new { message = "New password is required" });
-    }
-
-  if (request.NewPassword.Length < 8)
-       {
-  return BadRequest(new { message = "New password must be at least 8 characters" });
-}
+         if (request.NewPassword.Length < 8)
+          {
+         return BadRequest(new { message = "New password must be at least 8 characters" });
+        }
 
    // Verify current password
-      if (string.IsNullOrEmpty(subuser.subuser_password))
-     {
-          return BadRequest(new { message = "Subuser password not set. Cannot verify current password." });
+         if (string.IsNullOrEmpty(subuser.subuser_password))
+      {
+     return BadRequest(new { message = "Subuser password not set. Cannot verify current password." });
       }
 
-       bool isCurrentPasswordValid = BCrypt.Net.BCrypt.Verify(request.CurrentPassword, subuser.subuser_password);
-  if (!isCurrentPasswordValid)
-{
-  _logger.LogWarning("Failed password change attempt for subuser {Email} - incorrect current password", email);
-       return BadRequest(new { message = "Current password is incorrect" });
- }
+      bool isCurrentPasswordValid = BCrypt.Net.BCrypt.Verify(request.CurrentPassword, subuser.subuser_password);
+      if (!isCurrentPasswordValid)
+        {
+     _logger.LogWarning("Failed password change attempt for subuser {Email} - incorrect current password", email);
+          return BadRequest(new { message = "Current password is incorrect" });
+                }
 
-  // Check if new password is same as current password
+     // Check if new password is same as current password
     bool isSamePassword = BCrypt.Net.BCrypt.Verify(request.NewPassword, subuser.subuser_password);
-  if (isSamePassword)
-   {
-  return BadRequest(new { message = "New password must be different from current password" });
-   }
+     if (isSamePassword)
+      {
+   return BadRequest(new { message = "New password must be different from current password" });
+       }
 
-       // Update password - CRITICAL FIX: Explicitly mark entity as modified
-  string newHashedPassword = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
-   subuser.subuser_password = newHashedPassword;
-        subuser.UpdatedAt = DateTime.UtcNow;
-      subuser.UpdatedBy = (await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail))?.user_id;
+         // Update password
+        string newHashedPassword = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+    subuser.subuser_password = newHashedPassword;
+ subuser.UpdatedAt = DateTime.UtcNow;
+   // ✅ FIX: Get updater ID from subuser table
+ var updaterSubuser = await context.subuser
+        .Where(s => s.subuser_email == currentUserEmail)
+ .Select(s => new { s.superuser_id })
+  .FirstOrDefaultAsync();
+    subuser.UpdatedBy = updaterSubuser?.superuser_id ?? null;
 
- // CRITICAL FIX: Explicitly tell EF Core to track this entity as modified
-    _context.Entry(subuser).State = EntityState.Modified;
-          
-   // CRITICAL FIX: Explicitly mark the password field as modified
-      _context.Entry(subuser).Property(s => s.subuser_password).IsModified = true;
+  context.Entry(subuser).State = EntityState.Modified;
+   context.Entry(subuser).Property(s => s.subuser_password).IsModified = true;
 
-try
- {
- int rowsAffected = await _context.SaveChangesAsync();
-    
-// Verify that changes were actually saved
-   if (rowsAffected == 0)
-         {
-    _logger.LogError("SaveChanges returned 0 rows affected for subuser {Email}", email);
-return StatusCode(500, new { 
- message = "Failed to save password changes to database",
-    error = "No rows were modified"
-         });
- }
-
-      _logger.LogInformation("Password changed successfully for subuser {Email} by {ChangedBy}. Rows affected: {RowsAffected}", 
-    email, currentUserEmail, rowsAffected);
-
-        return Ok(new { 
-message = "Subuser password changed successfully", 
- subuserEmail = email,
-    changedBy = currentUserEmail,
-    changedAt = DateTime.UtcNow,
- rowsAffected = rowsAffected
+    int rowsAffected = await context.SaveChangesAsync();
+     
+             if (rowsAffected == 0)
+      {
+      _logger.LogError("SaveChanges returned 0 rows affected for subuser {Email}", email);
+       return StatusCode(500, new { 
+              message = "Failed to save password changes to database",
+            error = "No rows were modified"
    });
-  }
- catch (DbUpdateConcurrencyException ex)
-      {
-   _logger.LogError(ex, "Concurrency error changing password for subuser {Email}", email);
-  return StatusCode(409, new { 
-        message = "Password change failed due to concurrency conflict",
-       error = ex.Message
-    });
-      }
- catch (Exception ex)
-      {
- _logger.LogError(ex, "Error changing password for subuser {Email}", email);
-return StatusCode(500, new { 
-          message = "Error changing password",
-error = ex.Message,
-  stackTrace = ex.StackTrace
-  });
-     }
-      } // ✅ Missing closing brace for ChangeSubuserPassword method
+    }
+
+    _logger.LogInformation("✅ Password changed successfully for subuser {Email}", email);
+             return Ok(new { 
+   success = true,
+   message = "Password changed successfully", 
+      subuserEmail = email,
+       changedAt = DateTime.UtcNow,
+  rowsAffected = rowsAffected
+          });
+    }
+    catch (DbUpdateConcurrencyException ex)
+     {
+ _logger.LogError(ex, "Concurrency error changing password for subuser {Email}", email);
+return StatusCode(409, new { 
+   success = false,
+   message = "Password change failed due to concurrency conflict",
+        error = ex.Message
+     });
+    }
+        catch (Exception ex)
+    {
+   _logger.LogError(ex, "Error changing password for subuser {Email}", email);
+    return StatusCode(500, new { 
+     success = false,
+        message = "Error changing password",
+        error = ex.Message
+      });
+       }
+    }
 
         /// <summary>
         /// Simple password change - Only requires subuser email
- /// Subuser can change their own password without needing parent user email
+        /// Subuser can change their own password without needing parent user email
         /// Route: PATCH /api/EnhancedSubuser/simple-change-password
+        /// ✅ ROUTES TO PRIVATE CLOUD IF ENABLED
         /// </summary>
-        [HttpPatch("simple-change-password")]
+[HttpPatch("simple-change-password")]
    public async Task<IActionResult> SimpleChangePassword([FromBody] SimplePasswordChangeRequest request)
-        {
-            try
-          {
+  {
+     try
+  {
+    // ✅ Create context - routes to private cloud if enabled
+     using var context = await _contextFactory.CreateDbContextAsync();
+    
      // Validate request
-          if (string.IsNullOrEmpty(request.SubuserEmail))
-     {
-      return BadRequest(new { message = "Subuser email is required" });
-    }
-
-                if (string.IsNullOrEmpty(request.CurrentPassword))
-         {
-    return BadRequest(new { message = "Current password is required" });
- }
-
-          if (string.IsNullOrEmpty(request.NewPassword))
+ if (string.IsNullOrEmpty(request.SubuserEmail))
     {
-         return BadRequest(new { message = "New password is required" });
+   return BadRequest(new { message = "Subuser email is required" });
   }
 
-          if (request.NewPassword.Length < 8)
-                {
-    return BadRequest(new { message = "New password must be at least 8 characters" });
-     }
+   if (string.IsNullOrEmpty(request.CurrentPassword))
+   {
+     return BadRequest(new { message = "Current password is required" });
+    }
 
-      // Find subuser - NO NEED for parent user email
-             var subuser = await _context.subuser
-         .FirstOrDefaultAsync(s => s.subuser_email == request.SubuserEmail);
+        if (string.IsNullOrEmpty(request.NewPassword))
+  {
+     return BadRequest(new { message = "New password is required" });
+  }
 
-         if (subuser == null)
-        {
-             return NotFound(new { 
-         message = $"Subuser with email {request.SubuserEmail} not found" 
-         });
-         }
+    if (request.NewPassword.Length < 8)
+  {
+   return BadRequest(new { message = "New password must be at least 8 characters" });
+   }
+
+   // Find subuser - NO NEED for parent user email
+  var subuser = await context.subuser
+        .FirstOrDefaultAsync(s => s.subuser_email == request.SubuserEmail);
+
+    if (subuser == null)
+     {
+   return NotFound(new { 
+     message = $"Subuser with email {request.SubuserEmail} not found" 
+  });
+      }
 
    // Verify current password
     if (string.IsNullOrEmpty(subuser.subuser_password))
+  {
+     return BadRequest(new { 
+     message = "Subuser password not set. Cannot verify current password." 
+  });
+   }
+
+   bool isCurrentPasswordValid = BCrypt.Net.BCrypt.Verify(
+      request.CurrentPassword, 
+ subuser.subuser_password
+    );
+
+    if (!isCurrentPasswordValid)
          {
-  return BadRequest(new { 
-        message = "Subuser password not set. Cannot verify current password." 
-          });
-                }
+  _logger.LogWarning(
+             "Failed password change attempt for subuser {Email} - incorrect current password", 
+    request.SubuserEmail
+       );
+ return BadRequest(new { message = "Current password is incorrect" });
+ }
 
-              bool isCurrentPasswordValid = BCrypt.Net.BCrypt.Verify(
-    request.CurrentPassword, 
-      subuser.subuser_password
-              );
+    // Check if new password is same as current password
+     bool isSamePassword = BCrypt.Net.BCrypt.Verify(
+         request.NewPassword, 
+   subuser.subuser_password
+  );
 
-             if (!isCurrentPasswordValid)
-             {
-      _logger.LogWarning(
-    "Failed password change attempt for subuser {Email} - incorrect current password", 
-     request.SubuserEmail
-            );
-        return BadRequest(new { message = "Current password is incorrect" });
-         }
-
-            // Check if new password is same as current password
-           bool isSamePassword = BCrypt.Net.BCrypt.Verify(
-               request.NewPassword, 
-             subuser.subuser_password
-            );
-
-            if (isSamePassword)
-    {
-          return BadRequest(new { 
-          message = "New password must be different from current password" 
-  });
-       }
-
-      // Update password
-       string newHashedPassword = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
-                subuser.subuser_password = newHashedPassword;
-             subuser.UpdatedAt = DateTime.UtcNow;
-
-         // Mark entity as modified
-       _context.Entry(subuser).State = EntityState.Modified;
-   _context.Entry(subuser).Property(s => s.subuser_password).IsModified = true;
-
-    // Save changes
-    int rowsAffected = await _context.SaveChangesAsync();
-
-       if (rowsAffected == 0)
- {
-    _logger.LogError(
-                 "SaveChanges returned 0 rows affected for subuser {Email}", 
- request.SubuserEmail
-        );
-     return StatusCode(500, new { 
-         message = "Failed to save password changes to database",
-            error = "No rows were modified"
-    });
-          }
-
-           _logger.LogInformation(
-            "Password changed successfully for subuser {Email}. Rows affected: {RowsAffected}", 
-        request.SubuserEmail, 
-         rowsAffected
-   );
-
-         return Ok(new { 
-   success = true,
-       message = "Password changed successfully", 
-          subuserEmail = request.SubuserEmail,
-  changedAt = DateTime.UtcNow,
-    rowsAffected = rowsAffected
-  });
-  }
-     catch (DbUpdateConcurrencyException ex)
-            {
-_logger.LogError(ex, "Concurrency error changing password for subuser {Email}", request.SubuserEmail);
-       return StatusCode(409, new { 
-            success = false,
-              message = "Password change failed due to concurrency conflict",
-        error = ex.Message
+          if (isSamePassword)
+     {
+ return BadRequest(new { 
+         message = "New password must be different from current password" 
    });
    }
-  catch (Exception ex)
-       {
-       _logger.LogError(ex, "Error changing password for subuser {Email}", request.SubuserEmail);
-                return StatusCode(500, new { 
-         success = false,
- message = "Error changing password",
-             error = ex.Message
+
+     // Update password
+   string newHashedPassword = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
+     subuser.subuser_password = newHashedPassword;
+     subuser.UpdatedAt = DateTime.UtcNow;
+
+      // Mark entity as modified
+          context.Entry(subuser).State = EntityState.Modified;
+  context.Entry(subuser).Property(s => s.subuser_password).IsModified = true;
+
+      // Save changes
+    int rowsAffected = await context.SaveChangesAsync();
+
+  if (rowsAffected == 0)
+ {
+   _logger.LogError(
+    "SaveChanges returned 0 rows affected for subuser {Email}", 
+ request.SubuserEmail
+      );
+   return StatusCode(500, new { 
+   message = "Failed to save password changes to database",
+    error = "No rows were modified"
+           });
+   }
+
+  _logger.LogInformation(
+       "✅ Password changed successfully for subuser {Email}. Rows affected: {RowsAffected}", 
+             request.SubuserEmail, 
+  rowsAffected
+      );
+
+     return Ok(new { 
+   success = true,
+   message = "Password changed successfully", 
+      subuserEmail = request.SubuserEmail,
+       changedAt = DateTime.UtcNow,
+  rowsAffected = rowsAffected
+          });
+    }
+    catch (DbUpdateConcurrencyException ex)
+     {
+ _logger.LogError(ex, "Concurrency error changing password for subuser {Email}", request.SubuserEmail);
+return StatusCode(409, new { 
+   success = false,
+   message = "Password change failed due to concurrency conflict",
+        error = ex.Message
      });
-  }
-        }
+    }
+        catch (Exception ex)
+    {
+   _logger.LogError(ex, "Error changing password for subuser {Email}", request.SubuserEmail);
+    return StatusCode(500, new { 
+     success = false,
+        message = "Error changing password",
+        error = ex.Message
+      });
+       }
+    }
 
         /// <summary>
         /// Assign role to subuser by email - Users can assign roles to their subusers
-        /// </summary>
+        /// ✅ ROUTES TO PRIVATE CLOUD IF ENABLED
+  /// </summary>
         [HttpPost("{email}/assign-role")]
         public async Task<IActionResult> AssignRoleToSubuser(string email, [FromBody] AssignRoleRequest request)
         {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
-            var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
-            if (subuser == null) return NotFound($"Subuser with email {email} not found");
+   try
+    {
+        // ✅ Create context - routes to private cloud if enabled
+         using var context = await _contextFactory.CreateDbContextAsync();
+         
+   var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+     var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+      
+      var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+   if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
-            // Check if user can assign roles to this subuser
-            bool canAssign = subuser.user_email == currentUserEmail ||
-                           await _authService.HasPermissionAsync(currentUserEmail!, "ASSIGN_ALL_SUBUSER_ROLES", isCurrentUserSubuser);
+      // Check if user can assign roles to this subuser
+     bool canAssign = subuser.user_email == currentUserEmail ||
+ await _authService.HasPermissionAsync(currentUserEmail!, "ASSIGN_ALL_SUBUSER_ROLES", isCurrentUserSubuser);
 
-            if (!canAssign)
-            {
-                return StatusCode(403, new { error = "You can only assign roles to your own subusers" });
-            }
+  if (!canAssign)
+        {
+  return StatusCode(403, new { error = "You can only assign roles to your own subusers" });
+  }
 
-            await AssignRoleToSubuserAsync(email, request.RoleName, currentUserEmail!);
+          await AssignRoleToSubuserAsync(email, request.RoleName, currentUserEmail!, context);
 
-            return Ok(new { 
-                message = $"Role {request.RoleName} assigned to subuser {email}", 
-                subuserEmail = email,
-                roleName = request.RoleName,
-                assignedBy = currentUserEmail,
-                assignedAt = DateTime.UtcNow
+   _logger.LogInformation("✅ Role {RoleName} assigned to subuser {Email}", request.RoleName, email);
+  
+       return Ok(new { 
+          message = $"Role {request.RoleName} assigned to subuser {email}", 
+   subuserEmail = email,
+   roleName = request.RoleName,
+       assignedBy = currentUserEmail,
+        assignedAt = DateTime.UtcNow
             });
+    }
+     catch (Exception ex)
+       {
+     _logger.LogError(ex, "Error assigning role to subuser {Email}", email);
+           return StatusCode(500, new { message = "Error assigning role", error = ex.Message });
+    }
         }
 
         /// <summary>
-        /// Remove role from subuser by email
+     /// Remove role from subuser by email
+        /// ✅ ROUTES TO PRIVATE CLOUD IF ENABLED
         /// </summary>
         [HttpDelete("{email}/remove-role/{roleName}")]
-        public async Task<IActionResult> RemoveRoleFromSubuser(string email, string roleName)
+  public async Task<IActionResult> RemoveRoleFromSubuser(string email, string roleName)
         {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
-            var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
-            if (subuser == null) return NotFound($"Subuser with email {email} not found");
+   try
+   {
+    // ✅ Create context - routes to private cloud if enabled
+    using var context = await _contextFactory.CreateDbContextAsync();
+ 
+var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+     var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+      
+        var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+    if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
-            // Check permissions
-            bool canRemove = subuser.user_email == currentUserEmail ||
-                           await _authService.HasPermissionAsync(currentUserEmail!, "REMOVE_ALL_SUBUSER_ROLES", isCurrentUserSubuser);
+     // Check permissions
+   bool canRemove = subuser.user_email == currentUserEmail ||
+          await _authService.HasPermissionAsync(currentUserEmail!, "REMOVE_ALL_SUBUSER_ROLES", isCurrentUserSubuser);
 
-            if (!canRemove)
-            {
-                return StatusCode(403, new { error = "You can only remove roles from your own subusers" });
+   if (!canRemove)
+   {
+ return StatusCode(403, new { error = "You can only remove roles from your own subusers" });
             }
 
-            var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
-            if (role == null) return NotFound($"Role {roleName} not found");
+  var role = await context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
+  if (role == null) return NotFound($"Role {roleName} not found");
 
-            var subuserRole = await _context.SubuserRoles
-                .FirstOrDefaultAsync(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == role.RoleId);
+     var subuserRole = await context.SubuserRoles
+   .FirstOrDefaultAsync(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == role.RoleId);
 
-            if (subuserRole == null)
-                return NotFound($"Role {roleName} not assigned to subuser {email}");
+   if (subuserRole == null)
+   return NotFound($"Role {roleName} not assigned to subuser {email}");
 
-            _context.SubuserRoles.Remove(subuserRole);
-            await _context.SaveChangesAsync();
+            context.SubuserRoles.Remove(subuserRole);
+         await context.SaveChangesAsync();
 
-            return Ok(new { 
-                message = $"Role {roleName} removed from subuser {email}",
-                subuserEmail = email,
-                roleName = roleName,
-                removedBy = currentUserEmail,
-                removedAt = DateTime.UtcNow
-            });
-        }
+  _logger.LogInformation("✅ Role {RoleName} removed from subuser {Email}", roleName, email);
 
-        /// <summary>
-        /// Delete subuser by email
+     return Ok(new { 
+       message = $"Role {roleName} removed from subuser {email}",
+ subuserEmail = email,
+     roleName = roleName,
+    removedBy = currentUserEmail,
+      removedAt = DateTime.UtcNow
+ });
+   }
+      catch (Exception ex)
+            {
+        _logger.LogError(ex, "Error removing role from subuser {Email}", email);
+return StatusCode(500, new { message = "Error removing role", error = ex.Message });
+    }
+  }
+/// <summary>
+   /// Delete subuser by email
+        /// ✅ ROUTES TO PRIVATE CLOUD IF ENABLED
         /// </summary>
-        [HttpDelete("{email}")]
+  [HttpDelete("{email}")]
         public async Task<IActionResult> DeleteSubuser(string email)
-        {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
-            
-            if (subuser == null) return NotFound($"Subuser with email {email} not found");
+   {
+   try
+   {
+    // ✅ Create context - routes to private cloud if enabled
+      using var context = await _contextFactory.CreateDbContextAsync();
+      
+       var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+        var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+      
+     if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
-            // Check if user can delete this subuser
-            bool canDelete = subuser.user_email == currentUserEmail ||
-                           await _authService.HasPermissionAsync(currentUserEmail!, "DELETE_ALL_SUBUSERS", isCurrentUserSubuser);
+   // Check if user can delete this subuser
+   bool canDelete = subuser.user_email == currentUserEmail ||
+       await _authService.HasPermissionAsync(currentUserEmail!, "DELETE_ALL_SUBUSERS", isCurrentUserSubuser);
 
-            if (!canDelete)
-            {
-                return StatusCode(403, new { error = "You can only delete your own subusers" });
-            }
+  if (!canDelete)
+     {
+  return StatusCode(403, new { error = "You can only delete your own subusers" });
+   }
 
-            _context.subuser.Remove(subuser);
-            await _context.SaveChangesAsync();
+      context.subuser.Remove(subuser);
+   await context.SaveChangesAsync();
 
-            return Ok(new { 
-                message = "Subuser deleted successfully", 
-                subuserEmail = email,
-                deletedAt = DateTime.UtcNow
-            });
+    _logger.LogInformation("✅ Subuser deleted: {Email}", email);
+
+    return Ok(new { 
+       message = "Subuser deleted successfully", 
+  subuserEmail = email,
+ deletedAt = DateTime.UtcNow
+  });
         }
+     catch (Exception ex)
+      {
+      _logger.LogError(ex, "Error deleting subuser {Email}", email);
+       return StatusCode(500, new { message = "Error deleting subuser", error = ex.Message });
+ }
+ }
 
         /// <summary>
-        /// Get subuser statistics by parent user email
+ /// Get subuser statistics by parent user email
+        /// ✅ ROUTES TO PRIVATE CLOUD IF ENABLED
         /// </summary>
         [HttpGet("statistics/{parentEmail}")]
-        public async Task<ActionResult<object>> GetSubuserStatistics(string parentEmail)
+   public async Task<ActionResult<object>> GetSubuserStatistics(string parentEmail)
         {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
-            // Check if user can view statistics for this parent email
-            bool canView = parentEmail == currentUserEmail ||
-                          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSER_STATISTICS", isCurrentUserSubuser);
+    try
+   {
+   // ✅ Create context - routes to private cloud if enabled
+     using var context = await _contextFactory.CreateDbContextAsync();
+   
+   var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+       var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+   
+  // Check if user can view statistics for this parent email
+       bool canView = parentEmail == currentUserEmail ||
+ await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSER_STATISTICS", isCurrentUserSubuser);
 
-            if (!canView)
-            {
-                return StatusCode(403, new { error = "You can only view statistics for your own subusers" });
-            }
+       if (!canView)
+       {
+ return StatusCode(403, new { error = "You can only view statistics for your own subusers" });
+    }
 
-            var stats = new {
-                ParentUserEmail = parentEmail,
-                TotalSubusers = await _context.subuser.CountAsync(s => s.user_email == parentEmail),
-                SubusersWithRoles = await _context.subuser
-                    .Where(s => s.user_email == parentEmail)
-                    .CountAsync(s => s.SubuserRoles.Any()),
-                SubusersWithoutRoles = await _context.subuser
-                    .Where(s => s.user_email == parentEmail)
-                    .CountAsync(s => !s.SubuserRoles.Any()),
-                RoleDistribution = await _context.SubuserRoles
-                    .Join(_context.subuser, sr => sr.SubuserId, s => s.subuser_id, (sr, s) => new { sr, s })
-                    .Where(joined => joined.s.user_email == parentEmail)
-                    .Join(_context.Roles, joined => joined.sr.RoleId, r => r.RoleId, (joined, r) => r.RoleName)
-                    .GroupBy(roleName => roleName)
-                    .Select(g => new { RoleName = g.Key, Count = g.Count() })
-                    .ToListAsync()
-            };
+   var stats = new {
+      ParentUserEmail = parentEmail,
+   TotalSubusers = await context.subuser.CountAsync(s => s.user_email == parentEmail),
+    SubusersWithRoles = await context.subuser
+        .Where(s => s.user_email == parentEmail)
+     .CountAsync(s => s.SubuserRoles.Any()),
+SubusersWithoutRoles = await context.subuser
+      .Where(s => s.user_email == parentEmail)
+     .CountAsync(s => !s.SubuserRoles.Any()),
+  RoleDistribution = await context.SubuserRoles
+      .Join(context.subuser, sr => sr.SubuserId, s => s.subuser_id, (sr, s) => new { sr, s })
+     .Where(joined => joined.s.user_email == parentEmail)
+      .Join(context.Roles, joined => joined.sr.RoleId, r => r.RoleId, (joined, r) => r.RoleName)
+    .GroupBy(roleName => roleName)
+      .Select(g => new { RoleName = g.Key, Count = g.Count() })
+     .ToListAsync()
+ };
 
-            return Ok(stats);
-        }
+         _logger.LogInformation("✅ Retrieved statistics for parent {ParentEmail}", parentEmail);
+     return Ok(stats);
+   }
+  catch (Exception ex)
+    {
+     _logger.LogError(ex, "Error retrieving statistics for {ParentEmail}", parentEmail);
+    return StatusCode(500, new { message = "Error retrieving statistics", error = ex.Message });
+ }
+   }
 
-        #region Private Helper Methods
+   #region Private Helper Methods
 
-        private async Task<bool> AssignRoleToSubuserAsync(string subuserEmail, string roleName, string assignedByEmail)
+        private async Task<bool> AssignRoleToSubuserAsync(string subuserEmail, string roleName, string assignedByEmail, ApplicationDbContext context)
         {
-            try
-            {
-                var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == subuserEmail);
-                if (subuser == null)
-                {
-                    _logger.LogWarning("Subuser {Email} not found for role assignment", subuserEmail);
-                    return false;
-                }
+try
+   {
+   var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == subuserEmail);
+     if (subuser == null)
+      {
+     _logger.LogWarning("Subuser {Email} not found for role assignment", subuserEmail);
+ return false;
+         }
 
-                var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
-                if (role == null)
-                {
-                    _logger.LogWarning("Role {RoleName} not found, creating default User role instead", roleName);
-                    
-                    // Fallback to default role if specified role doesn't exist
-                    role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == "User");
-                    if (role == null)
-                    {
-                        _logger.LogError("No default role found in system");
-                        return false;
-                    }
-                }
+    var role = await context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
+if (role == null)
+         {
+      _logger.LogWarning("Role {RoleName} not found, creating default User role instead", roleName);
+  
+  // Fallback to default role if specified role doesn't exist
+        role = await context.Roles.FirstOrDefaultAsync(r => r.RoleName == "User");
+      if (role == null)
+    {
+   _logger.LogError("No default role found in system");
+   return false;
+         }
+ }
 
-                // Check if role already assigned
-                var existingRole = await _context.SubuserRoles
-                    .FirstOrDefaultAsync(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == role.RoleId);
+        // Check if role already assigned
+     var existingRole = await context.SubuserRoles
+    .FirstOrDefaultAsync(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == role.RoleId);
 
-                if (existingRole == null)
-                {
-                    var subuserRole = new SubuserRole
-                    {
-                        SubuserId = subuser.subuser_id,
-                        RoleId = role.RoleId,
-                        AssignedAt = DateTime.UtcNow,
-                        AssignedByEmail = assignedByEmail
-                    };
+  if (existingRole == null)
+  {
+   var subuserRole = new SubuserRole
+      {
+   SubuserId = subuser.subuser_id,
+  RoleId = role.RoleId,
+    AssignedAt = DateTime.UtcNow,
+         AssignedByEmail = assignedByEmail
+     };
 
-                    _context.SubuserRoles.Add(subuserRole);
-                    await _context.SaveChangesAsync();
-                    
-                    _logger.LogInformation("Role {RoleName} assigned to subuser {Email}", role.RoleName, subuserEmail);
-                    return true;
-                }
+   context.SubuserRoles.Add(subuserRole);
+   await context.SaveChangesAsync();
+   
+    _logger.LogInformation("Role {RoleName} assigned to subuser {Email}", role.RoleName, subuserEmail);
+      return true;
+  }
 
-                return true; // Already assigned
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error assigning role {RoleName} to subuser {Email}", roleName, subuserEmail);
-                return false;
-            }
+    return true; // Already assigned
         }
+       catch (Exception ex)
+     {
+   _logger.LogError(ex, "Error assigning role {RoleName} to subuser {Email}", roleName, subuserEmail);
+   return false;
+     }
+   }
 
-        #endregion
+#endregion
     }
 
     #region Request Models
 
-    /// <summary>
+ /// <summary>
     /// Subuser filter request model
     /// </summary>
   public class SubuserFilterRequest
@@ -1164,7 +1313,7 @@ _logger.LogError(ex, "Concurrency error changing password for subuser {Email}", 
   public string? SubuserEmail { get; set; }
     public DateTime? CreatedFrom { get; set; }
    public DateTime? CreatedTo { get; set; }
-        public int Page { get; set; } = 0;
+      public int Page { get; set; } = 0;
    public int PageSize { get; set; } = 100;
     }
 
@@ -1175,14 +1324,14 @@ _logger.LogError(ex, "Concurrency error changing password for subuser {Email}", 
     {
   [Required(ErrorMessage = "Subuser email is required")]
     [EmailAddress(ErrorMessage = "Invalid email format")]
-        [MaxLength(255)]
+ [MaxLength(255)]
    public string subuser_email { get; set; } = string.Empty;
    
         [Required(ErrorMessage = "Password is required")]
   [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
         public string subuser_password { get; set; } = string.Empty;
         
-     [MaxLength(100)]
+   [MaxLength(100)]
  public string? subuser_name { get; set; }
 
         [MaxLength(100)]
@@ -1195,26 +1344,22 @@ _logger.LogError(ex, "Concurrency error changing password for subuser {Email}", 
    public string? phone { get; set; }
      
       [MaxLength(100)]
- public string? subuser_group { get; set; }  // Changed from int? to string?
+ public string? subuser_group { get; set; }
         
-     /// <summary>
-        /// License allocation for this subuser
-        /// </summary>
-        public int? license_allocation { get; set; } = 0;
-        
+     public int? license_allocation { get; set; } = 0;
+    
         [EmailAddress(ErrorMessage = "Invalid parent email format")]
-   public string? parentUserEmail { get; set; } // Optional - If null, uses current user
+   public string? parentUserEmail { get; set; }
     }
 
     /// <summary>
     /// Subuser update request model
-    /// </summary>
+/// </summary>
     public class SubuserUpdateRequest
     {
       public string SubuserEmail { get; set; } = string.Empty;
 
-  // All optional fields that can be updated
-   [MaxLength(100)]
+  [MaxLength(100)]
       public string? SubuserName { get; set; }
   
    [MaxLength(100)]
@@ -1223,7 +1368,7 @@ _logger.LogError(ex, "Concurrency error changing password for subuser {Email}", 
         [MaxLength(50)]
  public string? Role { get; set; }
      
-        [MaxLength(20)]
+     [MaxLength(20)]
   public string? Phone { get; set; }
         
     [MaxLength(100)]
@@ -1240,69 +1385,36 @@ _logger.LogError(ex, "Concurrency error changing password for subuser {Email}", 
 
     /// <summary>
     /// Flexible PATCH request model for partial subuser updates
-    /// All fields are optional - only provided fields will be updated
     /// </summary>
     public class SubuserPatchRequest
     {
-   /// <summary>
-        /// Current subuser email - Required to identify which subuser to update
-    /// </summary>
-        [EmailAddress(ErrorMessage = "Invalid email format")]
+   [EmailAddress(ErrorMessage = "Invalid email format")]
         public string? subuser_email { get; set; }
 
-        /// <summary>
-      /// Parent user email - Optional, used for additional validation
-        /// If provided, will verify subuser belongs to this parent
-        /// </summary>
         [EmailAddress(ErrorMessage = "Invalid parent email format")]
    public string? parentUserEmail { get; set; }
 
-        /// <summary>
-        /// New subuser email - Optional, use to change subuser's email address
-        /// </summary>
         [EmailAddress(ErrorMessage = "Invalid new email format")]
         public string? new_subuser_email { get; set; }
 
-  /// <summary>
-        /// New password - Optional, provide to change password
-        /// </summary>
-        [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
+  [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
         public string? subuser_password { get; set; }
 
-      /// <summary>
-        /// Subuser name - Optional
-        /// </summary>
       [MaxLength(100)]
-        public string? subuser_name { get; set; }
+   public string? subuser_name { get; set; }
 
-    /// <summary>
-        /// Department - Optional
-   /// </summary>
-        [MaxLength(100)]
-        public string? department { get; set; }
+    [MaxLength(100)]
+   public string? department { get; set; }
 
- /// <summary>
-        /// Role - Optional
-        /// </summary>
-   [MaxLength(50)]
+ [MaxLength(50)]
      public string? role { get; set; }
 
-        /// <summary>
-        /// Phone number - Optional
-        /// </summary>
-    [MaxLength(20)]
+        [MaxLength(20)]
   public string? phone { get; set; }
 
-        /// <summary>
-    /// Subuser group (as string, will be converted to int internally) - Optional
-        /// </summary>
         [MaxLength(100)]
         public string? subuser_group { get; set; }
 
-        /// <summary>
-        /// New parent user email - Optional, use to reassign subuser to different parent
-        /// Requires REASSIGN_SUBUSERS permission
-      /// </summary>
         [EmailAddress(ErrorMessage = "Invalid new parent email format")]
         public string? new_parentUserEmail { get; set; }
     }
@@ -1312,30 +1424,29 @@ _logger.LogError(ex, "Concurrency error changing password for subuser {Email}", 
     /// </summary>
   public class ChangePasswordRequest
   {
-        [Required(ErrorMessage = "Current password is required")]
+   [Required(ErrorMessage = "Current password is required")]
         public string CurrentPassword { get; set; } = string.Empty;
-        
+    
         [Required(ErrorMessage = "New password is required")]
         [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
       public string NewPassword { get; set; } = string.Empty;
     }
 
     /// <summary>
-  /// Simple password change request - Only needs subuser email
-    /// No parent user email required
+  /// Simple password change request
   /// </summary>
     public class SimplePasswordChangeRequest
     {
     [Required(ErrorMessage = "Subuser email is required")]
         [EmailAddress(ErrorMessage = "Invalid email format")]
       [MaxLength(255)]
-        public string SubuserEmail { get; set; } = string.Empty;
+ public string SubuserEmail { get; set; } = string.Empty;
         
         [Required(ErrorMessage = "Current password is required")]
         public string CurrentPassword { get; set; } = string.Empty;
         
-        [Required(ErrorMessage = "New password is required")]
-        [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
+    [Required(ErrorMessage = "New password is required")]
+  [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
      public string NewPassword { get; set; } = string.Empty;
     }
 

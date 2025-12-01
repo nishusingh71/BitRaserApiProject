@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using BCrypt.Net;
 using BitRaserApiProject.Services;
+using BitRaserApiProject.Factories;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -668,20 +669,48 @@ namespace BitRaserApiProject.Controllers
     [ApiController]
     public class AuditReportsController : ControllerBase
     {
-        private readonly ApplicationDbContext _context;
+        private readonly DynamicDbContextFactory _contextFactory;
+        private readonly ILogger<AuditReportsController> _logger;
 
-        public AuditReportsController(ApplicationDbContext context)
+        public AuditReportsController(
+            DynamicDbContextFactory contextFactory,
+            ILogger<AuditReportsController> logger)
         {
-            _context = context;
+            _contextFactory = contextFactory;
+            _logger = logger;
         }
 
         /// <summary>
-        /// Get all audit reports
+        /// Get all audit reports for current user (from their database)
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<audit_reports>>> GetAuditReports()
         {
-            return await _context.AuditReports.ToListAsync();
+            try
+            {
+                // ✅ Use dynamic context - routes to private cloud if enabled
+                using var context = await _contextFactory.CreateDbContextAsync();
+
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    return Unauthorized();
+                }
+
+                var reports = await context.AuditReports
+                    .Where(r => r.client_email == userEmail)
+                    .ToListAsync();
+
+                _logger.LogInformation("Retrieved {Count} audit reports for {Email}", 
+                    reports.Count, userEmail);
+
+                return Ok(reports);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving audit reports");
+                return StatusCode(500, new { message = "Error retrieving reports", error = ex.Message });
+            }
         }
 
         /// <summary>
@@ -690,8 +719,31 @@ namespace BitRaserApiProject.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<audit_reports>> GetAuditReport(int id)
         {
-            var report = await _context.AuditReports.FindAsync(id);
-            return report == null ? NotFound() : Ok(report);
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
+
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    return Unauthorized();
+                }
+
+                var report = await context.AuditReports
+                    .FirstOrDefaultAsync(r => r.report_id == id && r.client_email == userEmail);
+
+                if (report == null)
+                {
+                    return NotFound(new { message = "Report not found" });
+                }
+
+                return Ok(report);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving audit report {ReportId}", id);
+                return StatusCode(500, new { message = "Error retrieving report", error = ex.Message });
+            }
         }
 
         /// <summary>
@@ -700,20 +752,60 @@ namespace BitRaserApiProject.Controllers
         [HttpGet("by-email/{email}")]
         public async Task<ActionResult<IEnumerable<audit_reports>>> GetAuditReportsByEmail(string email)
         {
-            var reports = await _context.AuditReports.Where(r => r.client_email == email).ToListAsync();
-            return reports.Any() ? Ok(reports) : NotFound();
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
+
+                var reports = await context.AuditReports
+                    .Where(r => r.client_email == email)
+                    .ToListAsync();
+
+                if (!reports.Any())
+                {
+                    return NotFound(new { message = "No reports found for this email" });
+                }
+
+                return Ok(reports);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error retrieving reports for email {Email}", email);
+                return StatusCode(500, new { message = "Error retrieving reports", error = ex.Message });
+            }
         }
 
         /// <summary>
-        /// Create a new audit report
+        /// ✅ Create new audit report - ROUTES TO PRIVATE CLOUD IF ENABLED
         /// </summary>
         [AllowAnonymous]
         [HttpPost]
         public async Task<ActionResult<audit_reports>> CreateAuditReport([FromBody] audit_reports report)
         {
-            _context.AuditReports.Add(report);
-            await _context.SaveChangesAsync();
-            return CreatedAtAction(nameof(GetAuditReport), new { id = report.report_id }, report);
+            try
+            {
+                // ✅ Use dynamic context - automatically routes to correct database
+                using var context = await _contextFactory.CreateDbContextAsync();
+
+                _logger.LogInformation("Creating new audit report for {Email}", report.client_email);
+
+                // Add report
+                context.AuditReports.Add(report);
+                await context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Audit report created successfully: ID={ReportId}, Email={Email}", 
+                    report.report_id, report.client_email);
+
+                return CreatedAtAction(nameof(GetAuditReport), 
+                    new { id = report.report_id }, report);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating audit report");
+                return StatusCode(500, new { 
+                    message = "Error creating report", 
+                    error = ex.Message 
+                });
+            }
         }
 
         /// <summary>
@@ -723,19 +815,38 @@ namespace BitRaserApiProject.Controllers
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateAuditReport(int id, [FromBody] audit_reports updatedReport)
         {
-            if (id != updatedReport.report_id)
-                return BadRequest(new { message = "Report ID mismatch" });
+            try
+            {
+                if (id != updatedReport.report_id)
+                {
+                    return BadRequest(new { message = "Report ID mismatch" });
+                }
 
-            var report = await _context.AuditReports.FindAsync(id);
-            if (report == null) return NotFound();
+                using var context = await _contextFactory.CreateDbContextAsync();
 
-            report.report_name = updatedReport.report_name;
-            report.erasure_method = updatedReport.erasure_method;
-            report.report_details_json = updatedReport.report_details_json;
+                var report = await context.AuditReports.FindAsync(id);
+                if (report == null)
+                {
+                    return NotFound(new { message = "Report not found" });
+                }
 
-            _context.Entry(report).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
-            return NoContent();
+                // Update properties
+                report.report_name = updatedReport.report_name;
+                report.erasure_method = updatedReport.erasure_method;
+                report.report_details_json = updatedReport.report_details_json;
+
+                context.Entry(report).State = EntityState.Modified;
+                await context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Audit report updated: ID={ReportId}", id);
+
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error updating audit report {ReportId}", id);
+                return StatusCode(500, new { message = "Error updating report", error = ex.Message });
+            }
         }
 
         /// <summary>
@@ -744,12 +855,28 @@ namespace BitRaserApiProject.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteAuditReport(int id)
         {
-            var report = await _context.AuditReports.FindAsync(id);
-            if (report == null) return NotFound();
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
 
-            _context.AuditReports.Remove(report);
-            await _context.SaveChangesAsync();
-            return NoContent();
+                var report = await context.AuditReports.FindAsync(id);
+                if (report == null)
+                {
+                    return NotFound(new { message = "Report not found" });
+                }
+
+                context.AuditReports.Remove(report);
+                await context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Audit report deleted: ID={ReportId}", id);
+
+                return NoContent();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting audit report {ReportId}", id);
+                return StatusCode(500, new { message = "Error deleting report", error = ex.Message });
+            }
         }
 
         /// <summary>
@@ -759,61 +886,32 @@ namespace BitRaserApiProject.Controllers
         [HttpPost("reserve-id")]
         public async Task<ActionResult<int>> ReserveReportId([FromBody] string clientEmail)
         {
-            var newReport = new audit_reports
+            try
             {
-                client_email = clientEmail,
-                synced = false,
-                report_details_json = "{}",
-                report_name = "Reserved",
-                erasure_method = "Reserved"
-            };
+                using var context = await _contextFactory.CreateDbContextAsync();
 
-            _context.AuditReports.Add(newReport);
-            await _context.SaveChangesAsync();
+                var newReport = new audit_reports
+                {
+                    client_email = clientEmail,
+                    synced = false,
+                    report_details_json = "{}",
+                    report_name = "Reserved",
+                    erasure_method = "Reserved"
+                };
 
-            return Ok(newReport.report_id);
-        }
+                context.AuditReports.Add(newReport);
+                await context.SaveChangesAsync();
 
-        /// <summary>
-        /// Upload full report data after reserving ID
-        /// </summary>
-        [AllowAnonymous]
-        [HttpPut("upload-report/{id}")]
-        public async Task<IActionResult> UploadReportData(int id, [FromBody] audit_reports updatedReport)
-        {
-            if (id != updatedReport.report_id)
-                return BadRequest(new { message = "Report ID mismatch" });
+                _logger.LogInformation("✅ Reserved report ID: {ReportId} for {Email}", 
+                    newReport.report_id, clientEmail);
 
-            var report = await _context.AuditReports.FindAsync(id);
-            if (report == null)
-                return NotFound();
-
-            report.report_name = updatedReport.report_name;
-            report.erasure_method = updatedReport.erasure_method;
-            report.report_details_json = updatedReport.report_details_json;
-
-            _context.Entry(report).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
-
-            return NoContent();
-        }
-
-        /// <summary>
-        /// Mark report as synced after full upload
-        /// </summary>
-        [AllowAnonymous]
-        [HttpPatch("mark-synced/{id}")]
-        public async Task<IActionResult> MarkReportSynced(int id)
-        {
-            var report = await _context.AuditReports.FindAsync(id);
-            if (report == null)
-                return NotFound();
-
-            report.synced = true;
-            _context.Entry(report).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
-
-            return NoContent();
+                return Ok(newReport.report_id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reserving report ID");
+                return StatusCode(500, new { message = "Error reserving ID", error = ex.Message });
+            }
         }
     }
 
@@ -1005,29 +1103,54 @@ await _context.SaveChangesAsync();
         }
 
         /// <summary>
+        /// Login response model
+        /// </summary>
+        public class LoginResponse
+        {
+            public string Token { get; set; } = string.Empty;
+            public string UserType { get; set; } = string.Empty; // "user" or "subuser"
+            public string Role { get; set; } = string.Empty;
+            public string Email { get; set; } = string.Empty;
+        }
+
+        /// <summary>
         /// User login endpoint
         /// </summary>
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest login)
         {
-            if (!await IsValidUserAsync(login.Email, login.Password))
-                return Unauthorized(new { message = "Invalid credentials" });
+            // First, check if it's a main user
+            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == login.Email);
+            if (user != null && BCrypt.Net.BCrypt.Verify(login.Password, user.hash_password))
+            {
+                var token = GenerateJwtToken(login.Email, user.user_role ?? "User", "user");
+                return Ok(new LoginResponse
+                {
+                    Token = token,
+                    UserType = "user",
+                    Role = user.user_role ?? "User",
+                    Email = login.Email
+                });
+            }
 
-            var token = GenerateJwtToken(login.Email);
-            return Ok(new { token });
+            // If not a main user, check if it's a subuser
+            var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == login.Email);
+            if (subuser != null && BCrypt.Net.BCrypt.Verify(login.Password, subuser.subuser_password))
+            {
+                var token = GenerateJwtToken(login.Email, subuser.Role ?? "Subuser", "subuser");
+                return Ok(new LoginResponse
+                {
+                    Token = token,
+                    UserType = "subuser",
+                    Role = subuser.Role ?? "Subuser",
+                    Email = login.Email
+                });
+            }
+
+            return Unauthorized(new { message = "Invalid credentials" });
         }
 
-        private async Task<bool> IsValidUserAsync(string email, string password)
-        {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
-            if (user == null)
-                return false;
-
-            // Verify hashed password using BCrypt
-            return BCrypt.Net.BCrypt.Verify(password, user.hash_password);
-        }
-
-        private string GenerateJwtToken(string username)
+        private string GenerateJwtToken(string email, string role, string userType)
         {
             var jwtSettings = _configuration.GetSection("Jwt");
             var secretKey = jwtSettings["Key"];
@@ -1042,15 +1165,18 @@ await _context.SaveChangesAsync();
 
             var claims = new[]
             {
-                new Claim(JwtRegisteredClaimNames.Sub, username),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+                new Claim(JwtRegisteredClaimNames.Sub, email),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new Claim(ClaimTypes.Role, role),
+                new Claim("user_type", userType),
+                new Claim(ClaimTypes.Email, email)
             };
 
             var token = new JwtSecurityToken(
                 issuer,
                 audience,
                 claims,
-                expires: DateTime.UtcNow.AddHours(1),
+                expires: DateTime.UtcNow.AddHours(1),       
                 signingCredentials: creds
             );
 
@@ -1372,6 +1498,358 @@ _logger.LogInformation("Successfully parsed JSON for report {ReportId}", reportI
         public byte[]? ValidatorSignature { get; set; }
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

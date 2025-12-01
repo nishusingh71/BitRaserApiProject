@@ -688,7 +688,7 @@ new RolePermission { RoleId = 4, PermissionId = 32 },
    .HasIndex(f => new { f.Email, f.ExpiresAt });
 
         modelBuilder.Entity<ForgotPasswordRequest>()
-            .HasIndex(f => new { f.UserId, f.UserType });
+          .HasIndex(f => new { f.UserId, f.UserType });
 
        modelBuilder.Entity<ForgotPasswordRequest>()
 .Property(f => f.IpAddress)
@@ -697,6 +697,63 @@ new RolePermission { RoleId = 4, PermissionId = 32 },
         modelBuilder.Entity<ForgotPasswordRequest>()
   .Property(f => f.UserAgent)
      .HasMaxLength(500);
+
+   // ✅ PrivateCloudDatabase table configuration
+            modelBuilder.Entity<PrivateCloudDatabase>()
+       .HasKey(p => p.ConfigId);
+
+            modelBuilder.Entity<PrivateCloudDatabase>()
+     .Property(p => p.UserEmail)
+       .HasMaxLength(255)
+    .IsRequired();
+
+     modelBuilder.Entity<PrivateCloudDatabase>()
+  .HasIndex(p => p.UserEmail)
+  .IsUnique();
+
+     modelBuilder.Entity<PrivateCloudDatabase>()
+       .Property(p => p.ConnectionString)
+       .IsRequired();
+
+    modelBuilder.Entity<PrivateCloudDatabase>()
+     .Property(p => p.DatabaseType)
+        .HasMaxLength(50)
+         .IsRequired();
+
+    modelBuilder.Entity<PrivateCloudDatabase>()
+         .Property(p => p.ServerHost)
+       .HasMaxLength(255);
+
+    modelBuilder.Entity<PrivateCloudDatabase>()
+   .Property(p => p.DatabaseName)
+  .HasMaxLength(255)
+    .IsRequired();
+
+     modelBuilder.Entity<PrivateCloudDatabase>()
+      .Property(p => p.DatabaseUsername)
+  .HasMaxLength(255)
+          .IsRequired();
+
+        // ✅ NEW: SelectedTables JSON field configuration
+          modelBuilder.Entity<PrivateCloudDatabase>()
+  .Property(p => p.SelectedTables)
+         .HasColumnName("selected_tables")
+ .HasColumnType("json");
+
+modelBuilder.Entity<PrivateCloudDatabase>()
+    .Property(p => p.TestStatus)
+       .HasMaxLength(50);
+
+            modelBuilder.Entity<PrivateCloudDatabase>()
+  .Property(p => p.CreatedBy)
+    .HasMaxLength(255);
+
+ // Foreign key to users table
+         modelBuilder.Entity<PrivateCloudDatabase>()
+  .HasOne(p => p.User)
+     .WithMany()
+                .HasForeignKey(p => p.UserId)
+        .OnDelete(DeleteBehavior.Cascade);
         }
     }
 

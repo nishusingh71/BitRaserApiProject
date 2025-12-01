@@ -8,6 +8,7 @@ using BitRaserApiProject.BackgroundServices;
 using BitRaserApiProject.Middleware;
 using BitRaserApiProject.Swagger;
 using BitRaserApiProject.Converters;  // ✅ ADD: Custom DateTime Converters
+using BitRaserApiProject.Factories;   // ✅ ADD: Factories for multi-tenant support
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -57,6 +58,22 @@ catch (Exception ex)
 var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__ApplicationDbContextConnection")
     ?? builder.Configuration.GetConnectionString("ApplicationDbContextConnection")
     ?? throw new InvalidOperationException("Database connection string is required");
+
+// ✅ OPTIONAL: CloudErase connection string (if needed for specific services)
+// This is NOT required for private cloud multi-tenant - just for reference/future use
+var cloudEraseConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__CloudEraseConnection")
+    ?? builder.Configuration.GetConnectionString("CloudEraseConnection");
+
+// Log if CloudEraseConnection is configured
+if (!string.IsNullOrEmpty(cloudEraseConnectionString))
+{
+    Console.WriteLine("✅ CloudEraseConnection configured (available but not used by multi-tenant system)");
+}
+
+// ✅ NOTE: Private cloud connection strings are NOT stored in config
+// They are dynamically fetched from private_cloud_databases table per user
+// This allows unlimited users to have their own private databases
+// CloudEraseConnection (if set) can be used for system-level operations
 
 var jwtKey = Environment.GetEnvironmentVariable("Jwt__Key")
     ?? builder.Configuration["Jwt:Key"]
@@ -314,6 +331,11 @@ builder.Services.AddScoped<IPrivateCloudService, PrivateCloudService>();
 
 // ✅ DATABASE CONTEXT FACTORY - Multi-tenant database routing
 builder.Services.AddScoped<IDatabaseContextFactory, DatabaseContextFactory>();
+
+// ✅ HYBRID MULTI-TENANT SUPPORT - Automatic tenant routing
+builder.Services.AddHttpContextAccessor();  // Required for reading JWT claims
+builder.Services.AddScoped<ITenantConnectionService, TenantConnectionService>();
+builder.Services.AddScoped<DynamicDbContextFactory>();
 
 // Add memory cache
 builder.Services.AddMemoryCache();

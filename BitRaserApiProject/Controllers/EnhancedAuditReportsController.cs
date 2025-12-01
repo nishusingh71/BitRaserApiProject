@@ -797,15 +797,15 @@ using var ms = new MemoryStream();
         /// <summary>
         /// Get user details for PDF generation from logged-in user
     /// Returns user name and department, handles both Users and Subusers
-        /// ✅ Never returns "N/A" - only returns actual values or null
+        /// ✅ FIXED: No Users table query for private cloud compatibility
    /// </summary>
    private async Task<UserDetailsForPDF> GetUserDetailsForPDF(string? userEmail)
         {
    var result = new UserDetailsForPDF
-            {
-   UserName = null, // Will only be set if actual value exists
-                Department = null // Will only be set if actual value exists
-          };
+        {
+   UserName = null,
+           Department = null
+      };
 
     if (string.IsNullOrEmpty(userEmail))
     return result;
@@ -818,8 +818,7 @@ using var ms = new MemoryStream();
 
        if (subuser != null)
   {
-   // ✅ Only set if not null/empty/whitespace
- if (!string.IsNullOrWhiteSpace(subuser.Name))
+   if (!string.IsNullOrWhiteSpace(subuser.Name))
          result.UserName = subuser.Name.Trim();
 
     if (!string.IsNullOrWhiteSpace(subuser.Department))
@@ -828,21 +827,13 @@ using var ms = new MemoryStream();
   return result;
    }
 
-   // ✅ Try to find as main user
-        var user = await _context.Users
-   .Where(u => u.user_email == userEmail)
-            .Select(u => new { u.user_name, u.department })
-          .FirstOrDefaultAsync();
-
-   if (user != null)
-       {
-      // ✅ Only set if not null/empty/whitespace
-  if (!string.IsNullOrWhiteSpace(user.user_name))
-        result.UserName = user.user_name.Trim();
-
-  if (!string.IsNullOrWhiteSpace(user.department))
-  result.Department = user.department.Trim();
-  }
+   // ✅ FIX: Don't query Users table for private cloud compatibility
+      // For private cloud users, if not a subuser, use email as fallback
+        // Main database users won't reach here as they authenticate separately
+        
+        // Use email as username fallback
+     result.UserName = userEmail.Split('@')[0]; // Use part before @
+        result.Department = null; // No department info available
 
    return result;
         }
