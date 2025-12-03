@@ -121,9 +121,9 @@ namespace BitRaserApiProject.Models
       public bool? is_domain_admin { get; set; } = false; // Is this user a domain admin?
 
         // Existing fields
-        [JsonIgnore]
+        
         public string? payment_details_json { get; set; } // JSON storing payment details
-        [JsonIgnore]
+        
         public string? license_details_json { get; set; } // JSON storing license details
 
         public DateTime created_at { get; set; } = DateTime.UtcNow; // Account creation date

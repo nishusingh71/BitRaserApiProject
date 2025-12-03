@@ -122,6 +122,147 @@ namespace BitRaserApiProject.Controllers
         }
     }
 
+
+
+    [Authorize]
+    [Route("api/[controller]")]
+    [ApiController]
+    public class AuditReportsController : ControllerBase
+    {
+        private readonly ApplicationDbContext _context;
+
+        public AuditReportsController(ApplicationDbContext context)
+        {
+            _context = context;
+        }
+
+        // Get all reports
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<audit_reports>>> GetAuditReports()
+        {
+            return await _context.AuditReports.ToListAsync();
+        }
+
+        // Get single report by id
+        [HttpGet("{id}")]
+        public async Task<ActionResult<audit_reports>> GetAuditReport(int id)
+        {
+            var report = await _context.AuditReports.FindAsync(id);
+            return report == null ? NotFound() : Ok(report);
+        }
+
+        // Get all reports by client email
+        [HttpGet("by-email/{email}")]
+        public async Task<ActionResult<IEnumerable<audit_reports>>> GetAuditReportsByEmail(string email)
+        {
+            var reports = await _context.AuditReports.Where(r => r.client_email == email).ToListAsync();
+            return reports.Any() ? Ok(reports) : NotFound();
+        }
+
+        // Create a new report (full data) — anonymous allowed for flexibility
+        [AllowAnonymous]
+        [HttpPost]
+        public async Task<ActionResult<audit_reports>> CreateAuditReport([FromBody] audit_reports report)
+        {
+            _context.AuditReports.Add(report);
+            await _context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetAuditReport), new { id = report.report_id }, report);
+        }
+
+        // Update full report data by id (except synced)
+        [AllowAnonymous]
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateAuditReport(int id, [FromBody] audit_reports updatedReport)
+        {
+            if (id != updatedReport.report_id)
+                return BadRequest(new { message = "Report ID mismatch" });
+
+            var report = await _context.AuditReports.FindAsync(id);
+            if (report == null) return NotFound();
+
+            report.report_name = updatedReport.report_name;
+            report.erasure_method = updatedReport.erasure_method;
+            report.report_details_json = updatedReport.report_details_json;
+
+            _context.Entry(report).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        // Delete report by id
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteAuditReport(int id)
+        {
+            var report = await _context.AuditReports.FindAsync(id);
+            if (report == null) return NotFound();
+
+            _context.AuditReports.Remove(report);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        // --- New endpoints for your unique report ID flow ---
+        [AllowAnonymous]
+        // Reserve unique report ID (creates stub report with minimal data, synced = false)
+        [HttpPost("reserve-id")]
+        public async Task<ActionResult<int>> ReserveReportId([FromBody] string clientEmail)
+        {
+            var newReport = new audit_reports
+            {
+                client_email = clientEmail,
+                synced = false,
+                report_details_json = "{}",
+                report_name = "Reserved",
+                erasure_method = "Reserved"
+            };
+
+            _context.AuditReports.Add(newReport);
+            await _context.SaveChangesAsync();
+
+            return Ok(newReport.report_id);
+        }
+
+        [AllowAnonymous]
+        // Upload full report data after reserving ID (except synced)
+        [HttpPut("upload-report/{id}")]
+        public async Task<IActionResult> UploadReportData(int id, [FromBody] audit_reports updatedReport)
+        {
+            if (id != updatedReport.report_id)
+                return BadRequest(new { message = "Report ID mismatch" });
+
+            var report = await _context.AuditReports.FindAsync(id);
+            if (report == null)
+                return NotFound();
+
+            report.report_name = updatedReport.report_name;
+            report.erasure_method = updatedReport.erasure_method;
+            report.report_details_json = updatedReport.report_details_json;
+
+            // synced flag remains unchanged here
+
+            _context.Entry(report).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+
+        [AllowAnonymous]
+        // Mark report as synced after full upload
+        [HttpPatch("mark-synced/{id}")]
+        public async Task<IActionResult> MarkReportSynced(int id)
+        {
+            var report = await _context.AuditReports.FindAsync(id);
+            if (report == null)
+                return NotFound();
+
+            report.synced = true;
+            _context.Entry(report).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
+
+            return NoContent();
+        }
+    }
+
     /// <summary>
     /// System logs management controller
     /// ✅ NOW SUPPORTS PRIVATE CLOUD ROUTING
