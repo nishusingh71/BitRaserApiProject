@@ -5,27 +5,35 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Attributes;
+using BitRaserApiProject.Factories; // ✅ ADDED
 
 namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Enhanced Commands management controller with comprehensive role-based access control
     /// Supports both users and subusers with appropriate access levels
+    /// ✅ NOW SUPPORTS PRIVATE CLOUD ROUTING
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class EnhancedCommandsController : ControllerBase
     {
-        private readonly ApplicationDbContext _context;
+        private readonly DynamicDbContextFactory _contextFactory; // ✅ CHANGED
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
+        private readonly ILogger<EnhancedCommandsController> _logger; // ✅ ADDED
 
-        public EnhancedCommandsController(ApplicationDbContext context, IRoleBasedAuthService authService, IUserDataService userDataService)
+        public EnhancedCommandsController(
+            DynamicDbContextFactory contextFactory, // ✅ CHANGED
+            IRoleBasedAuthService authService,
+            IUserDataService userDataService,
+            ILogger<EnhancedCommandsController> logger) // ✅ ADDED
         {
-            _context = context;
+            _contextFactory = contextFactory; // ✅ CHANGED
             _authService = authService;
             _userDataService = userDataService;
+            _logger = logger; // ✅ ADDED
         }
 
         /// <summary>
@@ -35,6 +43,8 @@ namespace BitRaserApiProject.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetCommands([FromQuery] CommandFilterRequest? filter)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
+     
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
@@ -108,47 +118,53 @@ namespace BitRaserApiProject.Controllers
         [HttpGet("by-email/{userEmail}")]
         public async Task<ActionResult<IEnumerable<object>>> GetCommandsByUserEmail(string userEmail)
         {
-        var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-          var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+ using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
+    
+            _logger.LogInformation("🔍 Fetching commands for user: {Email}", userEmail); // ✅ ADDED
+    
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
       
-            // Check if user can view commands for this email
-      bool canView = userEmail == currentUserEmail ||
-             await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_COMMANDS", isCurrentUserSubuser);
+     // Check if user can view commands for this email
+  bool canView = userEmail == currentUserEmail ||
+          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_COMMANDS", isCurrentUserSubuser);
 
-            if (!canView)
+    if (!canView)
             {
-        return StatusCode(403, new { error = "You can only view your own commands" });
-   }
+   return StatusCode(403, new { error = "You can only view your own commands" });
+            }
 
             // ✅ FIX: Get all commands first, then filter in memory (MySQL JSON search issue)
-            var allCommands = await _context.Commands
-        .OrderByDescending(c => c.issued_at)
-     .ToListAsync();
+      var allCommands = await _context.Commands
+  .OrderByDescending(c => c.issued_at)
+      .ToListAsync();
 
-   // Filter by user email in command_json (client-side)
-     var userEmailLower = userEmail.ToLower();
-      var commands = allCommands
-           .Where(c => {
-  if (string.IsNullOrEmpty(c.command_json) || c.command_json == "{}")
- return false;
+  // Filter by user email in command_json (client-side)
+    var userEmailLower = userEmail.ToLower();
+     var commands = allCommands
+        .Where(c => {
+     if (string.IsNullOrEmpty(c.command_json) || c.command_json == "{}")
+        return false;
      
-        var json = c.command_json.ToLower();
-            return json.Contains($"\"user_email\":\"{userEmailLower}\"") ||
-            json.Contains($"\"issued_by\":\"{userEmailLower}\"");
-   })
-    .ToList();
+  var json = c.command_json.ToLower();
+        return json.Contains($"\"user_email\":\"{userEmailLower}\"") ||
+   json.Contains($"\"issued_by\":\"{userEmailLower}\"");
+ })
+     .ToList();
 
-         var commandsWithUser = commands.Select(c => {
-      var userEmailFromJson = ExtractUserEmailFromJson(c.command_json);
-     return new {
-       c.Command_id,
-         c.command_text,
-        c.command_status,
-   c.issued_at,
-   IssuedByEmail = userEmailFromJson,
+            _logger.LogInformation("✅ Found {Count} commands for user: {Email}", commands.Count, userEmail); // ✅ ADDED
+
+            var commandsWithUser = commands.Select(c => {
+           var userEmailFromJson = ExtractUserEmailFromJson(c.command_json);
+       return new {
+     c.Command_id,
+          c.command_text,
+          c.command_status,
+       c.issued_at,
+              IssuedByEmail = userEmailFromJson,
     c.command_json
-           };
-    }).ToList();
+  };
+       }).ToList();
 
             return commands.Any() ? Ok(commandsWithUser) : NotFound("No commands found for this user");
         }
@@ -156,31 +172,35 @@ namespace BitRaserApiProject.Controllers
         /// <summary>
         /// Get command by ID with role validation
         /// </summary>
-        [HttpGet("{id}")]
+    [HttpGet("{id}")]
         public async Task<ActionResult<Commands>> GetCommand(int id)
-        {
-            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+   {
+        using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
+        
+        var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+ var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
             var command = await _context.Commands.FindAsync(id);
-            
-            if (command == null) return NotFound();
+       
+        if (command == null) return NotFound();
 
-            // Allow basic access to commands for operational purposes
+    // Allow basic access to commands for operational purposes
             return Ok(command);
-        }
+ }
 
         /// <summary>
         /// Create a new command - Users and subusers can create commands
         /// ✅ Updated: Store user_email in command_json
-        /// </summary>
+   /// </summary>
         [HttpPost]
         public async Task<ActionResult<Commands>> CreateCommand([FromBody] CommandCreateRequest request)
         {
+ using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
+    
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+   var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
 
-            if (string.IsNullOrEmpty(request.CommandText))
+          if (string.IsNullOrEmpty(request.CommandText))
                 return BadRequest("Command text is required");
 
             // ✅ Parse or create JSON with user_email
@@ -219,19 +239,21 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Update command by ID - Users and subusers can update commands
-        /// </summary>
+  /// Update command by ID - Users and subusers can update commands
+    /// </summary>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateCommand(int id, [FromBody] CommandUpdateRequest request)
         {
-            if (id != request.CommandId)
-                return BadRequest("Command ID mismatch");
-
-            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+    using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
             
-            var command = await _context.Commands.FindAsync(id);
-            if (command == null) return NotFound();
+if (id != request.CommandId)
+          return BadRequest("Command ID mismatch");
+
+       var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+ 
+     var command = await _context.Commands.FindAsync(id);
+   if (command == null) return NotFound();
 
             // Allow updates unless specifically restricted by admin permissions
             bool canUpdate = true;
@@ -265,6 +287,8 @@ namespace BitRaserApiProject.Controllers
         [HttpPatch("{id}/status")]
         public async Task<IActionResult> UpdateCommandStatus(int id, [FromBody] CommandStatusUpdateRequest request)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
+            
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
@@ -287,6 +311,8 @@ namespace BitRaserApiProject.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteCommand(int id)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
+            
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
@@ -315,6 +341,8 @@ namespace BitRaserApiProject.Controllers
         [HttpGet("statistics")]
         public async Task<ActionResult<object>> GetCommandStatistics()
         {
+            using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
+            
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
@@ -343,6 +371,8 @@ namespace BitRaserApiProject.Controllers
         [HttpPatch("bulk-update-status")]
         public async Task<IActionResult> BulkUpdateCommandStatus([FromBody] BulkCommandStatusUpdateRequest request)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
+            
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
@@ -382,6 +412,8 @@ namespace BitRaserApiProject.Controllers
         [HttpPost("{id}/execute")]
         public async Task<IActionResult> ExecuteCommand(int id)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
+            
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             
@@ -416,6 +448,8 @@ namespace BitRaserApiProject.Controllers
         [HttpPost("{id}/cancel")]
         public async Task<IActionResult> CancelCommand(int id)
         {
+            using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
+            
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             

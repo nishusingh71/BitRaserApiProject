@@ -414,15 +414,19 @@ var subusersCount = await dynamicContext.subuser
  .Where(s => s.user_email == userEmail)
      .ToListAsync();
 
-         _logger.LogInformation("📦 Found {ReportCount} reports and {SubuserCount} subusers in Main DB",
-        mainReports.Count, mainSubusers.Count);
+      var mainMachines= await _context.Machines
+        .AsNoTracking()
+        .Where(m=> m.user_email == userEmail) .ToListAsync();
 
-       if (mainReports.Count == 0 && mainSubusers.Count == 0)
-       {
+        _logger.LogInformation("📦 Found {ReportCount} reports and {SubuserCount} subusers ,{MainMachinesCount} machines in Main DB",
+        mainReports.Count, mainSubusers.Count, mainMachines.Count);
+
+if (mainReports.Count == 0 && mainSubusers.Count == 0 && mainMachines.Count == 0)
+{
     return Ok(new
           {
          message = "No data to migrate",
-            migrated = new { auditReports = 0, subusers = 0 },
+            migrated = new { auditReports = 0, subusers = 0,machines=0},
  note = "No existing data found in main database"
          });
    }
@@ -522,27 +526,67 @@ if (subusersMigrated % 10 == 0)
     }
 
      _logger.LogInformation("✅ Migrated {Count} subusers", subusersMigrated);
+  _logger.LogInformation("📥 Migrating machines...");
+
+        // Migrate machines in batches
+  int machinesMigrated = 0;
+        foreach (var machine in mainMachines)
+   {
+    try
+            {
+     var exists = await privateContext.Machines
+      .AnyAsync(m => m.fingerprint_hash == machine.fingerprint_hash);
+
+      if (!exists)
+     {
+   // ✅ Add machine directly
+    privateContext.Machines.Add(machine);
+    machinesMigrated++;
+
+ // Save in batches
+      if (machinesMigrated % 10 == 0)
+    {
+    await privateContext.SaveChangesAsync();
+       _logger.LogInformation("💾 Saved batch: {Count} machines", machinesMigrated);
+  }
+       }
+ }
+          catch (Exception machineEx)
+  {
+     _logger.LogWarning(machineEx, "⚠️ Failed to migrate machine {Hash}", machine.fingerprint_hash);
+ }
+        }
+
+  // Save remaining machines
+        if (machinesMigrated % 10 != 0)
+    {
+ await privateContext.SaveChangesAsync();
+   }
+
+        _logger.LogInformation("✅ Migrated {Count} machines", machinesMigrated);
   _logger.LogInformation("🎉 Data migration complete for {Email}", userEmail);
 
        return Ok(new
  {
-            message = "Data migrated successfully",
+     message = "Data migrated successfully",
       migrated = new
       {
    auditReports = reportsMigrated,
-       subusers = subusersMigrated
+     subusers = subusersMigrated,
+  machines = machinesMigrated
      },
           found = new
    {
-         auditReports = mainReports.Count,
-       subusers = mainSubusers.Count
+    auditReports = mainReports.Count,
+       subusers = mainSubusers.Count,
+            machines = mainMachines.Count
           },
-             note = reportsMigrated > 0 || subusersMigrated > 0
+             note = reportsMigrated > 0 || subusersMigrated > 0 || machinesMigrated > 0
     ? "Your existing data has been copied to your private database"
     : "No new data to migrate (already exists in private database)"
-                });
+ });
    }
-            catch (DbUpdateException dbEx)
+    catch (DbUpdateException dbEx)
    {
        _logger.LogError(dbEx, "❌ Database error during data migration");
     return StatusCode(500, new
@@ -910,7 +954,31 @@ tablesConfigured = !string.IsNullOrEmpty(dto.SelectedTables)
           migrationResults["Subusers"] = new { total = subusers.Count, migrated = subusersMigrated };
     _logger.LogInformation("✅ Migrated {Count} Subusers", subusersMigrated);
 
-       // 4. Migrate Sessions
+        // 4. Migrate Machines
+        _logger.LogInformation("🖥️ Migrating Machines...");
+        var subuserEmails = subusers.Select(s => s.subuser_email).ToList();
+   var machines = await _context.Machines
+            .AsNoTracking()
+     .Where(m => m.user_email == userEmail ||
+     (m.subuser_email != null && subuserEmails.Contains(m.subuser_email)))
+    .ToListAsync();
+
+   int machinesMigrated = 0;
+  foreach (var machine in machines)
+   {
+   var exists = await privateContext.Machines
+      .AnyAsync(m => m.fingerprint_hash == machine.fingerprint_hash);
+        if (!exists)
+  {
+         privateContext.Machines.Add(machine);
+         machinesMigrated++;
+       }
+   }
+      await privateContext.SaveChangesAsync();
+  migrationResults["Machines"] = new { total = machines.Count, migrated = machinesMigrated };
+   _logger.LogInformation("✅ Migrated {Count} Machines", machinesMigrated);
+
+       // 5. Migrate Sessions
       _logger.LogInformation("🔐 Migrating Sessions...");
          var sessions = await _context.Sessions
   .AsNoTracking()
@@ -932,7 +1000,7 @@ tablesConfigured = !string.IsNullOrEmpty(dto.SelectedTables)
        migrationResults["Sessions"] = new { total = sessions.Count, migrated = sessionsMigrated };
         _logger.LogInformation("✅ Migrated {Count} Sessions", sessionsMigrated);
 
-    // 5. Migrate Commands
+    // 6. Migrate Commands
            _logger.LogInformation("⚡ Migrating Commands...");
      var commands = await _context.Commands
  .AsNoTracking()
@@ -954,7 +1022,7 @@ tablesConfigured = !string.IsNullOrEmpty(dto.SelectedTables)
     migrationResults["Commands"] = new { total = commands.Count, migrated = commandsMigrated };
        _logger.LogInformation("✅ Migrated {Count} Commands", commandsMigrated);
 
-      // 6. Migrate logs
+      // 7. Migrate logs
 _logger.LogInformation("📝 Migrating logs...");
 var logs = await _context.logs
         .AsNoTracking()
@@ -978,7 +1046,7 @@ foreach (var log in logs)
 
       // ===== STEP 2: Migrate System Tables (ALL data, not user-specific) =====
 
-                // 7. Migrate Roles (ALL roles)
+                // 8. Migrate Roles (ALL roles)
          _logger.LogInformation("🔧 Migrating Roles...");
         var roles = await _context.Roles.AsNoTracking().ToListAsync();
      int rolesMigrated = 0;
@@ -996,7 +1064,7 @@ foreach (var log in logs)
       migrationResults["Roles"] = new { total = roles.Count, migrated = rolesMigrated };
     _logger.LogInformation("✅ Migrated {Count} Roles", rolesMigrated);
 
-        // 8. Migrate Permissions (ALL permissions)
+        // 9. Migrate Permissions (ALL permissions)
     _logger.LogInformation("🔐 Migrating Permissions...");
       var permissions = await _context.Permissions.AsNoTracking().ToListAsync();
     int permissionsMigrated = 0;
@@ -1014,7 +1082,7 @@ foreach (var log in logs)
       migrationResults["Permissions"] = new { total = permissions.Count, migrated = permissionsMigrated };
        _logger.LogInformation("✅ Migrated {Count} Permissions", permissionsMigrated);
 
-      // 9. Migrate RolePermissions (ALL mappings)
+      // 10. Migrate RolePermissions (ALL mappings)
      _logger.LogInformation("🔗 Migrating RolePermissions...");
        var rolePermissions = await _context.RolePermissions.AsNoTracking().ToListAsync();
        int rolePermissionsMigrated = 0;
@@ -1032,7 +1100,7 @@ foreach (var log in logs)
        migrationResults["RolePermissions"] = new { total = rolePermissions.Count, migrated = rolePermissionsMigrated };
     _logger.LogInformation("✅ Migrated {Count} RolePermissions", rolePermissionsMigrated);
 
-       // 10. Migrate SubuserRoles (only for user's subusers)
+       // 11. Migrate SubuserRoles (only for user's subusers)
           _logger.LogInformation("👥 Migrating SubuserRoles...");
      var subuserIds = subusers.Select(s => s.subuser_id).ToList();
       var subuserRoles = await _context.SubuserRoles
@@ -1055,7 +1123,7 @@ foreach (var log in logs)
         migrationResults["SubuserRoles"] = new { total = subuserRoles.Count, migrated = subuserRolesMigrated };
       _logger.LogInformation("✅ Migrated {Count} SubuserRoles", subuserRolesMigrated);
 
-          // 11. Migrate UserRoles (only current user's roles)
+          // 12. Migrate UserRoles (only current user's roles)
   _logger.LogInformation("🔑 Migrating UserRoles...");
         var userRoles = await _context.UserRoles
   .AsNoTracking()
@@ -1077,7 +1145,7 @@ int userRolesMigrated = 0;
         migrationResults["UserRoles"] = new { total = userRoles.Count, migrated = userRolesMigrated };
     _logger.LogInformation("✅ Migrated {Count} UserRoles", userRolesMigrated);
 
-  // 12. Migrate Routes (ALL routes)
+  // 13. Migrate Routes (ALL routes)
         _logger.LogInformation("🛣️ Migrating Routes...");
   var routes = await _context.Routes.AsNoTracking().ToListAsync();
  int routesMigrated = 0;
@@ -1131,29 +1199,29 @@ var existingUserRole = await privateContext.UserRoles
        _logger.LogWarning("⚠️ Manager role not found in Private DB");
  }
 
-          _logger.LogInformation("🎉 Migration of all 12 tables complete for {Email}", userEmail);
+          _logger.LogInformation("🎉 Migration of all 13 tables complete for {Email}", userEmail);
 
       return Ok(new
     {
 success = true,
-    message = "All 12 tables migrated successfully to Private Cloud",
+    message = "All 13 tables migrated successfully to Private Cloud",
    userEmail,
   migrationResults,
       summary = new
            {
-     totalTables = 12,
-  userSpecificTables = new[] { "users", "AuditReports", "subuser", "Sessions", "Commands", "logs", "SubuserRoles", "UserRoles" },
+     totalTables = 13,
+  userSpecificTables = new[] { "users", "AuditReports", "subuser", "Machines", "Sessions", "Commands", "logs", "SubuserRoles", "UserRoles" },
   systemTablesWithAllData = new[] { "Roles", "Permissions", "RolePermissions", "Routes" },
-        totalRecordsMigrated = usersMigrated + reportsMigrated + subusersMigrated + sessionsMigrated +
-    commandsMigrated + logsMigrated + rolesMigrated + permissionsMigrated + 
+        totalRecordsMigrated = usersMigrated + reportsMigrated + subusersMigrated + machinesMigrated +
+    sessionsMigrated + commandsMigrated + logsMigrated + rolesMigrated + permissionsMigrated + 
 rolePermissionsMigrated + subuserRolesMigrated + userRolesMigrated + routesMigrated,
     userRolesAssigned = userRolesAssigned
-        }
+     }
     });
  }
     catch (Exception ex)
       {
-       _logger.LogError(ex, "❌ Error during 12-table migration");
+       _logger.LogError(ex, "❌ Error during 13-table migration");
   return StatusCode(500, new
    {
   success = false,

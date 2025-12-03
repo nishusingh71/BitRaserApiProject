@@ -29,7 +29,9 @@ namespace BitRaserApiProject.Models
         public bool license_activated { get; set; } // Activation status
         public DateTime? license_activation_date { get; set; } // Null if never activated
         public int license_days_valid { get; set; } = 0; // Number of valid days
+      
         public string license_details_json { get; set; } // Stores license info
+        
         public string? machine_details_json { get; set; } // Stores additional machine details in JSON format
         public int demo_usage_count { get; set; } // Tracks demo usage count
         public DateTime created_at { get; set; } = DateTime.UtcNow; // Auto-set by DB
@@ -72,6 +74,7 @@ namespace BitRaserApiProject.Models
         public string user_email { get; set; } // Email (must be unique)
 
         [Required, MaxLength(255)]
+        [JsonIgnore]
       public string user_password { get; set; } // Plain password
 
       [JsonIgnore]
@@ -116,9 +119,11 @@ namespace BitRaserApiProject.Models
  public string? organization_name { get; set; } // Organization/Company name
         
       public bool? is_domain_admin { get; set; } = false; // Is this user a domain admin?
-        
+
         // Existing fields
+        [JsonIgnore]
         public string? payment_details_json { get; set; } // JSON storing payment details
+        [JsonIgnore]
         public string? license_details_json { get; set; } // JSON storing license details
 
         public DateTime created_at { get; set; } = DateTime.UtcNow; // Account creation date
@@ -160,7 +165,8 @@ namespace BitRaserApiProject.Models
         
         [Required, MaxLength(255)]
         public string subuser_email { get; set; } // Email of the subuser
-      
+
+        [JsonIgnore]
      [Required, MaxLength(255)]
       public string subuser_password { get; set; } // Hashed password
      
@@ -182,13 +188,15 @@ public string? Department { get; set; }
   // Role & Permissions
    [MaxLength(50)]
   public string? Role { get; set; } = "subuser"; // subuser, team_member, limited_admin
-      
+     
   public string? PermissionsJson { get; set; } // JSON string for granular permissions 
      
  // Machine & License Access
      public int? AssignedMachines { get; set; } = 0;
  public int? MaxMachines { get; set; } = 5;
+        
     public string? MachineIdsJson { get; set; } // JSON array of accessible machine IDs
+        
  public string? LicenseIdsJson { get; set; } // JSON array of accessible license IDs   
         
     // Group Access
@@ -254,10 +262,12 @@ public string? Department { get; set; }
     public class Commands
     {
         [Key]
+          
         public int Command_id { get; set; }
         public string user_email { get; set; }
         public string command_text { get; set; }
         public DateTime issued_at { get; set; } = DateTime.UtcNow;
+        [JsonIgnore]
         public string command_json { get; set; } // Changed from object to string
         public string command_status { get; set; } // Changed from object to string
     }
@@ -265,6 +275,7 @@ public string? Department { get; set; }
     public class Group
     {
         [Key]
+        
         public int group_id { get; set; }
         
         [Required, MaxLength(100)]
@@ -272,9 +283,10 @@ public string? Department { get; set; }
         
         [MaxLength(500)]
         public string? description { get; set; } // groupdescription
+     
         
         public int license_allocation { get; set; } = 0; // groplicenseallocation
-        
+        [JsonIgnore]
         public string? permissions_json { get; set; } // grouppermission stored as JSON
    
       public DateTime created_at { get; set; } = DateTime.UtcNow;
@@ -287,8 +299,10 @@ public string? Department { get; set; }
     public class User_role_profile
     {
         [Key]
+        [JsonIgnore]
         public int role_id { get; set; } // Primary Key
         public string user_email { get; set; } // User's email
+        [JsonIgnore]
         public int manage_user_id { get; set; } // User ID who manages this role
         public string role_name { get; set; } // Role name
         public string role_email { get; set; } // Role email

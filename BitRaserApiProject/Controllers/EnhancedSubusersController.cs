@@ -238,53 +238,58 @@ emailNotifications = subuser.EmailNotifications,
         /// Get subusers by parent user email
    /// </summary>
         [HttpGet("by-parent/{parentEmail}")]
-        public async Task<ActionResult<IEnumerable<object>>> GetSubusersByParent(string parentEmail)
-    {
-  var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-          var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+  public async Task<ActionResult<IEnumerable<object>>> GetSubusersByParent(string parentEmail)
+        {
+    var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+   var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
    
-       // ✅ ADD DYNAMIC CONTEXT
-     using var _context = await GetContextAsync();
+            // ✅ USE DYNAMIC CONTEXT (ROUTES TO PRIVATE DB IF CONFIGURED)
+    using var _context = await _contextFactory.CreateDbContextAsync();
        
-    // Check if user can view subusers for this parent
-    bool canView = parentEmail == currentUserEmail ||
-          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser);
+            _logger.LogInformation("🔍 Fetching subusers for parent: {ParentEmail}", parentEmail);
+        
+            // Check if user can view subusers for this parent
+   bool canView = parentEmail == currentUserEmail ||
+    await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser);
 
-   if (!canView)
-         {
-   return StatusCode(403, new { error = "You can only view your own subusers" });
-    }
+       if (!canView)
+  {
+  return StatusCode(403, new { error = "You can only view your own subusers" });
+       }
 
      var subusers = await _context.subuser
       .Include(s => s.SubuserRoles)
-.ThenInclude(sr => sr.Role)
+    .ThenInclude(sr => sr.Role)
      .Where(s => s.user_email == parentEmail)
-   .OrderByDescending(s => s.CreatedAt)
-       .ToListAsync();
+ .OrderByDescending(s => s.CreatedAt)
+     .ToListAsync();
 
-            var subuserDetails = subusers.Select(s => new {
-    s.subuser_id,
-  s.subuser_email,
-    name = s.Name ?? "N/A",
-  phone = s.Phone ?? "N/A",
+ _logger.LogInformation("✅ Found {Count} subusers for parent: {ParentEmail}", 
+    subusers.Count, parentEmail);
+
+  var subuserDetails = subusers.Select(s => new {
+           s.subuser_id,
+       s.subuser_email,
+       name = s.Name ?? "N/A",
+    phone = s.Phone ?? "N/A",
   department = s.Department ?? "N/A",
-  role = s.Role ?? "N/A",
-       status = s.status ?? "active",
- last_login = s.last_login,
-   subuser_group = s.subuser_group ?? "No Group",
- // Roles information
+   role = s.Role ?? "N/A",
+      status = s.status ?? "active",
+       last_login = s.last_login,
+          subuser_group = s.subuser_group ?? "No Group",
+     // Roles information
        roles = s.SubuserRoles.Select(sr => new {
-  roleId = sr.RoleId,
-    roleName = sr.Role.RoleName,
- hierarchyLevel = sr.Role.HierarchyLevel
- }).ToList(),
-   assignedMachines = s.AssignedMachines ?? 0,
-  maxMachines = s.MaxMachines ?? 5,
+   roleId = sr.RoleId,
+            roleName = sr.Role.RoleName,
+       hierarchyLevel = sr.Role.HierarchyLevel
+        }).ToList(),
+        assignedMachines = s.AssignedMachines ?? 0,
+      maxMachines = s.MaxMachines ?? 5,
   isEmailVerified = s.IsEmailVerified,
-   createdAt = s.CreatedAt
- }).ToList();
+  createdAt = s.CreatedAt
+}).ToList();
 
-   return Ok(subuserDetails);
+     return Ok(subuserDetails);
         }
 
     /// <summary>
