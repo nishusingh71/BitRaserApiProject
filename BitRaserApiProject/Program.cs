@@ -564,6 +564,11 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
+// ✅ RESPONSE ENCRYPTION MIDDLEWARE - AES-256-CBC
+// Place AFTER Authorization and BEFORE other custom middleware
+// This encrypts all API responses automatically
+app.UseResponseEncryption();
+
 // ✅ PRIVATE CLOUD: Automatic database context routing middleware
 // This middleware automatically detects user from JWT and injects appropriate DB context
 app.UseDatabaseContextMiddleware();
