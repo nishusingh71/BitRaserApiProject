@@ -99,22 +99,25 @@ _logger.LogWarning(
         // Encrypt the response body (now includes Gzip compression)
       var encryptedResponse = EncryptionHelper.Encrypt(responseBody, _encryptionKey);
 
-      // ✅ SIMPLIFIED: Only return data field
+      // ✅ Full response format with all fields
   var encryptedWrapper = new
       {
-       data = encryptedResponse
+       encrypted = true,
+       compressed = true,
+       data = encryptedResponse,
+    
    };
 
   // Serialize encrypted wrapper to JSON
-          var encryptedJson = System.Text.Json.JsonSerializer.Serialize(encryptedWrapper);
+      var encryptedJson = System.Text.Json.JsonSerializer.Serialize(encryptedWrapper);
     var encryptedBytes = Encoding.UTF8.GetBytes(encryptedJson);
 
    // Update content type and length
    context.Response.ContentType = "application/json; charset=utf-8";
    context.Response.ContentLength = encryptedBytes.Length;
 
-     // Write encrypted response to original stream
-      responseBodyStream.Seek(0, SeekOrigin.Begin);
+ // Write encrypted response to original stream
+    responseBodyStream.Seek(0, SeekOrigin.Begin);
   await originalBodyStream.WriteAsync(encryptedBytes, 0, encryptedBytes.Length);
 
 // ✅ Calculate compression ratio
@@ -128,13 +131,13 @@ _logger.LogDebug(
    encryptedBytes.Length,
    compressionRatio);
         }
-      catch (Exception ex)
+   catch (Exception ex)
    {
      _logger.LogError(ex, "❌ Failed to encrypt response for {Method} {Path}",
         context.Request.Method,
-        context.Request.Path);
+  context.Request.Path);
 
-      // Fall back to sending unencrypted response
+   // Fall back to sending unencrypted response
  responseBodyStream.Seek(0, SeekOrigin.Begin);
       await responseBodyStream.CopyToAsync(originalBodyStream);
          }
