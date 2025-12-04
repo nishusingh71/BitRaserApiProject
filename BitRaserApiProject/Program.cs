@@ -326,6 +326,9 @@ builder.Services.AddHostedService<ForgotPasswordCleanupBackgroundService>();
 builder.Services.AddHttpClient();  // Register HttpClient for keep-alive pings
 builder.Services.AddHostedService<KeepAliveBackgroundService>();
 
+// ✅ RATE LIMIT CLEANUP BACKGROUND SERVICE
+builder.Services.AddHostedService<RateLimitCleanupBackgroundService>();
+
 // ✅ PRIVATE CLOUD DATABASE SERVICE
 builder.Services.AddScoped<IPrivateCloudService, PrivateCloudService>();
 
@@ -409,6 +412,9 @@ builder.Services.AddSwaggerGen(c =>
 
     c.SupportNonNullableReferenceTypes();
     c.OperationFilter<SwaggerDefaultValues>();
+    
+    // ✅ NEW: Add X-No-Encryption header parameter to all endpoints
+    c.OperationFilter<NoEncryptionHeaderOperationFilter>();
 
     // Enhanced security definitions
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
@@ -563,6 +569,14 @@ app.Use(async (context, next) =>
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// ✅ RATE LIMITING MIDDLEWARE - Protect against abuse
+// Place AFTER Authentication so we can identify users
+// - Private Cloud Users: 500 requests/min
+// - Normal Users: 100 requests/min  
+// - Forgot Password: 5 requests/min
+// - Unauthenticated: 50 requests/min
+app.UseRateLimiting();
 
 // ✅ RESPONSE ENCRYPTION MIDDLEWARE - AES-256-CBC
 // Place AFTER Authorization and BEFORE other custom middleware

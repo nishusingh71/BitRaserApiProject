@@ -196,33 +196,64 @@ namespace BitRaserApiProject.Services
         /// IMPORTANT: Implement your own encryption/decryption logic here
 /// </summary>
         private string DecryptConnectionString(string encryptedConnectionString)
-        {
+      {
             try
   {
-          // Get encryption key and IV from configuration
+   // Get encryption key and IV from configuration
      var encryptionKey = _configuration["Encryption:Key"];
         var encryptionIV = _configuration["Encryption:IV"];
 
            if (string.IsNullOrEmpty(encryptionKey) || string.IsNullOrEmpty(encryptionIV))
           {
+ _logger.LogError("❌ Encryption key or IV not configured in appsettings.json");
     throw new InvalidOperationException("Encryption key or IV not configured");
          }
 
-          using var aes = Aes.Create();
-         aes.Key = Encoding.UTF8.GetBytes(encryptionKey.PadRight(32).Substring(0, 32));
+  _logger.LogDebug("🔐 Decryption Key length: {KeyLen}, IV length: {IVLen}", 
+             encryptionKey.Length, encryptionIV.Length);
+
+    using var aes = Aes.Create();
+     aes.Key = Encoding.UTF8.GetBytes(encryptionKey.PadRight(32).Substring(0, 32));
     aes.IV = Encoding.UTF8.GetBytes(encryptionIV.PadRight(16).Substring(0, 16));
 
-                var decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
+         var decryptor = aes.CreateDecryptor(aes.Key, aes.IV);
 
-             using var msDecrypt = new MemoryStream(Convert.FromBase64String(encryptedConnectionString));
-              using var csDecrypt = new CryptoStream(msDecrypt, decryptor, CryptoStreamMode.Read);
+     using var msDecrypt = new MemoryStream(Convert.FromBase64String(encryptedConnectionString));
+       using var csDecrypt = new CryptoStream(msDecrypt, decryptor, CryptoStreamMode.Read);
     using var srDecrypt = new StreamReader(csDecrypt);
 
-        return srDecrypt.ReadToEnd();
+        var decryptedConnectionString = srDecrypt.ReadToEnd();
+         
+        // ✅ Validate decrypted connection string format
+       if (string.IsNullOrWhiteSpace(decryptedConnectionString))
+       {
+     _logger.LogError("❌ Decrypted connection string is empty");
+         throw new InvalidOperationException("Decrypted connection string is empty");
+             }
+        
+        // ✅ Basic validation - check if it looks like a connection string
+      if (!decryptedConnectionString.Contains("="))
+ {
+    _logger.LogError("❌ Decrypted string doesn't look like a connection string");
+ throw new FormatException("Decrypted string is not a valid connection string format");
+    }
+          
+       _logger.LogDebug("✅ Connection string decrypted successfully (length: {Length})", decryptedConnectionString.Length);
+    return decryptedConnectionString;
             }
-            catch (Exception ex)
+   catch (FormatException formatEx)
+   {
+         _logger.LogError(formatEx, "❌ Invalid Base64 format in encrypted connection string");
+            throw;
+        }
+            catch (CryptographicException cryptoEx)
+            {
+    _logger.LogError(cryptoEx, "❌ Cryptographic error decrypting connection string - possible key mismatch");
+                throw;
+   }
+ catch (Exception ex)
      {
-                _logger.LogError(ex, "Error decrypting connection string");
+      _logger.LogError(ex, "❌ Error decrypting connection string");
      throw new InvalidOperationException("Failed to decrypt connection string", ex);
             }
   }

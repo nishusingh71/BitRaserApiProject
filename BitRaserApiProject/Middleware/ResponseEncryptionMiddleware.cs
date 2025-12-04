@@ -91,49 +91,54 @@ _logger.LogWarning(
                 // Only encrypt if response is successful and has content
               if (context.Response.StatusCode == 200 && !string.IsNullOrEmpty(responseBody))
        {
-               try
-      {
-        // Encrypt the response body
+  try
+   {
+    // ✅ Calculate original size for logging
+    var originalSize = Encoding.UTF8.GetByteCount(responseBody);
+
+        // Encrypt the response body (now includes Gzip compression)
       var encryptedResponse = EncryptionHelper.Encrypt(responseBody, _encryptionKey);
 
-      // Create encrypted response wrapper
+      // ✅ SIMPLIFIED: Only return data field
   var encryptedWrapper = new
       {
-        encrypted = true,
-       data = encryptedResponse,
-      timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-       };
+       data = encryptedResponse
+   };
 
-       // Serialize encrypted wrapper to JSON
-              var encryptedJson = System.Text.Json.JsonSerializer.Serialize(encryptedWrapper);
+  // Serialize encrypted wrapper to JSON
+          var encryptedJson = System.Text.Json.JsonSerializer.Serialize(encryptedWrapper);
     var encryptedBytes = Encoding.UTF8.GetBytes(encryptedJson);
 
    // Update content type and length
    context.Response.ContentType = "application/json; charset=utf-8";
-                context.Response.ContentLength = encryptedBytes.Length;
+   context.Response.ContentLength = encryptedBytes.Length;
 
      // Write encrypted response to original stream
-        responseBodyStream.Seek(0, SeekOrigin.Begin);
-     await originalBodyStream.WriteAsync(encryptedBytes, 0, encryptedBytes.Length);
+      responseBodyStream.Seek(0, SeekOrigin.Begin);
+  await originalBodyStream.WriteAsync(encryptedBytes, 0, encryptedBytes.Length);
+
+// ✅ Calculate compression ratio
+var compressionRatio = originalSize > 0 ? (1 - ((double)encryptedBytes.Length / originalSize)) * 100 : 0;
 
 _logger.LogDebug(
- "✅ Response encrypted for {Method} {Path} - Original size: {OriginalSize} bytes, Encrypted size: {EncryptedSize} bytes",
+ "✅ Response compressed+encrypted for {Method} {Path} - Original: {OriginalSize} bytes, Final: {EncryptedSize} bytes, Compression: {Ratio:F1}%",
       context.Request.Method,
     context.Request.Path,
-        responseBody.Length,
-   encryptedBytes.Length);
+        originalSize,
+   encryptedBytes.Length,
+   compressionRatio);
         }
       catch (Exception ex)
    {
-              _logger.LogError(ex, "❌ Failed to encrypt response for {Method} {Path}",
+     _logger.LogError(ex, "❌ Failed to encrypt response for {Method} {Path}",
         context.Request.Method,
         context.Request.Path);
 
       // Fall back to sending unencrypted response
  responseBodyStream.Seek(0, SeekOrigin.Begin);
       await responseBodyStream.CopyToAsync(originalBodyStream);
-              }
-     }
+         }
+   }
      else
     {
           // For non-200 responses or empty content, send as-is
@@ -174,7 +179,7 @@ _logger.LogDebug(
   "/api/health",
             "/metrics",      // Metrics endpoints
          "/favicon.ico",   // Static files
-     "/.well-known",   // Well-known URIs
+     "/.well-known",   // Well-known URIs"
             };
 
         if (skipPaths.Any(p => path.StartsWith(p)))
@@ -183,14 +188,16 @@ return true;
        }
 
        // ✅ NEW: Skip encryption for JWT token endpoints (login, register, refresh-token)
-            var authPaths = new[]
+    var authPaths = new[]
   {
-              "/api/auth/login"
+     "/api/auth/login",
+     "/api/time/server-time",
+         "/time/server-time"
    };
 
   if (authPaths.Any(p => path.Equals(p, StringComparison.OrdinalIgnoreCase)))
     {
-            _logger.LogDebug("⏭️ Skipping encryption for auth endpoint: {Path}", path);
+     _logger.LogDebug("⏭️ Skipping encryption for auth endpoint: {Path}", path);
       return true;
   }
 

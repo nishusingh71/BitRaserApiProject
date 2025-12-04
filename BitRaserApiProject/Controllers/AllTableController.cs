@@ -1106,6 +1106,21 @@ using var context = await _contextFactory.CreateDbContextAsync();
    }
     }
 
+
+
+    [Route("api/[controller]")]
+    [ApiController]
+    public class TimeController : ControllerBase
+    {
+        [HttpGet("server-time")]
+        public IActionResult GetServerTime()
+        {
+            var serverTimeUtc = DateTime.UtcNow;
+            return Ok(new { server_time = serverTimeUtc.ToString("o") }); // ISO 8601 format
+        }
+    }
+
+
     /// <summary>
     /// Authentication controller
     /// ✅ NOW SUPPORTS PRIVATE CLOUD ROUTING
