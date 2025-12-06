@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
+using Microsoft.EntityFrameworkCore;
 
 namespace BitRaserApiProject.Services
 {
     /// <summary>
-    /// In-memory OTP service - OTP database mein store nahi hoga
-    /// OTP expiry time ke saath validate hoga
+    /// Hybrid OTP service - Uses both in-memory cache AND database storage
+    /// This ensures OTPs survive server restarts on Render.com
+    /// OTP expiry time: 10 minutes
     /// </summary>
     public interface IOtpService
     {
@@ -12,118 +14,430 @@ namespace BitRaserApiProject.Services
         bool ValidateOtp(string email, string otp);
         void RemoveOtp(string email);
         bool IsOtpExpired(string email);
+        Task<string> GenerateOtpAsync(string email);
+        Task<bool> ValidateOtpAsync(string email, string otp);
+        Task RemoveOtpAsync(string email);
+        Task<bool> IsOtpExpiredAsync(string email);
     }
 
     public class OtpService : IOtpService
- {
-        // In-memory storage for OTPs with expiry time
-        private readonly ConcurrentDictionary<string, OtpData> _otpStorage = new();
-        private readonly int _otpExpiryMinutes = 10; // OTP 10 minutes ke liye valid
+    {
+        private readonly IServiceProvider _serviceProvider;
+        private readonly ILogger<OtpService> _logger;
+
+        // In-memory cache for fast access (backup for database)
+        private readonly ConcurrentDictionary<string, OtpData> _otpCache = new();
+        private readonly int _otpExpiryMinutes = 10;
 
         private class OtpData
         {
-        public string Otp { get; set; } = string.Empty;
-    public DateTime ExpiryTime { get; set; }
-    public int FailedAttempts { get; set; } = 0;
+            public string Otp { get; set; } = string.Empty;
+            public DateTime ExpiryTime { get; set; }
+            public int FailedAttempts { get; set; } = 0;
         }
 
+        public OtpService(IServiceProvider serviceProvider, ILogger<OtpService> logger)
+        {
+            _serviceProvider = serviceProvider;
+            _logger = logger;
+        }
+
+        #region Synchronous Methods (use cache + db fallback)
+
         /// <summary>
-        /// Generate 6-digit OTP for email
-      /// </summary>
+        /// Generate 6-digit OTP for email (sync version - uses cache)
+        /// </summary>
         public string GenerateOtp(string email)
         {
-     // Remove old OTP if exists
-            _otpStorage.TryRemove(email.ToLower(), out _);
+            var emailKey = email.ToLower().Trim();
+
+            // Remove old OTP from cache
+            _otpCache.TryRemove(emailKey, out _);
 
             // Generate random 6-digit OTP
-       var random = new Random();
-   string otp = random.Next(100000, 999999).ToString();
+            var random = new Random();
+            string otp = random.Next(100000, 999999).ToString();
 
-        // Store with expiry time
-         var otpData = new OtpData
+            // Store in cache
+            var otpData = new OtpData
             {
- Otp = otp,
-     ExpiryTime = DateTime.UtcNow.AddMinutes(_otpExpiryMinutes),
-            FailedAttempts = 0
+                Otp = otp,
+                ExpiryTime = DateTime.UtcNow.AddMinutes(_otpExpiryMinutes),
+                FailedAttempts = 0
             };
+            _otpCache.TryAdd(emailKey, otpData);
 
-   _otpStorage.TryAdd(email.ToLower(), otpData);
+            // Also store in database (async, fire-and-forget for speed)
+            _ = Task.Run(async () => await StoreOtpInDatabaseAsync(emailKey, otp));
+
+            _logger.LogInformation("📧 OTP generated for {Email}: {Otp} (expires in {Minutes} min)",
+                emailKey, otp, _otpExpiryMinutes);
 
             return otp;
         }
 
         /// <summary>
-        /// Validate OTP for email
+        /// Validate OTP for email (sync version)
         /// </summary>
         public bool ValidateOtp(string email, string otp)
-   {
-            var emailKey = email.ToLower();
+        {
+            var emailKey = email.ToLower().Trim();
 
-        if (!_otpStorage.TryGetValue(emailKey, out var otpData))
-  {
-       return false; // OTP not found
-}
-
-            // Check if OTP expired
-            if (DateTime.UtcNow > otpData.ExpiryTime)
+            // First check cache
+            if (_otpCache.TryGetValue(emailKey, out var otpData))
             {
-  _otpStorage.TryRemove(emailKey, out _);
-   return false; // OTP expired
-     }
+                if (DateTime.UtcNow > otpData.ExpiryTime)
+                {
+                    _otpCache.TryRemove(emailKey, out _);
+                    _logger.LogWarning("⏰ OTP expired (cache) for {Email}", emailKey);
+                    return false;
+                }
 
-  // Check if too many failed attempts (max 5)
-  if (otpData.FailedAttempts >= 5)
-            {
-         _otpStorage.TryRemove(emailKey, out _);
-         return false; // Too many attempts
+                if (otpData.FailedAttempts >= 5)
+                {
+                    _otpCache.TryRemove(emailKey, out _);
+                    _logger.LogWarning("🚫 Too many failed attempts for {Email}", emailKey);
+                    return false;
+                }
+
+                if (otpData.Otp == otp)
+                {
+                    _logger.LogInformation("✅ OTP validated (cache) for {Email}", emailKey);
+                    return true;
+                }
+
+                otpData.FailedAttempts++;
+                _logger.LogWarning("❌ Invalid OTP attempt #{Attempts} for {Email}",
+                    otpData.FailedAttempts, emailKey);
+                return false;
             }
 
-  // Validate OTP
-            if (otpData.Otp == otp)
-         {
-        return true; // Valid OTP
-          }
-
-            // Increment failed attempts
-        otpData.FailedAttempts++;
-          return false; // Invalid OTP
+            // Cache miss - try database (sync call for compatibility)
+            _logger.LogInformation("🔍 OTP not in cache, checking database for {Email}", emailKey);
+            return ValidateOtpFromDatabaseSync(emailKey, otp);
         }
 
         /// <summary>
-   /// Remove OTP after successful validation
-    /// </summary>
-     public void RemoveOtp(string email)
-  {
-_otpStorage.TryRemove(email.ToLower(), out _);
-    }
+        /// Remove OTP after successful use
+        /// </summary>
+        public void RemoveOtp(string email)
+        {
+            var emailKey = email.ToLower().Trim();
+            _otpCache.TryRemove(emailKey, out _);
 
-   /// <summary>
-        /// Check if OTP is expired
-  /// </summary>
-        public bool IsOtpExpired(string email)
-  {
-      var emailKey = email.ToLower();
+            // Also remove from database
+            _ = Task.Run(async () => await RemoveOtpFromDatabaseAsync(emailKey));
 
-          if (!_otpStorage.TryGetValue(emailKey, out var otpData))
-            {
-      return true; // No OTP found = expired
-            }
-
-            return DateTime.UtcNow > otpData.ExpiryTime;
+            _logger.LogInformation("🗑️ OTP removed for {Email}", emailKey);
         }
 
-        // Cleanup expired OTPs periodically (background task)
+        /// <summary>
+        /// Check if OTP is expired
+        /// </summary>
+        public bool IsOtpExpired(string email)
+        {
+            var emailKey = email.ToLower().Trim();
+
+            // Check cache first
+            if (_otpCache.TryGetValue(emailKey, out var otpData))
+            {
+                return DateTime.UtcNow > otpData.ExpiryTime;
+            }
+
+            // Check database
+            return IsOtpExpiredInDatabaseSync(emailKey);
+        }
+
+        #endregion
+
+        #region Async Methods (recommended for production)
+
+        /// <summary>
+        /// Generate OTP (async version - stores in both cache and database)
+        /// </summary>
+        public async Task<string> GenerateOtpAsync(string email)
+        {
+            var emailKey = email.ToLower().Trim();
+
+            _otpCache.TryRemove(emailKey, out _);
+
+            var random = new Random();
+            string otp = random.Next(100000, 999999).ToString();
+
+            var otpData = new OtpData
+            {
+                Otp = otp,
+                ExpiryTime = DateTime.UtcNow.AddMinutes(_otpExpiryMinutes),
+                FailedAttempts = 0
+            };
+            _otpCache.TryAdd(emailKey, otpData);
+
+            // Store in database
+            await StoreOtpInDatabaseAsync(emailKey, otp);
+
+            _logger.LogInformation("📧 OTP generated (async) for {Email}: {Otp}", emailKey, otp);
+            return otp;
+        }
+
+        /// <summary>
+        /// Validate OTP (async version - checks cache then database)
+        /// </summary>
+        public async Task<bool> ValidateOtpAsync(string email, string otp)
+        {
+            var emailKey = email.ToLower().Trim();
+
+            // Check cache first
+            if (_otpCache.TryGetValue(emailKey, out var otpData))
+            {
+                if (DateTime.UtcNow > otpData.ExpiryTime)
+                {
+                    _otpCache.TryRemove(emailKey, out _);
+                    return false;
+                }
+
+                if (otpData.FailedAttempts >= 5)
+                {
+                    _otpCache.TryRemove(emailKey, out _);
+                    return false;
+                }
+
+                if (otpData.Otp == otp)
+                {
+                    return true;
+                }
+
+                otpData.FailedAttempts++;
+                return false;
+            }
+
+            // Check database
+            return await ValidateOtpFromDatabaseAsync(emailKey, otp);
+        }
+
+        public async Task RemoveOtpAsync(string email)
+        {
+            var emailKey = email.ToLower().Trim();
+            _otpCache.TryRemove(emailKey, out _);
+            await RemoveOtpFromDatabaseAsync(emailKey);
+        }
+
+        public async Task<bool> IsOtpExpiredAsync(string email)
+        {
+            var emailKey = email.ToLower().Trim();
+
+            if (_otpCache.TryGetValue(emailKey, out var otpData))
+            {
+                return DateTime.UtcNow > otpData.ExpiryTime;
+            }
+
+            return await IsOtpExpiredInDatabaseAsync(emailKey);
+        }
+
+        #endregion
+
+        #region Database Operations
+
+        private async Task StoreOtpInDatabaseAsync(string email, string otp)
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                // Remove old OTPs for this email
+                var oldOtps = await context.ForgotPasswordRequests
+                                .Where(f => f.Email.ToLower() == email && !f.IsUsed)
+                    .ToListAsync();
+
+                if (oldOtps.Any())
+                {
+                    context.ForgotPasswordRequests.RemoveRange(oldOtps);
+                }
+
+                // Create new OTP record
+                var otpRecord = new BitRaserApiProject.Models.ForgotPasswordRequest
+                {
+                    Email = email,
+                    Otp = otp,
+                    ResetToken = Guid.NewGuid().ToString("N"),
+                    ExpiresAt = DateTime.UtcNow.AddMinutes(_otpExpiryMinutes),
+                    CreatedAt = DateTime.UtcNow,
+                    IsUsed = false,
+                    UserType = "unknown"
+                };
+
+                context.ForgotPasswordRequests.Add(otpRecord);
+                await context.SaveChangesAsync();
+
+                _logger.LogInformation("💾 OTP stored in database for {Email}", email);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to store OTP in database for {Email}", email);
+            }
+        }
+
+        private async Task<bool> ValidateOtpFromDatabaseAsync(string email, string otp)
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                var otpRecord = await context.ForgotPasswordRequests
+                       .Where(f => f.Email.ToLower() == email &&
+                    f.Otp == otp &&
+                    !f.IsUsed &&
+                      f.ExpiresAt > DateTime.UtcNow)
+                  .FirstOrDefaultAsync();
+
+                if (otpRecord != null)
+                {
+                    // Also add to cache for faster subsequent validations
+                    _otpCache.TryAdd(email, new OtpData
+                    {
+                        Otp = otp,
+                        ExpiryTime = otpRecord.ExpiresAt,
+                        FailedAttempts = 0
+                    });
+
+                    _logger.LogInformation("✅ OTP validated from database for {Email}", email);
+                    return true;
+                }
+
+                _logger.LogWarning("❌ OTP not found in database for {Email}", email);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error validating OTP from database for {Email}", email);
+                return false;
+            }
+        }
+
+        private bool ValidateOtpFromDatabaseSync(string email, string otp)
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                var otpRecord = context.ForgotPasswordRequests
+.Where(f => f.Email.ToLower() == email &&
+      f.Otp == otp &&
+              !f.IsUsed &&
+ f.ExpiresAt > DateTime.UtcNow)
+         .FirstOrDefault();
+
+                if (otpRecord != null)
+                {
+                    _otpCache.TryAdd(email, new OtpData
+                    {
+                        Otp = otp,
+                        ExpiryTime = otpRecord.ExpiresAt,
+                        FailedAttempts = 0
+                    });
+
+                    _logger.LogInformation("✅ OTP validated from database (sync) for {Email}", email);
+                    return true;
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error validating OTP from database (sync) for {Email}", email);
+                return false;
+            }
+        }
+
+        private async Task RemoveOtpFromDatabaseAsync(string email)
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                var otpRecords = await context.ForgotPasswordRequests
+              .Where(f => f.Email.ToLower() == email && !f.IsUsed)
+   .ToListAsync();
+
+                if (otpRecords.Any())
+                {
+                    foreach (var record in otpRecords)
+                    {
+                        record.IsUsed = true;
+                    }
+                    await context.SaveChangesAsync();
+                }
+
+                _logger.LogInformation("🗑️ OTP marked as used in database for {Email}", email);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error removing OTP from database for {Email}", email);
+            }
+        }
+
+        private async Task<bool> IsOtpExpiredInDatabaseAsync(string email)
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                var hasValidOtp = await context.ForgotPasswordRequests
+                     .AnyAsync(f => f.Email.ToLower() == email &&
+        !f.IsUsed &&
+        f.ExpiresAt > DateTime.UtcNow);
+
+                return !hasValidOtp;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error checking OTP expiry in database for {Email}", email);
+                return true;
+            }
+        }
+
+        private bool IsOtpExpiredInDatabaseSync(string email)
+        {
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+                var hasValidOtp = context.ForgotPasswordRequests
+     .Any(f => f.Email.ToLower() == email &&
+    !f.IsUsed &&
+                 f.ExpiresAt > DateTime.UtcNow);
+
+                return !hasValidOtp;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        #endregion
+
+        /// <summary>
+        /// Cleanup expired OTPs from cache
+        /// </summary>
         public void CleanupExpiredOtps()
         {
-            var expiredKeys = _otpStorage
-                .Where(x => DateTime.UtcNow > x.Value.ExpiryTime)
-      .Select(x => x.Key)
-   .ToList();
+            var expiredKeys = _otpCache
+       .Where(x => DateTime.UtcNow > x.Value.ExpiryTime)
+        .Select(x => x.Key)
+                .ToList();
 
-          foreach (var key in expiredKeys)
-        {
-       _otpStorage.TryRemove(key, out _);
-    }
+            foreach (var key in expiredKeys)
+            {
+                _otpCache.TryRemove(key, out _);
+            }
+
+            _logger.LogInformation("🧹 Cleaned up {Count} expired OTPs from cache", expiredKeys.Count);
         }
     }
 }

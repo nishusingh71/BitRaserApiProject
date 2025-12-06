@@ -425,58 +425,149 @@ public async Task<IActionResult> TestEmailConfiguration([FromBody] TestEmailRequ
       /// Diagnostic endpoint - Check email configuration
       /// </summary>
     [HttpGet("email-config-check")]
-        [AllowAnonymous]
+    [AllowAnonymous]
      public IActionResult CheckEmailConfiguration()
         {
-   try
+            try
    {
-      var smtpHost = _configuration["EmailSettings:SmtpHost"];
-            var smtpPort = _configuration["EmailSettings:SmtpPort"];
+      // Check appsettings configuration
+     var smtpHost = _configuration["EmailSettings:SmtpHost"];
+        var smtpPort = _configuration["EmailSettings:SmtpPort"];
      var fromEmail = _configuration["EmailSettings:FromEmail"];
-     var fromPassword = _configuration["EmailSettings:FromPassword"];
-           var fromName = _configuration["EmailSettings:FromName"];
-      var enableSsl = _configuration["EmailSettings:EnableSsl"];
+    var fromPassword = _configuration["EmailSettings:FromPassword"];
+   var fromName = _configuration["EmailSettings:FromName"];
+       var enableSsl = _configuration["EmailSettings:EnableSsl"];
+   var timeout = _configuration["EmailSettings:Timeout"];
 
-      // Also check environment variables
-     var envEmail = Environment.GetEnvironmentVariable("EmailSettings__FromEmail");
-    var envPassword = Environment.GetEnvironmentVariable("EmailSettings__FromPassword");
+      // Check environment variables (Render.com)
+     var envSmtpHost = Environment.GetEnvironmentVariable("EmailSettings__SmtpHost");
+   var envSmtpPort = Environment.GetEnvironmentVariable("EmailSettings__SmtpPort");
+  var envEmail = Environment.GetEnvironmentVariable("EmailSettings__FromEmail");
+  var envPassword = Environment.GetEnvironmentVariable("EmailSettings__FromPassword");
+  var envFromName = Environment.GetEnvironmentVariable("EmailSettings__FromName");
+      var envTimeout = Environment.GetEnvironmentVariable("EmailSettings__Timeout");
 
-    var configStatus = new
+            // Determine effective values (env vars take priority)
+       var effectiveHost = envSmtpHost ?? smtpHost ?? "NOT SET";
+     var effectivePort = envSmtpPort ?? smtpPort ?? "NOT SET";
+      var effectiveEmail = envEmail ?? fromEmail ?? "NOT SET";
+  var effectivePassword = envPassword ?? fromPassword;
+        var effectiveName = envFromName ?? fromName ?? "NOT SET";
+            var effectiveTimeout = envTimeout ?? timeout ?? "NOT SET";
+
+     var configStatus = new
+ {
+     environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Unknown",
+     serverTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+    
+           effectiveConfiguration = new
       {
-       fromConfiguration = new
-    {
-        smtpHost = smtpHost ?? "NOT SET",
-     smtpPort = smtpPort ?? "NOT SET",
-        fromEmail = fromEmail ?? "NOT SET",
-          fromPassword = string.IsNullOrEmpty(fromPassword) ? "NOT SET" : $"SET ({fromPassword.Length} chars)",
-        fromName = fromName ?? "NOT SET",
-    enableSsl = enableSsl ?? "NOT SET"
-        },
-fromEnvironmentVariables = new
-     {
-fromEmail = envEmail ?? "NOT SET",
-     password = string.IsNullOrEmpty(envPassword) ? "NOT SET" : $"SET ({envPassword.Length} chars)"
-         },
-      recommendations = new
-                {
-                   step1 = "Check .env file exists in project root",
-            step2 = "Verify EmailSettings__FromPassword has no spaces",
-               step3 = "Restart application after changing .env",
-          step4 = "Gmail App Password should be 16 characters",
-  step5 = "Try test-email endpoint to send actual email"
-   }
-              };
+            smtpHost = effectiveHost,
+ smtpPort = effectivePort,
+          fromEmail = effectiveEmail,
+      fromPassword = string.IsNullOrEmpty(effectivePassword) 
+     ? "❌ NOT SET" 
+    : $"✅ SET ({effectivePassword.Length} chars)",
+          fromName = effectiveName,
+  timeout = effectiveTimeout
+     },
+   
+   fromAppSettings = new
+   {
+ smtpHost = smtpHost ?? "NOT SET",
+            smtpPort = smtpPort ?? "NOT SET",
+       fromEmail = fromEmail ?? "NOT SET",
+   fromPassword = string.IsNullOrEmpty(fromPassword) 
+   ? "NOT SET" 
+ : $"SET ({fromPassword.Length} chars)",
+              fromName = fromName ?? "NOT SET",
+enableSsl = enableSsl ?? "NOT SET",
+        timeout = timeout ?? "NOT SET"
+      },
+    
+        fromEnvironmentVariables = new
+  {
+      smtpHost = envSmtpHost ?? "NOT SET",
+    smtpPort = envSmtpPort ?? "NOT SET",
+         fromEmail = envEmail ?? "NOT SET",
+     fromPassword = string.IsNullOrEmpty(envPassword) 
+ ? "NOT SET" 
+         : $"SET ({envPassword.Length} chars)",
+     fromName = envFromName ?? "NOT SET",
+       timeout = envTimeout ?? "NOT SET"
+    },
+
+  configurationStatus = new
+   {
+   isConfigured = !string.IsNullOrEmpty(effectiveEmail) && !string.IsNullOrEmpty(effectivePassword),
+           issues = GetConfigurationIssues(effectiveEmail, effectivePassword, effectiveHost, effectivePort)
+    },
+      
+   recommendations = new[]
+   {
+         "1. On Render.com, set environment variables with double underscore: EmailSettings__FromEmail",
+      "2. Gmail App Password should be 16 characters without spaces",
+       "3. Generate at: https://myaccount.google.com/apppasswords",
+ "4. Use test-email endpoint to verify email sending",
+           "5. Check Render.com logs for detailed error messages"
+       }
+            };
 
      return Ok(configStatus);
-       }
-            catch (Exception ex)
-     {
-          return StatusCode(500, new
-  {
-                error = ex.Message,
-    message = "Error checking email configuration"
-      });
-      }
+ }
+      catch (Exception ex)
+            {
+    return StatusCode(500, new
+    {
+  error = ex.Message,
+     innerError = ex.InnerException?.Message,
+       message = "Error checking email configuration"
+            });
+ }
+        }
+
+        private List<string> GetConfigurationIssues(string email, string password, string host, string port)
+        {
+         var issues = new List<string>();
+
+       if (string.IsNullOrEmpty(email) || email == "NOT SET")
+           issues.Add("❌ FromEmail is not configured");
+       
+  if (string.IsNullOrEmpty(password))
+      issues.Add("❌ FromPassword is not configured");
+       else if (password.Length != 16)
+       issues.Add($"⚠️ Password length is {password.Length} chars (Gmail App Password should be 16)");
+            
+ if (string.IsNullOrEmpty(host) || host == "NOT SET")
+    issues.Add("❌ SmtpHost is not configured");
+
+     if (string.IsNullOrEmpty(port) || port == "NOT SET")
+    issues.Add("❌ SmtpPort is not configured");
+
+if (!issues.Any())
+      issues.Add("✅ All configurations look good!");
+
+            return issues;
+   }
+
+        /// <summary>
+     /// Render.com health check - Verify service is running
+     /// </summary>
+        [HttpGet("health")]
+        [AllowAnonymous]
+        public IActionResult HealthCheck()
+        {
+   return Ok(new
+       {
+      status = "healthy",
+    service = "ForgotPasswordController",
+ environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Unknown",
+  serverTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+        emailConfigured = !string.IsNullOrEmpty(
+   Environment.GetEnvironmentVariable("EmailSettings__FromEmail") ?? 
+     _configuration["EmailSettings:FromEmail"]
+       )
+            });
         }
     }
 

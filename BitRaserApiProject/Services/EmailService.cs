@@ -6,281 +6,319 @@ namespace BitRaserApiProject.Services
 {
     public interface IEmailService
     {
-     Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName);
+        Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName);
      Task<bool> SendPasswordResetSuccessEmailAsync(string toEmail, string userName);
-  Task<bool> SendGenericEmailAsync(string toEmail, string subject, string htmlBody);
-    }
+   Task<bool> SendGenericEmailAsync(string toEmail, string subject, string htmlBody);
+  }
 
     public class EmailService : IEmailService
     {
         private readonly IConfiguration _configuration;
-        private readonly ILogger<EmailService> _logger;
-        private readonly IWebHostEnvironment _env;
+      private readonly ILogger<EmailService> _logger;
+     private readonly IWebHostEnvironment _env;
 
         public EmailService(
-        IConfiguration configuration,
- ILogger<EmailService> logger,
+ IConfiguration configuration,
+      ILogger<EmailService> logger,
             IWebHostEnvironment env)
         {
-       _configuration = configuration;
-         _logger = logger;
-            _env = env;
+            _configuration = configuration;
+_logger = logger;
+      _env = env;
         }
 
-        public async Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName)
-  {
-            try
-       {
-           // ✅ Get configuration from appsettings.json
- var smtpHost = _configuration["EmailSettings:SmtpHost"] ?? "smtp.gmail.com";
-     var smtpPort = int.Parse(_configuration["EmailSettings:SmtpPort"] ?? "587");
-    var fromEmail = _configuration["EmailSettings:FromEmail"];
-       var fromPassword = _configuration["EmailSettings:FromPassword"];
-          var fromName = _configuration["EmailSettings:FromName"] ?? "DSecure Support";
-          var enableSsl = bool.Parse(_configuration["EmailSettings:EnableSsl"] ?? "true");
-        var timeout = int.Parse(_configuration["EmailSettings:Timeout"] ?? "60000");
+    public async Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName)
+        {
+       try
+            {
+          // ✅ Get configuration - Check environment variables first (for Render.com)
+       var smtpHost = Environment.GetEnvironmentVariable("EmailSettings__SmtpHost") 
+         ?? _configuration["EmailSettings:SmtpHost"] 
+ ?? "smtp.gmail.com";
+            
+             var smtpPortStr = Environment.GetEnvironmentVariable("EmailSettings__SmtpPort") 
+          ?? _configuration["EmailSettings:SmtpPort"] 
+     ?? "587";
+    var smtpPort = int.Parse(smtpPortStr);
+   
+   var fromEmail = Environment.GetEnvironmentVariable("EmailSettings__FromEmail") 
+           ?? _configuration["EmailSettings:FromEmail"];
+           
+ var fromPassword = Environment.GetEnvironmentVariable("EmailSettings__FromPassword") 
+      ?? _configuration["EmailSettings:FromPassword"];
+  
+      var fromName = Environment.GetEnvironmentVariable("EmailSettings__FromName") 
+       ?? _configuration["EmailSettings:FromName"] 
+  ?? "DSecure Support";
+     
+        var timeoutStr = Environment.GetEnvironmentVariable("EmailSettings__Timeout") 
+   ?? _configuration["EmailSettings:Timeout"] 
+             ?? "120000"; // ✅ Increased to 120 seconds for Render
+           var timeout = int.Parse(timeoutStr);
 
-        // ✅ Validate required settings
+ // ✅ Validate required settings
          if (string.IsNullOrEmpty(fromEmail))
-           {
-          _logger.LogError("❌ FromEmail is not configured in appsettings.json!");
- return false;
-             }
-
-  if (string.IsNullOrEmpty(fromPassword))
-       {
-          _logger.LogError("❌ FromPassword is not configured in appsettings.json!");
-  return false;
-     }
-
-     _logger.LogInformation("📧 Email Configuration [Environment: {Env}]", _env.EnvironmentName);
-         _logger.LogInformation("   Host: {Host}:{Port}, SSL: {SSL}", smtpHost, smtpPort, enableSsl);
-
-      // ✅ Create MimeMessage
- var message = new MimeMessage();
-        message.From.Add(new MailboxAddress(fromName, fromEmail));
-   message.To.Add(new MailboxAddress(userName ?? toEmail, toEmail));
-         message.Subject = "Password Reset OTP - DSecure";
-     message.Priority = MessagePriority.Urgent;
-
-                // ✅ Create HTML body
-           var bodyBuilder = new BodyBuilder
-                {
-        HtmlBody = GetOtpEmailBody(userName ?? "User", otp)
-        };
- message.Body = bodyBuilder.ToMessageBody();
-
-     // ✅ Retry logic with MailKit
-          int maxRetries = 3;
-      int retryCount = 0;
-   Exception? lastException = null;
-
-    while (retryCount < maxRetries)
     {
-            try
-             {
-   _logger.LogInformation("📧 Attempt {Retry}/{Max} - Sending OTP email to {Email}",
-         retryCount + 1, maxRetries, toEmail);
-
-    using var smtpClient = new SmtpClient();
- smtpClient.Timeout = timeout;
-
-  // ✅ Connect with appropriate security
-        if (smtpPort == 465)
-     {
- // SSL/TLS on port 465
-     await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.SslOnConnect);
-       }
-     else
-   {
-          // STARTTLS on port 587 or others
-       await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
-}
-
-       // ✅ Authenticate
- await smtpClient.AuthenticateAsync(fromEmail, fromPassword);
-
-             // ✅ Send email
-         await smtpClient.SendAsync(message);
-
-      // ✅ Disconnect
-  await smtpClient.DisconnectAsync(true);
-
-   _logger.LogInformation("✅ OTP email sent successfully to {Email}", toEmail);
-         return true;
-    }
-        catch (Exception ex)
-              {
-                    lastException = ex;
-            retryCount++;
-
-                _logger.LogWarning("⚠️ SMTP attempt {Retry} failed: {Message}",
-         retryCount, ex.Message);
-
-    if (retryCount < maxRetries)
-    {
-   await Task.Delay(1000 * retryCount); // Exponential backoff
-      }
-            }
-       }
-
-           // All retries failed
-   if (lastException != null)
-       {
-     throw lastException;
-    }
-
-        return false;
-       }
-            catch (MailKit.Security.AuthenticationException authEx)
-            {
-         _logger.LogError(authEx, "🔐 SMTP Authentication Failed for {Email}", toEmail);
-     _logger.LogError("   ✅ Check EmailSettings:FromPassword in appsettings.json");
-     _logger.LogError("   ✅ Verify Gmail App Password (16 chars, no spaces)");
-  _logger.LogError("   ✅ Generate new: https://myaccount.google.com/apppasswords");
+       _logger.LogError("❌ FromEmail is not configured!");
+  _logger.LogError("   Set EmailSettings__FromEmail environment variable on Render.com");
    return false;
-     }
-      catch (MailKit.Net.Smtp.SmtpCommandException smtpEx)
-            {
-    _logger.LogError(smtpEx, "❌ SMTP Command Error: {StatusCode} - {Message}",
-       smtpEx.StatusCode, smtpEx.Message);
-             return false;
-            }
-            catch (MailKit.Net.Smtp.SmtpProtocolException protocolEx)
-   {
-          _logger.LogError(protocolEx, "❌ SMTP Protocol Error: {Message}", protocolEx.Message);
-          return false;
-            }
-       catch (TimeoutException timeoutEx)
-            {
-                _logger.LogError(timeoutEx, "⏱️ SMTP Connection Timeout!");
-                _logger.LogError("   ✅ Check firewall allows port 587");
-   _logger.LogError("   ✅ Try increasing EmailSettings:Timeout in appsettings.json");
-          return false;
- }
-            catch (Exception ex)
-            {
-      _logger.LogError(ex, "❌ Unexpected error sending OTP email to {Email}", toEmail);
-  _logger.LogError("   Environment: {Env}", _env.EnvironmentName);
-                _logger.LogError("   InnerException: {Inner}", ex.InnerException?.Message);
-     return false;
-   }
-        }
+    }
 
-     public async Task<bool> SendPasswordResetSuccessEmailAsync(string toEmail, string userName)
-   {
-        try
+   if (string.IsNullOrEmpty(fromPassword))
     {
-            var smtpHost = _configuration["EmailSettings:SmtpHost"] ?? "smtp.gmail.com";
-       var smtpPort = int.Parse(_configuration["EmailSettings:SmtpPort"] ?? "587");
-      var fromEmail = _configuration["EmailSettings:FromEmail"];
-       var fromPassword = _configuration["EmailSettings:FromPassword"];
-  var fromName = _configuration["EmailSettings:FromName"] ?? "DSecure Support";
-  var timeout = int.Parse(_configuration["EmailSettings:Timeout"] ?? "60000");
-
-      if (string.IsNullOrEmpty(fromEmail) || string.IsNullOrEmpty(fromPassword))
-        {
-       _logger.LogError("❌ Email settings not configured in appsettings.json");
-          return false;
-              }
-
-          // ✅ Create MimeMessage
-          var message = new MimeMessage();
-     message.From.Add(new MailboxAddress(fromName, fromEmail));
-       message.To.Add(new MailboxAddress(userName ?? toEmail, toEmail));
-     message.Subject = "Password Reset Successful - DSecure";
-
-             var bodyBuilder = new BodyBuilder
-        {
-       HtmlBody = GetPasswordResetSuccessEmailBody(userName ?? "User")
-           };
-          message.Body = bodyBuilder.ToMessageBody();
-
-     // ✅ Send with MailKit
-    using var smtpClient = new SmtpClient();
-      smtpClient.Timeout = timeout;
-
-      if (smtpPort == 465)
-       {
-       await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.SslOnConnect);
-     }
-           else
-    {
-         await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
-      }
-
-  await smtpClient.AuthenticateAsync(fromEmail, fromPassword);
-  await smtpClient.SendAsync(message);
-       await smtpClient.DisconnectAsync(true);
-
-     _logger.LogInformation("✅ Password reset success email sent to {Email}", toEmail);
-                return true;
-         }
-        catch (Exception ex)
-            {
-          _logger.LogError(ex, "❌ Failed to send password reset success email to {Email}", toEmail);
-    return false;
-         }
-     }
-
-        public async Task<bool> SendGenericEmailAsync(string toEmail, string subject, string htmlBody)
-   {
-        try
-      {
-      var smtpHost = _configuration["EmailSettings:SmtpHost"] ?? "smtp.gmail.com";
-      var smtpPort = int.Parse(_configuration["EmailSettings:SmtpPort"] ?? "587");
-  var fromEmail = _configuration["EmailSettings:FromEmail"];
-    var fromPassword = _configuration["EmailSettings:FromPassword"];
-        var fromName = _configuration["EmailSettings:FromName"] ?? "DSecure Support";
-                var timeout = int.Parse(_configuration["EmailSettings:Timeout"] ?? "60000");
-
-     if (string.IsNullOrEmpty(fromEmail) || string.IsNullOrEmpty(fromPassword))
-                {
-    _logger.LogError("❌ Email settings not configured in appsettings.json");
-return false;
+       _logger.LogError("❌ FromPassword is not configured!");
+  _logger.LogError("   Set EmailSettings__FromPassword environment variable on Render.com");
+ return false;
   }
 
-        // ✅ Create MimeMessage
-     var message = new MimeMessage();
-         message.From.Add(new MailboxAddress(fromName, fromEmail));
-      message.To.Add(MailboxAddress.Parse(toEmail));
-   message.Subject = subject;
+     _logger.LogInformation("📧 Email Configuration [Environment: {Env}]", _env.EnvironmentName);
+ _logger.LogInformation("   Host: {Host}:{Port}, Timeout: {Timeout}ms", smtpHost, smtpPort, timeout);
+ _logger.LogInformation("   From: {From}, Password: {PasswordLength} chars", 
+        fromEmail, fromPassword.Length);
 
-      var bodyBuilder = new BodyBuilder
-       {
-          HtmlBody = htmlBody
-          };
-         message.Body = bodyBuilder.ToMessageBody();
+      // ✅ Create MimeMessage
+        var message = new MimeMessage();
+   message.From.Add(new MailboxAddress(fromName, fromEmail));
+    message.To.Add(new MailboxAddress(userName ?? toEmail, toEmail));
+  message.Subject = "Password Reset OTP - DSecure";
+    message.Priority = MessagePriority.Urgent;
 
-       // ✅ Send with MailKit
-      using var smtpClient = new SmtpClient();
-          smtpClient.Timeout = timeout;
+        var bodyBuilder = new BodyBuilder
+     {
+      HtmlBody = GetOtpEmailBody(userName ?? "User", otp)
+    };
+   message.Body = bodyBuilder.ToMessageBody();
 
-                if (smtpPort == 465)
-         {
-          await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.SslOnConnect);
+     // ✅ Retry logic with better error handling for Render.com
+    int maxRetries = 3;
+                int retryCount = 0;
+ Exception? lastException = null;
+
+         while (retryCount < maxRetries)
+  {
+   try
+      {
+     _logger.LogInformation("📧 Attempt {Retry}/{Max} - Sending OTP email to {Email}",
+      retryCount + 1, maxRetries, toEmail);
+
+    using var smtpClient = new SmtpClient();
+smtpClient.Timeout = timeout;
+        
+        // ✅ Disable certificate validation for Render.com (if needed)
+       smtpClient.ServerCertificateValidationCallback = (s, c, h, e) => true;
+
+         // ✅ Connect with appropriate security
+  if (smtpPort == 465)
+  {
+           await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.SslOnConnect);
+    }
+     else
+      {
+             await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
+              }
+
+ _logger.LogInformation("✅ Connected to SMTP server");
+
+    // ✅ Authenticate
+       await smtpClient.AuthenticateAsync(fromEmail, fromPassword);
+   _logger.LogInformation("✅ Authenticated with SMTP server");
+
+         // ✅ Send email
+      await smtpClient.SendAsync(message);
+    _logger.LogInformation("✅ Email sent to SMTP server");
+
+      // ✅ Disconnect
+            await smtpClient.DisconnectAsync(true);
+
+   _logger.LogInformation("✅ OTP email sent successfully to {Email}", toEmail);
+       return true;
        }
-        else
-             {
-await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
+           catch (MailKit.Security.AuthenticationException authEx)
+     {
+         _logger.LogError(authEx, "🔐 SMTP Authentication Failed");
+ _logger.LogError("   Check EmailSettings__FromPassword on Render.com");
+   lastException = authEx;
+  break; // Don't retry auth failures
+  }
+catch (System.Net.Sockets.SocketException socketEx)
+      {
+       lastException = socketEx;
+        retryCount++;
+       _logger.LogWarning("🔌 Socket error (attempt {Retry}): {Message}", retryCount, socketEx.Message);
+       
+            if (retryCount < maxRetries)
+        {
+          await Task.Delay(2000 * retryCount);
+       }
+       }
+      catch (TimeoutException timeoutEx)
+        {
+     lastException = timeoutEx;
+  retryCount++;
+     _logger.LogWarning("⏱️ Timeout (attempt {Retry}): {Message}", retryCount, timeoutEx.Message);
+     
+     if (retryCount < maxRetries)
+     {
+      await Task.Delay(2000 * retryCount);
+             }
+      }
+   catch (Exception ex)
+           {
+   lastException = ex;
+       retryCount++;
+       _logger.LogWarning("⚠️ SMTP error (attempt {Retry}): {Message}", retryCount, ex.Message);
+
+     if (retryCount < maxRetries)
+    {
+  await Task.Delay(2000 * retryCount);
+   }
+ }
+    }
+
+      // All retries failed
+    if (lastException != null)
+    {
+  _logger.LogError(lastException, "❌ All {Max} attempts failed for {Email}", maxRetries, toEmail);
         }
 
-           await smtpClient.AuthenticateAsync(fromEmail, fromPassword);
-          await smtpClient.SendAsync(message);
-                await smtpClient.DisconnectAsync(true);
+return false;
+   }
+   catch (Exception ex)
+ {
+         _logger.LogError(ex, "❌ Unexpected error sending OTP email to {Email}", toEmail);
+  return false;
+   }
+     }
+
+     public async Task<bool> SendPasswordResetSuccessEmailAsync(string toEmail, string userName)
+        {
+try
+   {
+var smtpHost = Environment.GetEnvironmentVariable("EmailSettings__SmtpHost") 
+   ?? _configuration["EmailSettings:SmtpHost"] 
+    ?? "smtp.gmail.com";
+         var smtpPort = int.Parse(Environment.GetEnvironmentVariable("EmailSettings__SmtpPort") 
+        ?? _configuration["EmailSettings:SmtpPort"] 
+      ?? "587");
+                var fromEmail = Environment.GetEnvironmentVariable("EmailSettings__FromEmail") 
+      ?? _configuration["EmailSettings:FromEmail"];
+     var fromPassword = Environment.GetEnvironmentVariable("EmailSettings__FromPassword") 
+   ?? _configuration["EmailSettings:FromPassword"];
+    var fromName = Environment.GetEnvironmentVariable("EmailSettings__FromName") 
+        ?? _configuration["EmailSettings:FromName"] 
+ ?? "DSecure Support";
+     var timeout = int.Parse(Environment.GetEnvironmentVariable("EmailSettings__Timeout") 
+       ?? _configuration["EmailSettings:Timeout"] 
+       ?? "120000");
+
+       if (string.IsNullOrEmpty(fromEmail) || string.IsNullOrEmpty(fromPassword))
+   {
+           _logger.LogError("❌ Email settings not configured");
+     return false;
+  }
+
+    var message = new MimeMessage();
+  message.From.Add(new MailboxAddress(fromName, fromEmail));
+        message.To.Add(new MailboxAddress(userName ?? toEmail, toEmail));
+      message.Subject = "Password Reset Successful - DSecure";
+
+          var bodyBuilder = new BodyBuilder
+            {
+     HtmlBody = GetPasswordResetSuccessEmailBody(userName ?? "User")
+      };
+  message.Body = bodyBuilder.ToMessageBody();
+
+    using var smtpClient = new SmtpClient();
+  smtpClient.Timeout = timeout;
+     smtpClient.ServerCertificateValidationCallback = (s, c, h, e) => true;
+
+        if (smtpPort == 465)
+    {
+          await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.SslOnConnect);
+     }
+       else
+          {
+       await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
+                }
+
+            await smtpClient.AuthenticateAsync(fromEmail, fromPassword);
+  await smtpClient.SendAsync(message);
+     await smtpClient.DisconnectAsync(true);
+
+ _logger.LogInformation("✅ Password reset success email sent to {Email}", toEmail);
+           return true;
+      }
+ catch (Exception ex)
+     {
+           _logger.LogError(ex, "❌ Failed to send password reset success email to {Email}", toEmail);
+     return false;
+     }
+        }
+
+     public async Task<bool> SendGenericEmailAsync(string toEmail, string subject, string htmlBody)
+ {
+            try
+            {
+   var smtpHost = Environment.GetEnvironmentVariable("EmailSettings__SmtpHost") 
+      ?? _configuration["EmailSettings:SmtpHost"] 
+         ?? "smtp.gmail.com";
+         var smtpPort = int.Parse(Environment.GetEnvironmentVariable("EmailSettings__SmtpPort") 
+?? _configuration["EmailSettings:SmtpPort"] 
+         ?? "587");
+     var fromEmail = Environment.GetEnvironmentVariable("EmailSettings__FromEmail") 
+ ?? _configuration["EmailSettings:FromEmail"];
+  var fromPassword = Environment.GetEnvironmentVariable("EmailSettings__FromPassword") 
+ ?? _configuration["EmailSettings:FromPassword"];
+      var fromName = Environment.GetEnvironmentVariable("EmailSettings__FromName") 
+             ?? _configuration["EmailSettings:FromName"] 
+  ?? "DSecure Support";
+          var timeout = int.Parse(Environment.GetEnvironmentVariable("EmailSettings__Timeout") 
+            ?? _configuration["EmailSettings:Timeout"] 
+    ?? "120000");
+
+          if (string.IsNullOrEmpty(fromEmail) || string.IsNullOrEmpty(fromPassword))
+        {
+     _logger.LogError("❌ Email settings not configured");
+   return false;
+         }
+
+      var message = new MimeMessage();
+       message.From.Add(new MailboxAddress(fromName, fromEmail));
+        message.To.Add(MailboxAddress.Parse(toEmail));
+       message.Subject = subject;
+
+        var bodyBuilder = new BodyBuilder { HtmlBody = htmlBody };
+  message.Body = bodyBuilder.ToMessageBody();
+
+            using var smtpClient = new SmtpClient();
+   smtpClient.Timeout = timeout;
+smtpClient.ServerCertificateValidationCallback = (s, c, h, e) => true;
+
+  if (smtpPort == 465)
+               {
+      await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.SslOnConnect);
+    }
+            else
+  {
+      await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
+           }
+
+          await smtpClient.AuthenticateAsync(fromEmail, fromPassword);
+        await smtpClient.SendAsync(message);
+               await smtpClient.DisconnectAsync(true);
 
     _logger.LogInformation("✅ Generic email sent to {Email} - Subject: {Subject}", toEmail, subject);
- return true;
-            }
-    catch (Exception ex)
-            {
-    _logger.LogError(ex, "❌ Failed to send generic email to {Email}", toEmail);
-    return false;
-            }
-   }
+           return true;
+    }
+          catch (Exception ex)
+  {
+  _logger.LogError(ex, "❌ Failed to send generic email to {Email}", toEmail);
+          return false;
+    }
+  }
 
         private string GetOtpEmailBody(string userName, string otp)
-{
+      {
       return $@"
 <!DOCTYPE html>
 <html>
@@ -321,11 +359,11 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f4f4; m
 </div>
 </body>
 </html>";
-        }
+    }
 
-private string GetPasswordResetSuccessEmailBody(string userName)
+        private string GetPasswordResetSuccessEmailBody(string userName)
         {
-      return $@"
+  return $@"
 <!DOCTYPE html>
 <html>
 <head>
@@ -373,6 +411,6 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f4f4; m
 </div>
 </body>
 </html>";
-        }
+     }
     }
 }
