@@ -1,325 +1,427 @@
 using MailKit.Net.Smtp;
 using MailKit.Security;
 using MimeKit;
+using sib_api_v3_sdk.Api;
+using sib_api_v3_sdk.Client;
+using sib_api_v3_sdk.Model;
 
 namespace BitRaserApiProject.Services
 {
     public interface IEmailService
-    {
-        Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName);
-     Task<bool> SendPasswordResetSuccessEmailAsync(string toEmail, string userName);
-   Task<bool> SendGenericEmailAsync(string toEmail, string subject, string htmlBody);
-  }
+{
+        System.Threading.Tasks.Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName);
+        System.Threading.Tasks.Task<bool> SendPasswordResetSuccessEmailAsync(string toEmail, string userName);
+        System.Threading.Tasks.Task<bool> SendGenericEmailAsync(string toEmail, string subject, string htmlBody);
+    }
 
     public class EmailService : IEmailService
     {
-        private readonly IConfiguration _configuration;
-      private readonly ILogger<EmailService> _logger;
-     private readonly IWebHostEnvironment _env;
+      private readonly IConfiguration _configuration;
+        private readonly ILogger<EmailService> _logger;
+        private readonly IWebHostEnvironment _env;
 
         public EmailService(
- IConfiguration configuration,
+      IConfiguration configuration,
       ILogger<EmailService> logger,
-            IWebHostEnvironment env)
+   IWebHostEnvironment env)
         {
-            _configuration = configuration;
-_logger = logger;
-      _env = env;
+          _configuration = configuration;
+            _logger = logger;
+    _env = env;
+   }
+
+        public async System.Threading.Tasks.Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName)
+        {
+ var subject = "Password Reset OTP - DSecure";
+  var htmlBody = GetOtpEmailBody(userName ?? "User", otp);
+
+     return await SendEmailAsync(toEmail, userName ?? toEmail, subject, htmlBody, true);
+    }
+
+        public async System.Threading.Tasks.Task<bool> SendPasswordResetSuccessEmailAsync(string toEmail, string userName)
+        {
+    var subject = "Password Reset Successful - DSecure";
+      var htmlBody = GetPasswordResetSuccessEmailBody(userName ?? "User");
+
+   return await SendEmailAsync(toEmail, userName ?? toEmail, subject, htmlBody, false);
+      }
+
+        public async System.Threading.Tasks.Task<bool> SendGenericEmailAsync(string toEmail, string subject, string htmlBody)
+        {
+            return await SendEmailAsync(toEmail, toEmail, subject, htmlBody, false);
         }
 
-    public async Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName)
-        {
-       try
+        /// <summary>
+   /// Main email sending method - auto-detects provider
+        /// Priority: Brevo API > Brevo SMTP > Gmail SMTP
+  /// </summary>
+    private async System.Threading.Tasks.Task<bool> SendEmailAsync(string toEmail, string toName, string subject, string htmlBody, bool withRetry)
+      {
+            var brevoKey = GetBrevoKey();
+
+      // Check if it's a Brevo API key (xkeysib-...) or SMTP key (xsmtpsib-...)
+            if (!string.IsNullOrEmpty(brevoKey))
             {
-          // ✅ Get configuration - Check environment variables first (for Render.com)
-       var smtpHost = Environment.GetEnvironmentVariable("EmailSettings__SmtpHost") 
-         ?? _configuration["EmailSettings:SmtpHost"] 
- ?? "smtp.gmail.com";
-            
-             var smtpPortStr = Environment.GetEnvironmentVariable("EmailSettings__SmtpPort") 
-          ?? _configuration["EmailSettings:SmtpPort"] 
-     ?? "587";
-    var smtpPort = int.Parse(smtpPortStr);
+             if (brevoKey.StartsWith("xkeysib-"))
+     {
+    // Use Brevo REST API
+     _logger.LogInformation("📧 Using Brevo API to send email to {Email}", toEmail);
+               var result = await SendViaBrevoApiAsync(toEmail, toName, subject, htmlBody);
+        if (result) return true;
    
-   var fromEmail = Environment.GetEnvironmentVariable("EmailSettings__FromEmail") 
-           ?? _configuration["EmailSettings:FromEmail"];
-           
- var fromPassword = Environment.GetEnvironmentVariable("EmailSettings__FromPassword") 
-      ?? _configuration["EmailSettings:FromPassword"];
-  
-      var fromName = Environment.GetEnvironmentVariable("EmailSettings__FromName") 
-       ?? _configuration["EmailSettings:FromName"] 
-  ?? "DSecure Support";
-     
-        var timeoutStr = Environment.GetEnvironmentVariable("EmailSettings__Timeout") 
-   ?? _configuration["EmailSettings:Timeout"] 
-             ?? "120000"; // ✅ Increased to 120 seconds for Render
-           var timeout = int.Parse(timeoutStr);
-
- // ✅ Validate required settings
-         if (string.IsNullOrEmpty(fromEmail))
-    {
-       _logger.LogError("❌ FromEmail is not configured!");
-  _logger.LogError("   Set EmailSettings__FromEmail environment variable on Render.com");
-   return false;
-    }
-
-   if (string.IsNullOrEmpty(fromPassword))
-    {
-       _logger.LogError("❌ FromPassword is not configured!");
-  _logger.LogError("   Set EmailSettings__FromPassword environment variable on Render.com");
- return false;
-  }
-
-     _logger.LogInformation("📧 Email Configuration [Environment: {Env}]", _env.EnvironmentName);
- _logger.LogInformation("   Host: {Host}:{Port}, Timeout: {Timeout}ms", smtpHost, smtpPort, timeout);
- _logger.LogInformation("   From: {From}, Password: {PasswordLength} chars", 
-        fromEmail, fromPassword.Length);
-
-      // ✅ Create MimeMessage
-        var message = new MimeMessage();
-   message.From.Add(new MailboxAddress(fromName, fromEmail));
-    message.To.Add(new MailboxAddress(userName ?? toEmail, toEmail));
-  message.Subject = "Password Reset OTP - DSecure";
-    message.Priority = MessagePriority.Urgent;
-
-        var bodyBuilder = new BodyBuilder
-     {
-      HtmlBody = GetOtpEmailBody(userName ?? "User", otp)
-    };
-   message.Body = bodyBuilder.ToMessageBody();
-
-     // ✅ Retry logic with better error handling for Render.com
-    int maxRetries = 3;
-                int retryCount = 0;
- Exception? lastException = null;
-
-         while (retryCount < maxRetries)
+        // Fallback to SMTP if API fails
+           _logger.LogWarning("⚠️ Brevo API failed, trying Brevo SMTP...");
+        }
+          
+  if (brevoKey.StartsWith("xsmtpsib-") || brevoKey.StartsWith("xkeysib-"))
   {
-   try
-      {
-     _logger.LogInformation("📧 Attempt {Retry}/{Max} - Sending OTP email to {Email}",
-      retryCount + 1, maxRetries, toEmail);
-
-    using var smtpClient = new SmtpClient();
-smtpClient.Timeout = timeout;
-        
-        // ✅ Disable certificate validation for Render.com (if needed)
-       smtpClient.ServerCertificateValidationCallback = (s, c, h, e) => true;
-
-         // ✅ Connect with appropriate security
-  if (smtpPort == 465)
-  {
-           await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.SslOnConnect);
-    }
-     else
-      {
-             await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
-              }
-
- _logger.LogInformation("✅ Connected to SMTP server");
-
-    // ✅ Authenticate
-       await smtpClient.AuthenticateAsync(fromEmail, fromPassword);
-   _logger.LogInformation("✅ Authenticated with SMTP server");
-
-         // ✅ Send email
-      await smtpClient.SendAsync(message);
-    _logger.LogInformation("✅ Email sent to SMTP server");
-
-      // ✅ Disconnect
-            await smtpClient.DisconnectAsync(true);
-
-   _logger.LogInformation("✅ OTP email sent successfully to {Email}", toEmail);
-       return true;
-       }
-           catch (MailKit.Security.AuthenticationException authEx)
-     {
-         _logger.LogError(authEx, "🔐 SMTP Authentication Failed");
- _logger.LogError("   Check EmailSettings__FromPassword on Render.com");
-   lastException = authEx;
-  break; // Don't retry auth failures
-  }
-catch (System.Net.Sockets.SocketException socketEx)
-      {
-       lastException = socketEx;
-        retryCount++;
-       _logger.LogWarning("🔌 Socket error (attempt {Retry}): {Message}", retryCount, socketEx.Message);
-       
-            if (retryCount < maxRetries)
-        {
-          await Task.Delay(2000 * retryCount);
-       }
-       }
-      catch (TimeoutException timeoutEx)
-        {
-     lastException = timeoutEx;
-  retryCount++;
-     _logger.LogWarning("⏱️ Timeout (attempt {Retry}): {Message}", retryCount, timeoutEx.Message);
-     
-     if (retryCount < maxRetries)
-     {
-      await Task.Delay(2000 * retryCount);
-             }
+          // Use Brevo SMTP
+             _logger.LogInformation("📧 Using Brevo SMTP to send email to {Email}", toEmail);
+  var result = await SendViaBrevoSmtpAsync(toEmail, toName, subject, htmlBody, withRetry);
+          if (result) return true;
+    
+        _logger.LogWarning("⚠️ Brevo SMTP failed, trying Gmail SMTP...");
       }
-   catch (Exception ex)
-           {
-   lastException = ex;
-       retryCount++;
-       _logger.LogWarning("⚠️ SMTP error (attempt {Retry}): {Message}", retryCount, ex.Message);
+     }
 
-     if (retryCount < maxRetries)
-    {
-  await Task.Delay(2000 * retryCount);
-   }
- }
-    }
-
-      // All retries failed
-    if (lastException != null)
-    {
-  _logger.LogError(lastException, "❌ All {Max} attempts failed for {Email}", maxRetries, toEmail);
+          // Fallback to Gmail SMTP
+            _logger.LogInformation("📧 Using Gmail SMTP to send email to {Email}", toEmail);
+            return await SendViaGmailSmtpAsync(toEmail, toName, subject, htmlBody, withRetry);
         }
 
-return false;
-   }
-   catch (Exception ex)
- {
-         _logger.LogError(ex, "❌ Unexpected error sending OTP email to {Email}", toEmail);
-  return false;
-   }
-     }
+        #region Configuration Getters
 
-     public async Task<bool> SendPasswordResetSuccessEmailAsync(string toEmail, string userName)
-        {
-try
-   {
-var smtpHost = Environment.GetEnvironmentVariable("EmailSettings__SmtpHost") 
-   ?? _configuration["EmailSettings:SmtpHost"] 
-    ?? "smtp.gmail.com";
-         var smtpPort = int.Parse(Environment.GetEnvironmentVariable("EmailSettings__SmtpPort") 
-        ?? _configuration["EmailSettings:SmtpPort"] 
-      ?? "587");
-                var fromEmail = Environment.GetEnvironmentVariable("EmailSettings__FromEmail") 
-      ?? _configuration["EmailSettings:FromEmail"];
-     var fromPassword = Environment.GetEnvironmentVariable("EmailSettings__FromPassword") 
-   ?? _configuration["EmailSettings:FromPassword"];
-    var fromName = Environment.GetEnvironmentVariable("EmailSettings__FromName") 
-        ?? _configuration["EmailSettings:FromName"] 
- ?? "DSecure Support";
-     var timeout = int.Parse(Environment.GetEnvironmentVariable("EmailSettings__Timeout") 
-       ?? _configuration["EmailSettings:Timeout"] 
-       ?? "120000");
-
-       if (string.IsNullOrEmpty(fromEmail) || string.IsNullOrEmpty(fromPassword))
-   {
-           _logger.LogError("❌ Email settings not configured");
-     return false;
-  }
-
-    var message = new MimeMessage();
-  message.From.Add(new MailboxAddress(fromName, fromEmail));
-        message.To.Add(new MailboxAddress(userName ?? toEmail, toEmail));
-      message.Subject = "Password Reset Successful - DSecure";
-
-          var bodyBuilder = new BodyBuilder
-            {
-     HtmlBody = GetPasswordResetSuccessEmailBody(userName ?? "User")
-      };
-  message.Body = bodyBuilder.ToMessageBody();
-
-    using var smtpClient = new SmtpClient();
-  smtpClient.Timeout = timeout;
-     smtpClient.ServerCertificateValidationCallback = (s, c, h, e) => true;
-
-        if (smtpPort == 465)
-    {
-          await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.SslOnConnect);
-     }
-       else
-          {
-       await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
-                }
-
-            await smtpClient.AuthenticateAsync(fromEmail, fromPassword);
-  await smtpClient.SendAsync(message);
-     await smtpClient.DisconnectAsync(true);
-
- _logger.LogInformation("✅ Password reset success email sent to {Email}", toEmail);
-           return true;
-      }
- catch (Exception ex)
-     {
-           _logger.LogError(ex, "❌ Failed to send password reset success email to {Email}", toEmail);
-     return false;
-     }
+        private string? GetBrevoKey()
+      {
+   return Environment.GetEnvironmentVariable("Brevo__ApiKey")
+          ?? Environment.GetEnvironmentVariable("BREVO_API_KEY")
+    ?? _configuration["Brevo:ApiKey"];
         }
 
-     public async Task<bool> SendGenericEmailAsync(string toEmail, string subject, string htmlBody)
- {
+        private string GetBrevoSenderEmail()
+{
+            return Environment.GetEnvironmentVariable("Brevo__SenderEmail")
+    ?? Environment.GetEnvironmentVariable("BREVO_SENDER_EMAIL")
+   ?? _configuration["Brevo:SenderEmail"]
+        ?? _configuration["EmailSettings:FromEmail"]
+     ?? "noreply@dsecure.com";
+        }
+
+        private string GetBrevoSenderName()
+        {
+            return Environment.GetEnvironmentVariable("Brevo__SenderName")
+           ?? Environment.GetEnvironmentVariable("BREVO_SENDER_NAME")
+       ?? _configuration["Brevo:SenderName"]
+     ?? "DSecure Support";
+    }
+
+        #endregion
+
+        #region Brevo REST API
+
+        /// <summary>
+        /// Send email via Brevo REST API (requires xkeysib-... key)
+        /// </summary>
+        private async System.Threading.Tasks.Task<bool> SendViaBrevoApiAsync(string toEmail, string toName, string subject, string htmlBody)
+        {
             try
             {
-   var smtpHost = Environment.GetEnvironmentVariable("EmailSettings__SmtpHost") 
-      ?? _configuration["EmailSettings:SmtpHost"] 
-         ?? "smtp.gmail.com";
-         var smtpPort = int.Parse(Environment.GetEnvironmentVariable("EmailSettings__SmtpPort") 
-?? _configuration["EmailSettings:SmtpPort"] 
-         ?? "587");
-     var fromEmail = Environment.GetEnvironmentVariable("EmailSettings__FromEmail") 
- ?? _configuration["EmailSettings:FromEmail"];
-  var fromPassword = Environment.GetEnvironmentVariable("EmailSettings__FromPassword") 
- ?? _configuration["EmailSettings:FromPassword"];
-      var fromName = Environment.GetEnvironmentVariable("EmailSettings__FromName") 
-             ?? _configuration["EmailSettings:FromName"] 
-  ?? "DSecure Support";
-          var timeout = int.Parse(Environment.GetEnvironmentVariable("EmailSettings__Timeout") 
-            ?? _configuration["EmailSettings:Timeout"] 
-    ?? "120000");
+         var apiKey = GetBrevoKey();
+     var senderEmail = GetBrevoSenderEmail();
+    var senderName = GetBrevoSenderName();
 
-          if (string.IsNullOrEmpty(fromEmail) || string.IsNullOrEmpty(fromPassword))
-        {
-     _logger.LogError("❌ Email settings not configured");
-   return false;
-         }
+   if (string.IsNullOrEmpty(apiKey) || !apiKey.StartsWith("xkeysib-"))
+      {
+       _logger.LogWarning("⚠️ Invalid Brevo API key format (expected xkeysib-...)");
+ return false;
+     }
 
-      var message = new MimeMessage();
-       message.From.Add(new MailboxAddress(fromName, fromEmail));
-        message.To.Add(MailboxAddress.Parse(toEmail));
-       message.Subject = subject;
+                _logger.LogInformation("📧 Brevo API - Sender: {Name} <{Email}>", senderName, senderEmail);
 
-        var bodyBuilder = new BodyBuilder { HtmlBody = htmlBody };
-  message.Body = bodyBuilder.ToMessageBody();
+            Configuration.Default.ApiKey.Clear();
+            Configuration.Default.ApiKey.Add("api-key", apiKey);
 
-            using var smtpClient = new SmtpClient();
-   smtpClient.Timeout = timeout;
-smtpClient.ServerCertificateValidationCallback = (s, c, h, e) => true;
+              var apiInstance = new TransactionalEmailsApi();
 
-  if (smtpPort == 465)
-               {
-      await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.SslOnConnect);
-    }
-            else
+ var sendSmtpEmail = new SendSmtpEmail
+            {
+          Sender = new SendSmtpEmailSender
+          {
+            Email = senderEmail,
+       Name = senderName
+                    },
+       To = new List<SendSmtpEmailTo>
+       {
+     new SendSmtpEmailTo
+   {
+    Email = toEmail,
+        Name = toName
+       }
+                 },
+                Subject = subject,
+ HtmlContent = htmlBody
+     };
+
+     var result = await apiInstance.SendTransacEmailAsync(sendSmtpEmail);
+
+          _logger.LogInformation("✅ Brevo API email sent! MessageId: {MessageId}", result.MessageId);
+            return true;
+            }
+      catch (ApiException apiEx)
+          {
+       _logger.LogError(apiEx, "❌ Brevo API Error: {Code} - {Message}", apiEx.ErrorCode, apiEx.Message);
+   string errorContent = apiEx.ErrorContent != null ? Convert.ToString(apiEx.ErrorContent) ?? "No content" : "No content";
+                _logger.LogError("   Response: {Response}", errorContent);
+    return false;
+        }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Brevo API failed for {Email}", toEmail);
+    return false;
+       }
+        }
+
+        #endregion
+
+    #region Brevo SMTP
+
+    /// <summary>
+     /// Send email via Brevo SMTP (works with xsmtpsib-... key)
+        /// SMTP Server: smtp-relay.brevo.com
+    /// Port: 587 (TLS) or 465 (SSL)
+        /// Login: Your Brevo account email OR your sender email
+     /// Password: Your SMTP key (xsmtpsib-...)
+        /// </summary>
+        private async System.Threading.Tasks.Task<bool> SendViaBrevoSmtpAsync(string toEmail, string toName, string subject, string htmlBody, bool withRetry)
+   {
+            try
+            {
+     var brevoKey = GetBrevoKey();
+        var senderEmail = GetBrevoSenderEmail();
+          var senderName = GetBrevoSenderName();
+
+    if (string.IsNullOrEmpty(brevoKey))
+     {
+     _logger.LogError("❌ Brevo key is not configured!");
+         return false;
+      }
+
+     // Brevo SMTP settings
+                const string smtpHost = "smtp-relay.brevo.com";
+ const int smtpPort = 587;
+
+            // For Brevo SMTP:
+                // - Login: Your Brevo account email (the email you registered with)
+          // - Password: Your SMTP key (xsmtpsib-...)
+   // Note: Some accounts use the sender email as login
+      var smtpLogin = senderEmail;  // Try sender email first
+      var smtpPassword = brevoKey;
+
+             _logger.LogInformation("📧 Brevo SMTP Configuration:");
+   _logger.LogInformation("   Host: {Host}:{Port}", smtpHost, smtpPort);
+           _logger.LogInformation("   Login: {Login}", smtpLogin);
+      _logger.LogInformation("   Key: {KeyStart}...{KeyEnd}", 
+         brevoKey.Substring(0, Math.Min(15, brevoKey.Length)),
+        brevoKey.Length > 20 ? brevoKey.Substring(brevoKey.Length - 8) : "");
+       _logger.LogInformation("   Sender: {Name} <{Email}>", senderName, senderEmail);
+     _logger.LogInformation("   To: {Email}", toEmail);
+
+           var message = new MimeMessage();
+       message.From.Add(new MailboxAddress(senderName, senderEmail));
+    message.To.Add(new MailboxAddress(toName, toEmail));
+        message.Subject = subject;
+
+           var bodyBuilder = new BodyBuilder { HtmlBody = htmlBody };
+message.Body = bodyBuilder.ToMessageBody();
+
+  int maxRetries = withRetry ? 3 : 1;
+           int retryCount = 0;
+    Exception? lastException = null;
+
+       while (retryCount < maxRetries)
+     {
+            try
   {
-      await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
-           }
+       _logger.LogInformation("📧 Brevo SMTP attempt {Retry}/{Max}", retryCount + 1, maxRetries);
 
-          await smtpClient.AuthenticateAsync(fromEmail, fromPassword);
-        await smtpClient.SendAsync(message);
-               await smtpClient.DisconnectAsync(true);
+ using var smtp = new SmtpClient();
+    smtp.Timeout = 120000; // 2 minutes
+          smtp.ServerCertificateValidationCallback = (s, c, h, e) => true;
 
-    _logger.LogInformation("✅ Generic email sent to {Email} - Subject: {Subject}", toEmail, subject);
-           return true;
-    }
+       // Connect with TLS on port 587
+     _logger.LogInformation("🔌 Connecting to {Host}:{Port}...", smtpHost, smtpPort);
+        await smtp.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
+             _logger.LogInformation("✅ Connected to Brevo SMTP");
+
+             // Authenticate
+          _logger.LogInformation("🔐 Authenticating as {Login}...", smtpLogin);
+      await smtp.AuthenticateAsync(smtpLogin, smtpPassword);
+      _logger.LogInformation("✅ Authenticated with Brevo SMTP");
+
+    // Send
+     _logger.LogInformation("📤 Sending email...");
+            await smtp.SendAsync(message);
+              _logger.LogInformation("✅ Email sent via Brevo SMTP");
+
+    // Disconnect
+      await smtp.DisconnectAsync(true);
+
+            _logger.LogInformation("✅ Brevo SMTP email sent successfully to {Email}", toEmail);
+return true;
+                 }
+                  catch (MailKit.Security.AuthenticationException authEx)
+          {
+ _logger.LogError(authEx, "🔐 Brevo SMTP Authentication Failed!");
+     _logger.LogError("   Login used: {Login}", smtpLogin);
+        _logger.LogError("   Possible fixes:");
+    _logger.LogError("   1. Verify sender email is verified in Brevo");
+         _logger.LogError("   2. Check SMTP key is correct in Brevo dashboard");
+      _logger.LogError("   3. Try using your Brevo account email as login");
+             lastException = authEx;
+          break; // Don't retry auth failures
+  }
           catch (Exception ex)
   {
-  _logger.LogError(ex, "❌ Failed to send generic email to {Email}", toEmail);
-          return false;
-    }
+             lastException = ex;
+       retryCount++;
+          _logger.LogWarning("⚠️ Brevo SMTP attempt {Retry} failed: {Message}", retryCount, ex.Message);
+
+ if (retryCount < maxRetries)
+     {
+        await System.Threading.Tasks.Task.Delay(2000 * retryCount);
+          }
+   }
   }
 
+                if (lastException != null)
+       {
+  _logger.LogError(lastException, "❌ All Brevo SMTP attempts failed for {Email}", toEmail);
+          }
+
+   return false;
+            }
+            catch (Exception ex)
+            {
+             _logger.LogError(ex, "❌ Brevo SMTP error for {Email}", toEmail);
+        return false;
+   }
+        }
+
+        #endregion
+
+        #region Gmail SMTP (Fallback)
+
+  /// <summary>
+        /// Send email via Gmail SMTP (fallback)
+        /// </summary>
+        private async System.Threading.Tasks.Task<bool> SendViaGmailSmtpAsync(string toEmail, string toName, string subject, string htmlBody, bool withRetry)
+    {
+        try
+            {
+                var smtpHost = Environment.GetEnvironmentVariable("EmailSettings__SmtpHost")
+       ?? _configuration["EmailSettings:SmtpHost"]
+         ?? "smtp.gmail.com";
+
+       var smtpPortStr = Environment.GetEnvironmentVariable("EmailSettings__SmtpPort")
+        ?? _configuration["EmailSettings:SmtpPort"]
+           ?? "587";
+     var smtpPort = int.Parse(smtpPortStr);
+
+     var fromEmail = Environment.GetEnvironmentVariable("EmailSettings__FromEmail")
+          ?? _configuration["EmailSettings:FromEmail"];
+
+        var fromPassword = Environment.GetEnvironmentVariable("EmailSettings__FromPassword")
+   ?? _configuration["EmailSettings:FromPassword"];
+
+            var fromName = Environment.GetEnvironmentVariable("EmailSettings__FromName")
+      ?? _configuration["EmailSettings:FromName"]
+   ?? "DSecure Support";
+
+  var timeoutStr = Environment.GetEnvironmentVariable("EmailSettings__Timeout")
+        ?? _configuration["EmailSettings:Timeout"]
+        ?? "120000";
+             var timeout = int.Parse(timeoutStr);
+
+      if (string.IsNullOrEmpty(fromEmail) || string.IsNullOrEmpty(fromPassword))
+    {
+            _logger.LogError("❌ Gmail SMTP credentials not configured!");
+       return false;
+       }
+
+  _logger.LogInformation("📧 Gmail SMTP Configuration:");
+    _logger.LogInformation("   Host: {Host}:{Port}, Timeout: {Timeout}ms", smtpHost, smtpPort, timeout);
+
+   var message = new MimeMessage();
+                message.From.Add(new MailboxAddress(fromName, fromEmail));
+      message.To.Add(new MailboxAddress(toName, toEmail));
+      message.Subject = subject;
+
+     var bodyBuilder = new BodyBuilder { HtmlBody = htmlBody };
+     message.Body = bodyBuilder.ToMessageBody();
+
+           int maxRetries = withRetry ? 3 : 1;
+     int retryCount = 0;
+     Exception? lastException = null;
+
+ while (retryCount < maxRetries)
+           {
+      try
+        {
+           using var smtpClient = new SmtpClient();
+              smtpClient.Timeout = timeout;
+      smtpClient.ServerCertificateValidationCallback = (s, c, h, e) => true;
+
+   if (smtpPort == 465)
+     {
+      await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.SslOnConnect);
+               }
+                  else
+           {
+              await smtpClient.ConnectAsync(smtpHost, smtpPort, SecureSocketOptions.StartTls);
+   }
+
+          await smtpClient.AuthenticateAsync(fromEmail, fromPassword);
+      await smtpClient.SendAsync(message);
+           await smtpClient.DisconnectAsync(true);
+
+             _logger.LogInformation("✅ Gmail SMTP email sent successfully to {Email}", toEmail);
+          return true;
+    }
+    catch (Exception ex)
+           {
+         lastException = ex;
+      retryCount++;
+    _logger.LogWarning("⚠️ Gmail SMTP attempt {Retry}/{Max} failed: {Message}",
+    retryCount, maxRetries, ex.Message);
+
+    if (retryCount < maxRetries)
+           {
+            await System.Threading.Tasks.Task.Delay(2000 * retryCount);
+    }
+          }
+    }
+
+       if (lastException != null)
+  {
+                    _logger.LogError(lastException, "❌ All Gmail SMTP attempts failed for {Email}", toEmail);
+   }
+
+     return false;
+      }
+            catch (Exception ex)
+            {
+    _logger.LogError(ex, "❌ Gmail SMTP error for {Email}", toEmail);
+                return false;
+   }
+        }
+
+        #endregion
+
+        #region Email Templates
+
         private string GetOtpEmailBody(string userName, string otp)
-      {
-      return $@"
+        {
+ return $@"
 <!DOCTYPE html>
 <html>
 <head>
@@ -359,11 +461,11 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f4f4; m
 </div>
 </body>
 </html>";
-    }
+     }
 
         private string GetPasswordResetSuccessEmailBody(string userName)
         {
-  return $@"
+    return $@"
 <!DOCTYPE html>
 <html>
 <head>
@@ -411,6 +513,8 @@ body {{ font-family: 'Segoe UI', Arial, sans-serif; background-color: #f4f4f4; m
 </div>
 </body>
 </html>";
-     }
+        }
+
+ #endregion
     }
 }

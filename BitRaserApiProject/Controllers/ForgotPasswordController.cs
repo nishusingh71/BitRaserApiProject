@@ -44,79 +44,93 @@ namespace BitRaserApiProject.Controllers
         /// Email pe OTP bhejega (Users aur Subusers dono ke liye)
         /// </summary>
         [HttpPost("request-otp")]
-        [AllowAnonymous]
+    [AllowAnonymous]
         public async Task<IActionResult> RequestOtp([FromBody] RequestOtpRequest request)
    {
   try
 {
-             // Validate email
+     // Validate email
        if (string.IsNullOrEmpty(request.Email))
       {
-        return BadRequest(new { message = "Email is required" });
+        return BadRequest(new { success = false, message = "Email is required" });
       }
 
-          // Check if email exists in Users or Subusers table
+      _logger.LogInformation("📧 OTP Request received for: {Email}", request.Email);
+
+        // Check if email exists in Users or Subusers table
         var user = await _context.Users
           .FirstOrDefaultAsync(u => u.user_email == request.Email);
 
     var subuser = await _context.subuser
-            .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+      .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
 
 if (user == null && subuser == null)
-           {
-   // Security: Don't reveal if email exists or not
-                    return Ok(new
-       {
-     success = true,
+         {
+     _logger.LogWarning("⚠️ Email not found in database: {Email}", request.Email);
+            // Security: Don't reveal if email exists or not
+        return Ok(new
+   {
+   success = true,
    message = "If this email exists, an OTP has been sent. Please check your inbox.",
-               note = "OTP is valid for 10 minutes"
+         note = "OTP is valid for 10 minutes"
           });
          }
 
-                // Determine user type and name
+      // Determine user type and name
 string userType = user != null ? "User" : "Subuser";
   string userName = user != null ? user.user_name : (subuser?.Name ?? "User");
 
-            // Generate OTP
+      _logger.LogInformation("✅ User found: {UserType} - {UserName}", userType, userName);
+
+      // Generate OTP
     string otp = _otpService.GenerateOtp(request.Email);
+            _logger.LogInformation("📧 OTP generated: {OTP} for {Email}", otp, request.Email);
 
        // Send OTP email
-                bool emailSent = await _emailService.SendOtpEmailAsync(request.Email, otp, userName);
+   _logger.LogInformation("📧 Attempting to send OTP email...");
+  bool emailSent = await _emailService.SendOtpEmailAsync(request.Email, otp, userName);
 
   if (!emailSent)
       {
-   _logger.LogWarning("Failed to send OTP email to {Email}", request.Email);
-           return StatusCode(500, new
-      {
+   _logger.LogError("❌ Failed to send OTP email to {Email}", request.Email);
+    return StatusCode(500, new
+   {
   success = false,
-      message = "Failed to send OTP email. Please try again later."
+      message = "Failed to send OTP email. Please try again later.",
+       troubleshooting = new
+       {
+  step1 = "Check Brevo sender email is verified",
+  step2 = "Check Brevo API/SMTP key is correct",
+ step3 = "Check application logs for detailed error",
+ step4 = "Try /api/ForgotPassword/email-config-check endpoint"
+       }
        });
-                }
+  }
 
-                _logger.LogInformation("OTP sent successfully to {Email} ({UserType})", request.Email, userType);
+  _logger.LogInformation("✅ OTP sent successfully to {Email} ({UserType})", request.Email, userType);
 
   return Ok(new
         {
   success = true,
-            message = "OTP has been sent to your email. Please check your inbox.",
-          email = request.Email,
+message = "OTP has been sent to your email. Please check your inbox.",
+  email = request.Email,
            userType = userType,
     expiryMinutes = 10,
-          maxAttempts = 5
-     });
+        maxAttempts = 5
+ });
   }
-   catch (Exception ex)
+ catch (Exception ex)
  {
-            _logger.LogError(ex, "Error requesting OTP for {Email}", request.Email);
+      _logger.LogError(ex, "❌ Error requesting OTP for {Email}", request.Email);
    return StatusCode(500, new
 {
-     success = false,
-     message = "Error processing request",
-         error = ex.Message
-              });
+   success = false,
+   message = "Error processing request",
+         error = ex.Message,
+         innerError = ex.InnerException?.Message
+         });
      }
-        }
-
+   }
         /// <summary>
         /// Step 2: Verify OTP
     /// OTP validate karega
@@ -428,190 +442,204 @@ public async Task<IActionResult> TestEmailConfiguration([FromBody] TestEmailRequ
     [AllowAnonymous]
      public IActionResult CheckEmailConfiguration()
         {
-            try
+     try
    {
-      // Check appsettings configuration
-     var smtpHost = _configuration["EmailSettings:SmtpHost"];
-        var smtpPort = _configuration["EmailSettings:SmtpPort"];
-     var fromEmail = _configuration["EmailSettings:FromEmail"];
-    var fromPassword = _configuration["EmailSettings:FromPassword"];
-   var fromName = _configuration["EmailSettings:FromName"];
-       var enableSsl = _configuration["EmailSettings:EnableSsl"];
-   var timeout = _configuration["EmailSettings:Timeout"];
+  // Check Brevo configuration
+           var brevoApiKey = Environment.GetEnvironmentVariable("Brevo__ApiKey")
+   ?? Environment.GetEnvironmentVariable("BREVO_API_KEY")
+        ?? _configuration["Brevo:ApiKey"];
+ var brevoSenderEmail = Environment.GetEnvironmentVariable("Brevo__SenderEmail")
+           ?? _configuration["Brevo:SenderEmail"];
+ var brevoSenderName = Environment.GetEnvironmentVariable("Brevo__SenderName")
+   ?? _configuration["Brevo:SenderName"];
 
-      // Check environment variables (Render.com)
-     var envSmtpHost = Environment.GetEnvironmentVariable("EmailSettings__SmtpHost");
-   var envSmtpPort = Environment.GetEnvironmentVariable("EmailSettings__SmtpPort");
-  var envEmail = Environment.GetEnvironmentVariable("EmailSettings__FromEmail");
-  var envPassword = Environment.GetEnvironmentVariable("EmailSettings__FromPassword");
-  var envFromName = Environment.GetEnvironmentVariable("EmailSettings__FromName");
-      var envTimeout = Environment.GetEnvironmentVariable("EmailSettings__Timeout");
+       // Check Gmail SMTP configuration
+     var smtpHost = Environment.GetEnvironmentVariable("EmailSettings__SmtpHost")
+       ?? _configuration["EmailSettings:SmtpHost"];
+    var smtpPort = Environment.GetEnvironmentVariable("EmailSettings__SmtpPort")
+  ?? _configuration["EmailSettings:SmtpPort"];
+   var fromEmail = Environment.GetEnvironmentVariable("EmailSettings__FromEmail")
+         ?? _configuration["EmailSettings:FromEmail"];
+   var fromPassword = Environment.GetEnvironmentVariable("EmailSettings__FromPassword")
+    ?? _configuration["EmailSettings:FromPassword"];
+   var fromName = Environment.GetEnvironmentVariable("EmailSettings__FromName")
+  ?? _configuration["EmailSettings:FromName"];
+     var timeout = Environment.GetEnvironmentVariable("EmailSettings__Timeout")
+        ?? _configuration["EmailSettings:Timeout"];
 
-            // Determine effective values (env vars take priority)
-       var effectiveHost = envSmtpHost ?? smtpHost ?? "NOT SET";
-     var effectivePort = envSmtpPort ?? smtpPort ?? "NOT SET";
-      var effectiveEmail = envEmail ?? fromEmail ?? "NOT SET";
-  var effectivePassword = envPassword ?? fromPassword;
-        var effectiveName = envFromName ?? fromName ?? "NOT SET";
-            var effectiveTimeout = envTimeout ?? timeout ?? "NOT SET";
+ // Determine active provider
+   var activeProvider = !string.IsNullOrEmpty(brevoApiKey) ? "Brevo" : "Gmail SMTP";
 
-     var configStatus = new
- {
+         var configStatus = new
+            {
      environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Unknown",
-     serverTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-    
-           effectiveConfiguration = new
-      {
-            smtpHost = effectiveHost,
- smtpPort = effectivePort,
-          fromEmail = effectiveEmail,
-      fromPassword = string.IsNullOrEmpty(effectivePassword) 
-     ? "❌ NOT SET" 
-    : $"✅ SET ({effectivePassword.Length} chars)",
-          fromName = effectiveName,
-  timeout = effectiveTimeout
-     },
-   
-   fromAppSettings = new
-   {
- smtpHost = smtpHost ?? "NOT SET",
-            smtpPort = smtpPort ?? "NOT SET",
-       fromEmail = fromEmail ?? "NOT SET",
-   fromPassword = string.IsNullOrEmpty(fromPassword) 
-   ? "NOT SET" 
- : $"SET ({fromPassword.Length} chars)",
-              fromName = fromName ?? "NOT SET",
-enableSsl = enableSsl ?? "NOT SET",
-        timeout = timeout ?? "NOT SET"
-      },
-    
-        fromEnvironmentVariables = new
-  {
-      smtpHost = envSmtpHost ?? "NOT SET",
-    smtpPort = envSmtpPort ?? "NOT SET",
-         fromEmail = envEmail ?? "NOT SET",
-     fromPassword = string.IsNullOrEmpty(envPassword) 
- ? "NOT SET" 
-         : $"SET ({envPassword.Length} chars)",
-     fromName = envFromName ?? "NOT SET",
-       timeout = envTimeout ?? "NOT SET"
-    },
+serverTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+        activeEmailProvider = activeProvider,
+  
+        brevoConfiguration = new
+     {
+           isConfigured = !string.IsNullOrEmpty(brevoApiKey),
+     apiKey = string.IsNullOrEmpty(brevoApiKey) 
+    ? "❌ NOT SET" 
+       : $"✅ SET ({brevoApiKey.Length} chars, starts with: {brevoApiKey.Substring(0, Math.Min(8, brevoApiKey.Length))}...)",
+    senderEmail = brevoSenderEmail ?? "NOT SET",
+ senderName = brevoSenderName ?? "NOT SET"
+        },
 
-  configurationStatus = new
+        gmailSmtpConfiguration = new
+                {
+        isConfigured = !string.IsNullOrEmpty(fromEmail) && !string.IsNullOrEmpty(fromPassword),
+          smtpHost = smtpHost ?? "NOT SET",
+  smtpPort = smtpPort ?? "NOT SET",
+ fromEmail = fromEmail ?? "NOT SET",
+        fromPassword = string.IsNullOrEmpty(fromPassword)
+   ? "❌ NOT SET"
+ : $"✅ SET ({fromPassword.Length} chars)",
+      fromName = fromName ?? "NOT SET",
+  timeout = timeout ?? "NOT SET"
+      },
+
+ configurationStatus = new
    {
-   isConfigured = !string.IsNullOrEmpty(effectiveEmail) && !string.IsNullOrEmpty(effectivePassword),
-           issues = GetConfigurationIssues(effectiveEmail, effectivePassword, effectiveHost, effectivePort)
+      activeProvider = activeProvider,
+       brevoConfigured = !string.IsNullOrEmpty(brevoApiKey),
+    gmailConfigured = !string.IsNullOrEmpty(fromEmail) && !string.IsNullOrEmpty(fromPassword),
+    issues = GetConfigurationIssues(
+               brevoApiKey, brevoSenderEmail,
+         fromEmail, fromPassword, smtpHost, smtpPort
+        )
+      },
+
+setupInstructions = new
+  {
+             brevo = new[]
+   {
+            "1. Sign up at https://www.brevo.com (free tier: 300 emails/day)",
+       "2. Go to SMTP & API → API Keys → Create new API key",
+   "3. Set environment variable: Brevo__ApiKey=your-api-key",
+         "4. Set environment variable: Brevo__SenderEmail=your-verified-email"
     },
-      
-   recommendations = new[]
-   {
-         "1. On Render.com, set environment variables with double underscore: EmailSettings__FromEmail",
-      "2. Gmail App Password should be 16 characters without spaces",
-       "3. Generate at: https://myaccount.google.com/apppasswords",
- "4. Use test-email endpoint to verify email sending",
-           "5. Check Render.com logs for detailed error messages"
-       }
-            };
+       gmail = new[]
+    {
+    "1. Enable 2-Step Verification on your Google Account",
+        "2. Generate App Password at: https://myaccount.google.com/apppasswords",
+ "3. Set EmailSettings__FromPassword=your-16-char-app-password"
+        }
+   }
+      };
 
      return Ok(configStatus);
- }
-      catch (Exception ex)
-            {
-    return StatusCode(500, new
-    {
-  error = ex.Message,
-     innerError = ex.InnerException?.Message,
-       message = "Error checking email configuration"
-            });
+     }
+    catch (Exception ex)
+ {
+      return StatusCode(500, new
+  {
+   error = ex.Message,
+           message = "Error checking email configuration"
+      });
  }
         }
 
-        private List<string> GetConfigurationIssues(string email, string password, string host, string port)
+        private List<string> GetConfigurationIssues(
+            string? brevoApiKey, string? brevoSenderEmail,
+            string? gmailEmail, string? gmailPassword, string? smtpHost, string? smtpPort)
         {
-         var issues = new List<string>();
+   var issues = new List<string>();
 
-       if (string.IsNullOrEmpty(email) || email == "NOT SET")
-           issues.Add("❌ FromEmail is not configured");
-       
-  if (string.IsNullOrEmpty(password))
-      issues.Add("❌ FromPassword is not configured");
-       else if (password.Length != 16)
-       issues.Add($"⚠️ Password length is {password.Length} chars (Gmail App Password should be 16)");
-            
- if (string.IsNullOrEmpty(host) || host == "NOT SET")
-    issues.Add("❌ SmtpHost is not configured");
+    // Check Brevo
+          if (!string.IsNullOrEmpty(brevoApiKey))
+  {
+  if (string.IsNullOrEmpty(brevoSenderEmail))
+      issues.Add("⚠️ Brevo: SenderEmail not set (will use default)");
+       }
 
-     if (string.IsNullOrEmpty(port) || port == "NOT SET")
-    issues.Add("❌ SmtpPort is not configured");
+      // Check Gmail (if Brevo not configured)
+    if (string.IsNullOrEmpty(brevoApiKey))
+   {
+     if (string.IsNullOrEmpty(gmailEmail))
+         issues.Add("❌ Gmail: FromEmail is not configured");
 
-if (!issues.Any())
-      issues.Add("✅ All configurations look good!");
+    if (string.IsNullOrEmpty(gmailPassword))
+   issues.Add("❌ Gmail: FromPassword is not configured");
+     else if (gmailPassword.Length != 16)
+   issues.Add($"⚠️ Gmail: Password length is {gmailPassword.Length} chars (App Password should be 16)");
 
-            return issues;
+   if (string.IsNullOrEmpty(smtpHost))
+   issues.Add("❌ Gmail: SmtpHost is not configured");
+
+  if (string.IsNullOrEmpty(smtpPort))
+   issues.Add("❌ Gmail: SmtpPort is not configured");
    }
 
-        /// <summary>
-     /// Render.com health check - Verify service is running
-     /// </summary>
+ if (!issues.Any())
+    issues.Add("✅ All configurations look good!");
+
+    return issues;
+ }
+
+  /// <summary>
+   /// Render.com health check - Verify service is running
+        /// </summary>
         [HttpGet("health")]
         [AllowAnonymous]
         public IActionResult HealthCheck()
         {
-   return Ok(new
-       {
-      status = "healthy",
-    service = "ForgotPasswordController",
- environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Unknown",
-  serverTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
-        emailConfigured = !string.IsNullOrEmpty(
-   Environment.GetEnvironmentVariable("EmailSettings__FromEmail") ?? 
-     _configuration["EmailSettings:FromEmail"]
-       )
-            });
+            return Ok(new
+      {
+    status = "healthy",
+service = "ForgotPasswordController",
+        environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Unknown",
+          serverTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ"),
+       emailProvider = !string.IsNullOrEmpty(
+           Environment.GetEnvironmentVariable("Brevo__ApiKey") ?? 
+   Environment.GetEnvironmentVariable("BREVO_API_KEY") ?? 
+    _configuration["Brevo:ApiKey"]
+         ) ? "Brevo" : "Gmail SMTP"
+     });
         }
     }
 
-    #region Request Models
+  #region Request Models
 
     public class RequestOtpRequest
     {
- [Required(ErrorMessage = "Email is required")]
+        [Required(ErrorMessage = "Email is required")]
         [EmailAddress(ErrorMessage = "Invalid email format")]
         public string Email { get; set; } = string.Empty;
     }
 
     public class VerifyOtpRequest
     {
-     [Required(ErrorMessage = "Email is required")]
+        [Required(ErrorMessage = "Email is required")]
         [EmailAddress(ErrorMessage = "Invalid email format")]
  public string Email { get; set; } = string.Empty;
 
-      [Required(ErrorMessage = "OTP is required")]
+        [Required(ErrorMessage = "OTP is required")]
         [StringLength(6, MinimumLength = 6, ErrorMessage = "OTP must be 6 digits")]
         public string Otp { get; set; } = string.Empty;
     }
 
     public class ResetPasswordRequest
     {
-[Required(ErrorMessage = "Email is required")]
-    [EmailAddress(ErrorMessage = "Invalid email format")]
- public string Email { get; set; } = string.Empty;
+        [Required(ErrorMessage = "Email is required")]
+        [EmailAddress(ErrorMessage = "Invalid email format")]
+     public string Email { get; set; } = string.Empty;
 
-[Required(ErrorMessage = "OTP is required")]
-        [StringLength(6, MinimumLength = 6, ErrorMessage = "OTP must be 6 digits")]
-     public string Otp { get; set; } = string.Empty;
+        [Required(ErrorMessage = "OTP is required")]
+     [StringLength(6, MinimumLength = 6, ErrorMessage = "OTP must be 6 digits")]
+        public string Otp { get; set; } = string.Empty;
 
- [Required(ErrorMessage = "New password is required")]
-     [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
-        public string NewPassword { get; set; } = string.Empty;
+        [Required(ErrorMessage = "New password is required")]
+        [MinLength(8, ErrorMessage = "Password must be at least 8 characters")]
+     public string NewPassword { get; set; } = string.Empty;
     }
 
     public class TestEmailRequest
     {
         [Required(ErrorMessage = "Email is required")]
-        [EmailAddress(ErrorMessage = "Invalid email format")]
+     [EmailAddress(ErrorMessage = "Invalid email format")]
         public string Email { get; set; } = string.Empty;
-  }
+    }
 
     #endregion
 }
