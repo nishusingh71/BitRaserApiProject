@@ -29,9 +29,9 @@ namespace BitRaserApiProject.Models
         public bool license_activated { get; set; } // Activation status
         public DateTime? license_activation_date { get; set; } // Null if never activated
         public int license_days_valid { get; set; } = 0; // Number of valid days
-      
+
         public string license_details_json { get; set; } // Stores license info
-        
+
         public string? machine_details_json { get; set; } // Stores additional machine details in JSON format
         public int demo_usage_count { get; set; } // Tracks demo usage count
         public DateTime created_at { get; set; } = DateTime.UtcNow; // Auto-set by DB
@@ -74,63 +74,76 @@ namespace BitRaserApiProject.Models
         public string user_email { get; set; } // Email (must be unique)
 
         [Required, MaxLength(255)]
+        public string user_password { get; set; } // Plain password
+
         [JsonIgnore]
-      public string user_password { get; set; } // Plain password
+        public string? hash_password { get; set; } // Hashed password
 
-      [JsonIgnore]
-      public string? hash_password { get; set; } // Hashed password
-
-  public bool? is_private_cloud { get; set; } = false; // Private cloud flag
+        // ✅ PRIVATE CLOUD / MULTI-TENANT FIELDS
+        public bool? is_private_cloud { get; set; } = false; // Private cloud flag
         public bool? private_api { get; set; } = false; // Private API access flag
 
-    [MaxLength(20)]
+        [JsonIgnore] // Don't expose in API responses
+        public string? private_db_connection_string { get; set; } // Encrypted connection string
+
+        public DateTime? private_db_created_at { get; set; } // When private DB was setup
+
+        [MaxLength(20)]
+        public string? private_db_status { get; set; } = "inactive"; // active/inactive/error
+
+        public DateTime? private_db_last_validated { get; set; } // Last health check
+
+        [MaxLength(20)]
+        public string? private_db_schema_version { get; set; } // Schema version tracking
+
+        [MaxLength(20)]
         public string? phone_number { get; set; } // User's phone number
-      
+
         // NEW FIELDS - All Optional (Nullable)
         [MaxLength(100)]
         public string? department { get; set; } // Department name - OPTIONAL
-        
-     [MaxLength(100)]
+
+        [MaxLength(100)]
         public string? user_group { get; set; } // User group - OPTIONAL  
-     
-    // Session & Status Fields
-  public DateTime? last_login { get; set; } // Last login timestamp - OPTIONAL
-    public DateTime? last_logout { get; set; } // Last logout timestamp - OPTIONAL
-     
+
+        // Session & Status Fields
+        public DateTime? last_login { get; set; } // Last login timestamp - OPTIONAL
+        public DateTime? last_logout { get; set; } // Last logout timestamp - OPTIONAL
+
         [MaxLength(50)]
         public string? user_role { get; set; } // User role - OPTIONAL 
         public int? license_allocation { get; set; } // Number of licenses - OPTIONAL
-        
-     [MaxLength(50)]
-     public string? status { get; set; } // Account status - OPTIONAL (active, inactive, suspended, banned)
-        
+
+        [MaxLength(50)]
+        public string? status { get; set; } // Account status - OPTIONAL (active, inactive, suspended, banned)
+
         [MaxLength(50)]
         public string? activity_status { get; set; } // Online/Offline status - OPTIONAL (online, offline)
-        
+
         // Timezone Support
         [MaxLength(100)]
         public string? timezone { get; set; } // User's timezone (e.g., "Asia/Kolkata", "America/New_York")
- 
-   // Domain-related fields
+
+        // Domain-related fields
         [MaxLength(255)]
         public string? domain { get; set; } // Domain name for organization (e.g., "company.com")
-    
+
         [MaxLength(255)]
- public string? organization_name { get; set; } // Organization/Company name
-        
-      public bool? is_domain_admin { get; set; } = false; // Is this user a domain admin?
+        public string? organization_name { get; set; } // Organization/Company name
+
+        public bool? is_domain_admin { get; set; } = false; // Is this user a domain admin?
 
         // Existing fields
-        
+
         public string? payment_details_json { get; set; } // JSON storing payment details
-        
+
         public string? license_details_json { get; set; } // JSON storing license details
 
         public DateTime created_at { get; set; } = DateTime.UtcNow; // Account creation date
-   public DateTime updated_at { get; set; } = DateTime.UtcNow; // Last update date
-  
+        public DateTime updated_at { get; set; } = DateTime.UtcNow; // Last update date
+
         // Navigation properties for role-based system - ignore in JSON to prevent circular references
-   [JsonIgnore]
+        [JsonIgnore]
         public ICollection<UserRole>? UserRoles { get; set; } = new List<UserRole>();
     }
 
@@ -160,114 +173,114 @@ namespace BitRaserApiProject.Models
     public class subuser
     {
         [Key]
-   public int subuser_id { get; set; } // Primary Key
-      public int? superuser_id { get; set; } // ✅ Made nullable - Reference to users.user_id (superuser)
-        
+        public int subuser_id { get; set; } // Primary Key
+        public int? superuser_id { get; set; } // ✅ Made nullable - Reference to users.user_id (superuser)
+
         [Required, MaxLength(255)]
         public string subuser_email { get; set; } // Email of the subuser
 
-        [JsonIgnore]
-     [Required, MaxLength(255)]
-      public string subuser_password { get; set; } // Hashed password
-     
+
+        [Required, MaxLength(255)]
+        public string subuser_password { get; set; } // Hashed password
+
         public string user_email { get; set; } // ID of the parent user
-    
- // Subuser Details (Enhanced fields from documentation)
-  [MaxLength(100)]
- public string? subuser_username { get; set; } // Added: Username field
-    
-      [MaxLength(100)]
-   public string? Name { get; set; }
-      
-     [MaxLength(20)]
-      public string? Phone { get; set; }
- 
-   [MaxLength(100)]
-public string? Department { get; set; }
-   
-  // Role & Permissions
-   [MaxLength(50)]
-  public string? Role { get; set; } = "subuser"; // subuser, team_member, limited_admin
-     
-  public string? PermissionsJson { get; set; } // JSON string for granular permissions 
-     
- // Machine & License Access
-     public int? AssignedMachines { get; set; } = 0;
- public int? MaxMachines { get; set; } = 5;
-        
-    public string? MachineIdsJson { get; set; } // JSON array of accessible machine IDs
-        
- public string? LicenseIdsJson { get; set; } // JSON array of accessible license IDs   
-        
-    // Group Access
- public int? GroupId { get; set; }
-        
-     [MaxLength(100)]
-    public string? subuser_group { get; set; } // Group name or identifier (string format)
-        
-    public int? license_allocation { get; set; } = 0; // Number of licenses allocated to subuser
-  
-     // Status & Activity Fields
-   [MaxLength(50)]
-   public string? status { get; set; } = "active"; // Account status: active, inactive, suspended
-        
+
+        // Subuser Details (Enhanced fields from documentation)
+        [MaxLength(100)]
+        public string? subuser_username { get; set; } // Added: Username field
+
+        [MaxLength(100)]
+        public string? Name { get; set; }
+
+        [MaxLength(20)]
+        public string? Phone { get; set; }
+
+        [MaxLength(100)]
+        public string? Department { get; set; }
+
+        // Role & Permissions
+        [MaxLength(50)]
+        public string? Role { get; set; } = "subuser"; // subuser, team_member, limited_admin
+
+        public string? PermissionsJson { get; set; } // JSON string for granular permissions 
+
+        // Machine & License Access
+        public int? AssignedMachines { get; set; } = 0;
+        public int? MaxMachines { get; set; } = 5;
+
+        public string? MachineIdsJson { get; set; } // JSON array of accessible machine IDs
+
+        public string? LicenseIdsJson { get; set; } // JSON array of accessible license IDs   
+
+        // Group Access
+        public int? GroupId { get; set; }
+
+        [MaxLength(100)]
+        public string? subuser_group { get; set; } // Group name or identifier (string format)
+
+        public int? license_allocation { get; set; } = 0; // Number of licenses allocated to subuser
+
+        // Status & Activity Fields
+        [MaxLength(50)]
+        public string? status { get; set; } = "active"; // Account status: active, inactive, suspended
+
         [MaxLength(50)]
         public string? activity_status { get; set; } // Online/Offline status: online, offline
-        
+
         public DateTime? last_login { get; set; } // Last login timestamp
-   public DateTime? last_logout { get; set; } // Last logout timestamp
-   
-    [MaxLength(100)]
-    public string? timezone { get; set; } // Subuser's timezone (e.g., Asia/Kolkata)
+        public DateTime? last_logout { get; set; } // Last logout timestamp
+
+        [MaxLength(100)]
+        public string? timezone { get; set; } // Subuser's timezone (e.g., Asia/Kolkata)
 
         // Domain-related fields
         [MaxLength(255)]
         public string? domain { get; set; } // Domain inherited from parent user
-   
- [MaxLength(255)]
+
+        [MaxLength(255)]
         public string? organization_name { get; set; } // Organization name inherited from parent
 
-     // Permissions Flags
-     public bool IsEmailVerified { get; set; } = false;
- public bool CanCreateSubusers { get; set; } = false;
-  public bool CanViewReports { get; set; } = true;
-    public bool CanManageMachines { get; set; } = false;
-   public bool CanAssignLicenses { get; set; } = false;
-    
-// Notifications
-  public bool EmailNotifications { get; set; } = true;
- public bool SystemAlerts { get; set; } = true;
-  
-  // Session & Security
-[MaxLength(500)]
-    public string? LastLoginIp { get; set; }
-   
- public int FailedLoginAttempts { get; set; } = 0;
-        public DateTime? LockedUntil { get; set; }
-   
-        // Audit
-     public int CreatedBy { get; set; }
-  public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime? UpdatedAt { get; set; }
-      public int? UpdatedBy { get; set; }
-  
-        [MaxLength(500)]
-  public string? Notes { get; set; }
+        // Permissions Flags
+        public bool IsEmailVerified { get; set; } = false;
+        public bool CanCreateSubusers { get; set; } = false;
+        public bool CanViewReports { get; set; } = true;
+        public bool CanManageMachines { get; set; } = false;
+        public bool CanAssignLicenses { get; set; } = false;
 
-  // Navigation properties for role-based system - ignore in JSON to prevent circular references
-     [JsonIgnore]
+        // Notifications
+        public bool EmailNotifications { get; set; } = true;
+        public bool SystemAlerts { get; set; } = true;
+
+        // Session & Security
+        [MaxLength(500)]
+        public string? LastLoginIp { get; set; }
+
+        public int FailedLoginAttempts { get; set; } = 0;
+        public DateTime? LockedUntil { get; set; }
+
+        // Audit
+        public int CreatedBy { get; set; }
+        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+        public DateTime? UpdatedAt { get; set; }
+        public int? UpdatedBy { get; set; }
+
+        [MaxLength(500)]
+        public string? Notes { get; set; }
+
+        // Navigation properties for role-based system - ignore in JSON to prevent circular references
+        [JsonIgnore]
         public ICollection<SubuserRole> SubuserRoles { get; set; } = new List<SubuserRole>();
     }
 
     public class Commands
     {
         [Key]
-          
+
         public int Command_id { get; set; }
         public string user_email { get; set; }
         public string command_text { get; set; }
         public DateTime issued_at { get; set; } = DateTime.UtcNow;
-        [JsonIgnore]
+
         public string command_json { get; set; } // Changed from object to string
         public string command_status { get; set; } // Changed from object to string
     }
@@ -275,23 +288,23 @@ public string? Department { get; set; }
     public class Group
     {
         [Key]
-        
+
         public int group_id { get; set; }
-        
+
         [Required, MaxLength(100)]
         public string name { get; set; } = string.Empty; // groupname
-        
+
         [MaxLength(500)]
         public string? description { get; set; } // groupdescription
-     
-        
+
+
         public int license_allocation { get; set; } = 0; // groplicenseallocation
-        [JsonIgnore]
+
         public string? permissions_json { get; set; } // grouppermission stored as JSON
-   
-      public DateTime created_at { get; set; } = DateTime.UtcNow;
+
+        public DateTime created_at { get; set; } = DateTime.UtcNow;
         public DateTime? updated_at { get; set; }
-        
+
         [MaxLength(50)]
         public string status { get; set; } = "active";
     }
@@ -299,10 +312,9 @@ public string? Department { get; set; }
     public class User_role_profile
     {
         [Key]
-        [JsonIgnore]
         public int role_id { get; set; } // Primary Key
         public string user_email { get; set; } // User's email
-        [JsonIgnore]
+
         public int manage_user_id { get; set; } // User ID who manages this role
         public string role_name { get; set; } // Role name
         public string role_email { get; set; } // Role email
@@ -380,30 +392,30 @@ public string? Department { get; set; }
         [MaxLength(100)]
         public string? rollback_version { get; set; } // Version to rollback to if this update fails
     }
-    
+
     // Role-based system models
     public class Role
     {
         [Key]
         public int RoleId { get; set; }
-        
+
         [Required, MaxLength(100)]
         public string RoleName { get; set; } = string.Empty;
-        
+
         [MaxLength(500)]
         public string Description { get; set; } = string.Empty;
-        
+
         public int HierarchyLevel { get; set; }
-        
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        
+
         // Navigation properties
         [JsonIgnore]
         public ICollection<RolePermission>? RolePermissions { get; set; } = new List<RolePermission>();
-        
+
         [JsonIgnore]
         public ICollection<UserRole>? UserRoles { get; set; } = new List<UserRole>();
-        
+
         [JsonIgnore]
         public ICollection<SubuserRole>? SubuserRoles { get; set; } = new List<SubuserRole>();
     }
@@ -412,19 +424,19 @@ public string? Department { get; set; }
     {
         [Key]
         public int PermissionId { get; set; }
-        
+
         [Required, MaxLength(100)]
         public string PermissionName { get; set; } = string.Empty;
-        
+
         [MaxLength(500)]
         public string Description { get; set; } = string.Empty;
-        
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        
+
         // Navigation properties
         [JsonIgnore]
         public ICollection<RolePermission>? RolePermissions { get; set; } = new List<RolePermission>();
-        
+
         [JsonIgnore]
         public ICollection<PermissionRoute>? PermissionRoutes { get; set; } = new List<PermissionRoute>();
     }
@@ -433,11 +445,11 @@ public string? Department { get; set; }
     {
         public int RoleId { get; set; }
         public int PermissionId { get; set; }
-        
+
         // Navigation properties
         [JsonIgnore]
         public Role? Role { get; set; }
-        
+
         [JsonIgnore]
         public Permission? Permission { get; set; }
     }
@@ -448,11 +460,11 @@ public string? Department { get; set; }
         public int RoleId { get; set; }
         public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
         public string AssignedByEmail { get; set; } = string.Empty;
-        
+
         // Navigation properties
         [JsonIgnore]
         public users? User { get; set; }
-        
+
         [JsonIgnore]
         public Role? Role { get; set; }
     }
@@ -463,11 +475,11 @@ public string? Department { get; set; }
         public int RoleId { get; set; }
         public DateTime AssignedAt { get; set; } = DateTime.UtcNow;
         public string AssignedByEmail { get; set; } = string.Empty;
-        
+
         // Navigation properties
         [JsonIgnore]
         public subuser? Subuser { get; set; }
-        
+
         [JsonIgnore]
         public Role? Role { get; set; }
     }
@@ -476,18 +488,18 @@ public string? Department { get; set; }
     {
         [Key]
         public int RouteId { get; set; }
-        
+
         [Required, MaxLength(500)]
         public string RoutePath { get; set; } = string.Empty;
-        
+
         [Required, MaxLength(10)]
         public string HttpMethod { get; set; } = string.Empty;
-        
+
         [MaxLength(200)]
         public string Description { get; set; } = string.Empty;
-        
+
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        
+
         // Navigation properties
         [JsonIgnore]
         public ICollection<PermissionRoute>? PermissionRoutes { get; set; } = new List<PermissionRoute>();
@@ -497,25 +509,44 @@ public string? Department { get; set; }
     {
         public int PermissionId { get; set; }
         public int RouteId { get; set; }
-        
+
         // Navigation properties
         [JsonIgnore]
         public Permission? Permission { get; set; }
-        
+
         [JsonIgnore]
         public Route? Route { get; set; }
     }
-} // End of namespace BitRaserApiProject.Models
+}
 
+public class License
+{
+    [Key]
+    public int Id { get; set; }
+    [Required, MaxLength(64)]
+    public string LicenseKey { get; set; } = string.Empty;
+    [MaxLength(128)]
+    public string? Hwid { get; set; }
+    [Column(TypeName = "int")]
+    public DateTime ExpiryDays { get; set; }
+    [Required, MaxLength(32)]
+    public string Edition { get; set; } = "BASIC"; // BASIC / PRO / ENTERPRISE
+    [Required, MaxLength(16)]
+    public string Status { get; set; } = "ACTIVE"; // ACTIVE / REVOKED / EXPIRED
+    public int ServerRevision { get; set; } = 1;
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? LastSeen { get; set; }
+}
+// End of namespace BitRaserApiProject.Models
 // ReportRequest class (used for PDF generation)
 // Note: ReportData and ErasureLogEntry are defined in ReportDataOptional.cs
 // Note: FlexibleStringConverter is defined in ReportDataOptional.cs
 public class ReportRequest
 {
     [Required]
-public BitRaserApiProject.Models.ReportData ReportData { get; set; } = new();
+    public BitRaserApiProject.Models.ReportData ReportData { get; set; } = new();
 
- public string? ReportTitle { get; set; }
+    public string? ReportTitle { get; set; }
     public string? HeaderText { get; set; }
 
     public byte[]? HeaderLeftLogo { get; set; }

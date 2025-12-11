@@ -22,17 +22,20 @@ namespace BitRaserApiProject.Controllers
     private readonly DynamicDbContextFactory _contextFactory; // ✅ CHANGED
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
+    private readonly ITenantConnectionService _tenantService; // ✅ ADDED
         private readonly ILogger<EnhancedMachinesController> _logger; // ✅ ADDED
 
 public EnhancedMachinesController(
         DynamicDbContextFactory contextFactory, // ✅ CHANGED
             IRoleBasedAuthService authService,
     IUserDataService userDataService,
+    ITenantConnectionService tenantService, // ✅ ADDED
         ILogger<EnhancedMachinesController> logger) // ✅ ADDED
         {
        _contextFactory = contextFactory; // ✅ CHANGED
       _authService = authService;
             _userDataService = userDataService;
+    _tenantService = tenantService; // ✅ ADDED
     _logger = logger; // ✅ ADDED
    }
 
@@ -43,77 +46,85 @@ public EnhancedMachinesController(
       [HttpGet("by-email/{userEmail}")]
         public async Task<ActionResult<IEnumerable<object>>> GetMachinesByUserEmail(string userEmail, [FromQuery] MachineFilterRequest? filter)
         {
-    using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-    
-          _logger.LogInformation("🔍 Fetching machines for user: {Email}", userEmail); // ✅ ADDED
+   try
+ {
+      using var _context = await _contextFactory.CreateDbContextAsync();
+  
+           _logger.LogInformation("🔍 Fetching machines for user: {Email}", userEmail);
       
-   var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+     var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+     var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
          
-  // Allow access if:
-     // 1. Requesting own machines (user or subuser)
- // 2. User has permission to view other machines
- // 3. Manager can view managed user machines
-         bool canAccess = userEmail == currentUserEmail ||
-          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser) ||
-  await CanManageUserAsync(currentUserEmail!, userEmail); // ✅ FIXED: Removed _context parameter
+        // Allow access if:
+           // 1. Requesting own machines (user or subuser)
+   // 2. User has permission to view other machines
+                // 3. Manager can view managed user machines
+           bool canAccess = userEmail == currentUserEmail ||
+      await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser) ||
+        await CanManageUserAsync(currentUserEmail!, userEmail);
 
-  if (!canAccess)
+      if (!canAccess)
+              {
+         return StatusCode(403, new { error = "You can only view your own machines or machines of users you manage" });
+     }
+
+  IQueryable<machines> query = _context.Machines.Where(m => m.user_email == userEmail);
+
+          // Apply additional filters if provided
+    if (filter != null)
        {
-          return StatusCode(403, new { error = "You can only view your own machines or machines of users you manage" });
+     if (!string.IsNullOrEmpty(filter.MacAddress))
+     query = query.Where(m => m.mac_address.Contains(filter.MacAddress));
+
+        if (filter.LicenseActivated.HasValue)
+         query = query.Where(m => m.license_activated == filter.LicenseActivated.Value);
+
+      if (!string.IsNullOrEmpty(filter.VmStatus))
+ query = query.Where(m => m.vm_status.Contains(filter.VmStatus));
+
+        if (filter.RegisteredFrom.HasValue)
+           query = query.Where(m => m.created_at >= filter.RegisteredFrom.Value);
+
+         if (filter.RegisteredTo.HasValue)
+             query = query.Where(m => m.created_at <= filter.RegisteredTo.Value);
+
+      if (filter.LicenseExpiringInDays.HasValue)
+      {
+       var expiryDate = DateTime.UtcNow.AddDays(filter.LicenseExpiringInDays.Value);
+     query = query.Where(m => m.license_activation_date.HasValue && 
+            m.license_activation_date.Value.AddDays(m.license_days_valid) <= expiryDate);
+       }
     }
 
-   IQueryable<machines> query = _context.Machines.Where(m => m.user_email == userEmail);
-
-   // Apply additional filters if provided
-    if (filter != null)
-            {
-            if (!string.IsNullOrEmpty(filter.MacAddress))
-            query = query.Where(m => m.mac_address.Contains(filter.MacAddress));
-
-     if (filter.LicenseActivated.HasValue)
-    query = query.Where(m => m.license_activated == filter.LicenseActivated.Value);
-
-             if (!string.IsNullOrEmpty(filter.VmStatus))
-  query = query.Where(m => m.vm_status.Contains(filter.VmStatus));
-
-                if (filter.RegisteredFrom.HasValue)
-       query = query.Where(m => m.created_at >= filter.RegisteredFrom.Value);
-
-            if (filter.RegisteredTo.HasValue)
-           query = query.Where(m => m.created_at <= filter.RegisteredTo.Value);
-
-        if (filter.LicenseExpiringInDays.HasValue)
-   {
-             var expiryDate = DateTime.UtcNow.AddDays(filter.LicenseExpiringInDays.Value);
-         query = query.Where(m => m.license_activation_date.HasValue && 
-   m.license_activation_date.Value.AddDays(m.license_days_valid) <= expiryDate);
-                }
-            }
-
-var machines = await query
-                .OrderByDescending(m => m.created_at)
-     .Take(filter?.PageSize ?? 100)
-              .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-     .Select(m => new {
-     fingerprintHash = m.fingerprint_hash,
-           userEmail = m.user_email,
-   subuserEmail = m.subuser_email,
-    macAddress = m.mac_address,
-        osVersion = m.os_version,
-      licenseActivated = m.license_activated,  
-            licenseActivationDate = m.license_activation_date,
-           licenseDaysValid = m.license_days_valid,
-         vmStatus = m.vm_status,
-  createdAt = m.created_at,
-           hasLicenseDetails = !string.IsNullOrEmpty(m.license_details_json) && m.license_details_json != "{}"
-                })
+    var machines = await query
+         .OrderByDescending(m => m.created_at)
+           .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+       .Take(filter?.PageSize ?? 100)
+         .Select(m => new {
+      fingerprintHash = m.fingerprint_hash,
+  userEmail = m.user_email,
+       subuserEmail = m.subuser_email,
+  macAddress = m.mac_address,
+            osVersion = m.os_version,
+ licenseActivated = m.license_activated,  
+       licenseActivationDate = m.license_activation_date,
+          licenseDaysValid = m.license_days_valid,
+      vmStatus = m.vm_status,
+            createdAt = m.created_at,
+              hasLicenseDetails = !string.IsNullOrEmpty(m.license_details_json) && m.license_details_json != "{}"
+          })
                 .ToListAsync();
 
-            _logger.LogInformation("✅ Found {Count} machines for user: {Email}", machines.Count, userEmail); // ✅ ADDED
+          _logger.LogInformation("✅ Found {Count} machines for user: {Email}", machines.Count, userEmail);
 
-            return Ok(machines);
-    }
+         return Ok(machines);
+            }
+            catch (Exception ex)
+  {
+   _logger.LogError(ex, "Error fetching machines for user {Email}", userEmail);
+      return StatusCode(500, new { message = "Error retrieving machines", error = ex.Message });
+  }
+        }
 
     /// <summary>
         /// Get all machines with role-based filtering
@@ -122,103 +133,112 @@ var machines = await query
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetAllMachines([FromQuery] MachineFilterRequest? filter)
         {
-     using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-            
-  var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-  var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-       
-            IQueryable<machines> query = _context.Machines;
-
-  // ✅ SIMPLIFIED: Apply role-based filtering based on actual permissions
-     bool hasGlobalAccess = await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser);
+    try
+  {
+     using var _context = await _contextFactory.CreateDbContextAsync();
          
-    if (hasGlobalAccess)
-          {
-     // ✅ SuperAdmin/Admin: Get their managed hierarchy (not entire DB)
-     var allManagedEmails = await GetAllManagedEmailsAsync(currentUserEmail!);
-       query = query.Where(m => 
-       allManagedEmails.Contains(m.user_email) || 
-          (m.subuser_email != null && allManagedEmails.Contains(m.subuser_email))
-);
-        }
-            else if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_MANAGED_USER_MACHINES", isCurrentUserSubuser))
-            {
-         // Manager: Get managed users + their subusers
-            var managedUserEmails = await GetManagedUserEmailsAsync(currentUserEmail!);
-    var managedSubuserEmails = await GetSubusersOfManagedUsersAsync(managedUserEmails);
+    var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
        
-      var allManagedEmails = managedUserEmails.Concat(managedSubuserEmails).ToList();
-    
-                query = query.Where(m => 
-               allManagedEmails.Contains(m.user_email) || 
-           m.user_email == currentUserEmail ||
-    (m.subuser_email != null && allManagedEmails.Contains(m.subuser_email)) ||
-        m.subuser_email == currentUserEmail
-       );
- }
-  else if (isCurrentUserSubuser)
-   {
-    // ❌ Subuser - only own machines
-           query = query.Where(m => m.subuser_email == currentUserEmail);
-            }
-            else
-         {
-          // ✅ Regular User - own machines + subuser machines
-         var subuserEmails = await _context.subuser
-.Where(s => s.user_email == currentUserEmail)
-              .Select(s => s.subuser_email)
-            .ToListAsync();
-   
-         query = query.Where(m => 
-         m.user_email == currentUserEmail ||  // Own machines
-        (m.subuser_email != null && subuserEmails.Contains(m.subuser_email))  // Subuser machines
-     );
-}
+       IQueryable<machines> query = _context.Machines;
 
-            // Apply additional filters if provided
-          if (filter != null)
+     // ✅ SIMPLIFIED: Apply role-based filtering based on actual permissions
+bool hasGlobalAccess = await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser);
+         
+     if (hasGlobalAccess)
        {
-     if (!string.IsNullOrEmpty(filter.UserEmail))
-             query = query.Where(m => m.user_email.Contains(filter.UserEmail));
+    // ✅ SuperAdmin/Admin: Get their managed hierarchy (not entire DB)
+         var allManagedEmails = await GetAllManagedEmailsAsync(currentUserEmail!);
+            query = query.Where(m => 
+       allManagedEmails.Contains(m.user_email) || 
+     (m.subuser_email != null && allManagedEmails.Contains(m.subuser_email))
+    );
+    }
+     else if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_MANAGED_USER_MACHINES", isCurrentUserSubuser))
+    {
+   // Manager: Get managed users + their subusers
+   var managedUserEmails = await GetManagedUserEmailsAsync(currentUserEmail!);
+     var managedSubuserEmails = await GetSubusersOfManagedUsersAsync(managedUserEmails);
+      
+    var allManagedEmails = managedUserEmails.Concat(managedSubuserEmails).ToList();
+     
+         query = query.Where(m => 
+    allManagedEmails.Contains(m.user_email) || 
+       m.user_email == currentUserEmail ||
+        (m.subuser_email != null && allManagedEmails.Contains(m.subuser_email)) ||
+        m.subuser_email == currentUserEmail
+            );
+            }
+else if (isCurrentUserSubuser)
+{
+   // ❌ Subuser - only own machines
+      query = query.Where(m => m.subuser_email == currentUserEmail);
+     }
+ else
+     {
+   // ✅ Regular User - own machines + subuser machines
+          var subuserEmails = await _context.subuser
+    .Where(s => s.user_email == currentUserEmail)
+    .Select(s => s.subuser_email)
+      .ToListAsync();
+      
+    query = query.Where(m => 
+       m.user_email == currentUserEmail ||  // Own machines
+ (m.subuser_email != null && subuserEmails.Contains(m.subuser_email))  // Subuser machines
+            );
+  }
 
-           if (!string.IsNullOrEmpty(filter.MacAddress))
-  query = query.Where(m => m.mac_address.Contains(filter.MacAddress));
+// Apply additional filters if provided
+   if (filter != null)
+  {
+   if (!string.IsNullOrEmpty(filter.UserEmail))
+   query = query.Where(m => m.user_email.Contains(filter.UserEmail));
 
-    if (filter.LicenseActivated.HasValue)
-             query = query.Where(m => m.license_activated == filter.LicenseActivated.Value);
+   if (!string.IsNullOrEmpty(filter.MacAddress))
+      query = query.Where(m => m.mac_address.Contains(filter.MacAddress));
+
+      if (filter.LicenseActivated.HasValue)
+ query = query.Where(m => m.license_activated == filter.LicenseActivated.Value);
 
 if (!string.IsNullOrEmpty(filter.VmStatus))
-          query = query.Where(m => m.vm_status.Contains(filter.VmStatus));
+       query = query.Where(m => m.vm_status.Contains(filter.VmStatus));
 
-    if (filter.RegisteredFrom.HasValue)
-      query = query.Where(m => m.created_at >= filter.RegisteredFrom.Value);
+        if (filter.RegisteredFrom.HasValue)
+         query = query.Where(m => m.created_at >= filter.RegisteredFrom.Value);
 
-     if (filter.RegisteredTo.HasValue)
-            query = query.Where(m => m.created_at <= filter.RegisteredTo.Value);
-            }
-
-         var machines = await query
-   .OrderByDescending(m => m.created_at)
-    .Take(filter?.PageSize ?? 100)
-       .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-            .Select(m => new {
-  fingerprintHash = m.fingerprint_hash,
-          userEmail = m.user_email,
-      subuserEmail = m.subuser_email,
-     macAddress = m.mac_address,
-osVersion = m.os_version,
-              licenseActivated = m.license_activated,
-            licenseActivationDate = m.license_activation_date,
-          licenseDaysValid = m.license_days_valid,
-                  vmStatus = m.vm_status,
-   createdAt = m.created_at,
-    hasLicenseDetails = !string.IsNullOrEmpty(m.license_details_json) && m.license_details_json != "{}"
- })
-           .ToListAsync();
-
-      return Ok(machines);
+   if (filter.RegisteredTo.HasValue)
+        query = query.Where(m => m.created_at <= filter.RegisteredTo.Value);
         }
 
+ var machines = await query
+   .OrderByDescending(m => m.created_at)
+      .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+     .Take(filter?.PageSize ?? 100)
+      .Select(m => new {
+  fingerprintHash = m.fingerprint_hash,
+    userEmail = m.user_email,
+        subuserEmail = m.subuser_email,
+      macAddress = m.mac_address,
+osVersion = m.os_version,
+       licenseActivated = m.license_activated,
+  licenseActivationDate = m.license_activation_date,
+     licenseDaysValid = m.license_days_valid,
+    vmStatus = m.vm_status,
+  createdAt = m.created_at,
+       hasLicenseDetails = !string.IsNullOrEmpty(m.license_details_json) && m.license_details_json != "{}"
+     })
+        .ToListAsync();
+
+ _logger.LogInformation("✅ Retrieved {Count} machines for {Email}", machines.Count, currentUserEmail);
+
+   return Ok(machines);
+        }
+    catch (Exception ex)
+ {
+   _logger.LogError(ex, "Error fetching all machines");
+   return StatusCode(500, new { message = "Error retrieving machines", error = ex.Message });
+  }
+     }
         /// <summary>
         /// Get machine by MAC address (email-based ownership validation)
         /// </summary>
@@ -226,119 +246,151 @@ osVersion = m.os_version,
         [AllowAnonymous] // Allow anonymous access for client validation
         public async Task<ActionResult<object>> GetMachineByMac(string macAddress)
         {
-  using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-            
+   try
+ {
+using var _context = await _contextFactory.CreateDbContextAsync();
+    
 var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == macAddress);
-            
-   if (machine == null) 
- return NotFound($"Machine with MAC address {macAddress} not found");
+  
+ if (machine == null)
+           {
+      _logger.LogWarning("Machine not found with MAC: {MacAddress}", macAddress);
+      return NotFound($"Machine with MAC address {macAddress} not found");
+    }
 
-            // Return limited information for anonymous requests
-            if (!User.Identity?.IsAuthenticated == true)
+  // Return limited information for anonymous requests
+if (!User.Identity?.IsAuthenticated == true)
             {
-                return Ok(new {
-                    macAddress = machine.mac_address,
-                    userEmail = machine.user_email,
-                    subuserEmail = machine.subuser_email,
-                    licenseActivated = machine.license_activated,
-                    licenseActivationDate = machine.license_activation_date,
-                    licenseDaysValid = machine.license_days_valid,
-                    createdAt = machine.created_at
-                });
-            }
+        _logger.LogInformation("Anonymous request for machine MAC: {MacAddress}", macAddress);
+      return Ok(new {
+        macAddress = machine.mac_address,
+   userEmail = machine.user_email,
+      subuserEmail = machine.subuser_email,
+         licenseActivated = machine.license_activated,
+  licenseActivationDate = machine.license_activation_date,
+      licenseDaysValid = machine.license_days_valid,
+    createdAt = machine.created_at
+     });
+ }
 
-            // Full information for authenticated users
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
-            // Check if user can view this machine
-            bool canAccess = machine.user_email == currentUserEmail ||
-                           machine.subuser_email == currentUserEmail ||
-                           await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser);
+   // Full information for authenticated users
+     var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+         
+ // Check if user can view this machine
+     bool canAccess = machine.user_email == currentUserEmail ||
+      machine.subuser_email == currentUserEmail ||
+await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser);
 
-            if (!canAccess)
-            {
-                return StatusCode(403, new { error = "You can only view your own machines" });
-            }
+     if (!canAccess)
+       {
+        _logger.LogWarning("Unauthorized access attempt for machine {MacAddress} by {Email}", macAddress, currentUserEmail);
+      return StatusCode(403, new { error = "You can only view your own machines" });
+    }
 
-            return Ok(machine);
-        }
+ _logger.LogInformation("Retrieved machine {MacAddress} for {Email}", macAddress, currentUserEmail);
+    return Ok(machine);
+   }
+ catch (Exception ex)
+ {
+   _logger.LogError(ex, "Error fetching machine by MAC {MacAddress}", macAddress);
+     return StatusCode(500, new { message = "Error retrieving machine", error = ex.Message });
+  }
+   }
 
         /// <summary>
         /// Register new machine for user or subuser email
         /// </summary>
         [HttpPost("register/{userEmail}")]
         public async Task<ActionResult<object>> RegisterMachine(string userEmail, [FromBody] MachineRegisterRequest request)
-        {
-  using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-      
-   var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-      var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
-            // Allow registration if:
-            // 1. User registering for themselves
-            // 2. Subuser registering for themselves 
-            // 3. User has permission to register for others
-            bool canRegister = userEmail == currentUserEmail ||
-                             await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_MACHINE", isCurrentUserSubuser) ||
-                             await CanManageUserAsync(currentUserEmail!, userEmail);
+ {
+  try
+  {
+using var _context = await _contextFactory.CreateDbContextAsync();
+  
+     var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+         
+       // Allow registration if:
+       // 1. User registering for themselves
+ // 2. Subuser registering for themselves 
+       // 3. User has permission to register for others
+         bool canRegister = userEmail == currentUserEmail ||
+      await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_MACHINE", isCurrentUserSubuser) ||
+        await CanManageUserAsync(currentUserEmail!, userEmail);
 
-            if (!canRegister)
-            {
-                return StatusCode(403, new { error = "You can only register machines for yourself or users you manage" });
-            }
+ if (!canRegister)
+   {
+  _logger.LogWarning("Unauthorized machine registration attempt by {CurrentEmail} for {TargetEmail}", currentUserEmail, userEmail);
+     return StatusCode(403, new { error = "You can only register machines for yourself or users you manage" });
+   }
 
-            // Validate that user exists (for users) or validate subuser exists (for subusers)
-            bool targetExists = await _userDataService.UserExistsAsync(userEmail) || 
-                               await _userDataService.SubuserExistsAsync(userEmail);
-            
-            if (!targetExists)
-                return BadRequest($"User or subuser with email {userEmail} not found");
+     // Validate that user exists (for users) or validate subuser exists (for subusers)
+         bool targetExists = await _userDataService.UserExistsAsync(userEmail) || 
+    await _userDataService.SubuserExistsAsync(userEmail);
+   
+if (!targetExists)
+   {
+    _logger.LogWarning("Attempted to register machine for non-existent user {Email}", userEmail);
+     return BadRequest($"User or subuser with email {userEmail} not found");
+ }
 
-            // Check if machine already exists
-            var existingMachine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == request.MacAddress);
+  // Check if machine already exists
+   var existingMachine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == request.MacAddress);
             if (existingMachine != null)
-                return Conflict($"Machine with MAC address {request.MacAddress} already registered");
+       {
+ _logger.LogWarning("Attempted to register duplicate machine with MAC {MacAddress}", request.MacAddress);
+         return Conflict($"Machine with MAC address {request.MacAddress} already registered");
+ }
 
-            // Determine if the target is a subuser
-            var targetIsSubuser = await _userDataService.SubuserExistsAsync(userEmail);
-            
-            // Create machine
-            var newMachine = new machines
-            {
-                user_email = targetIsSubuser ? (await _userDataService.GetSubuserByEmailAsync(userEmail))?.user_email ?? userEmail : userEmail,
-                subuser_email = targetIsSubuser ? userEmail : null,
-                mac_address = request.MacAddress,
-                fingerprint_hash = request.FingerprintHash,
-                physical_drive_id = request.PhysicalDriveId,
-                cpu_id = request.CpuId,
-                bios_serial = request.BiosSerial,
-                os_version = request.OsVersion,
-                license_activated = request.LicenseActivated ?? false,
-                license_activation_date = request.LicenseActivationDate,
-                license_days_valid = request.LicenseDaysValid ?? 0,
-                license_details_json = request.LicenseDetailsJson ?? "{}",
-                vm_status = request.VmStatus ?? "unknown",
-                demo_usage_count = 0,
-                created_at = DateTime.UtcNow,
-                updated_at = DateTime.UtcNow
-            };
+     // Determine if the target is a subuser
+var targetIsSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+         
+        // Create machine
+  var newMachine = new machines
+     {
+          user_email = targetIsSubuser ? (await _userDataService.GetSubuserByEmailAsync(userEmail))?.user_email ?? userEmail : userEmail,
+     subuser_email = targetIsSubuser ? userEmail : null,
+   mac_address = request.MacAddress,
+  fingerprint_hash = request.FingerprintHash,
+    physical_drive_id = request.PhysicalDriveId,
+       cpu_id = request.CpuId,
+   bios_serial = request.BiosSerial,
+    os_version = request.OsVersion,
+ license_activated = request.LicenseActivated ?? false,
+   license_activation_date = request.LicenseActivationDate,
+      license_days_valid = request.LicenseDaysValid ?? 0,
+license_details_json = request.LicenseDetailsJson ?? "{}",
+     vm_status = request.VmStatus ?? "unknown",
+  demo_usage_count = 0,
+     created_at = DateTime.UtcNow,
+   updated_at = DateTime.UtcNow
+    };
 
-            _context.Machines.Add(newMachine);
-            await _context.SaveChangesAsync();
+_context.Machines.Add(newMachine);
+ await _context.SaveChangesAsync();
 
-            var response = new {
-                fingerprintHash = newMachine.fingerprint_hash,
-                userEmail = newMachine.user_email,
-                subuserEmail = newMachine.subuser_email,
-                macAddress = newMachine.mac_address,
-                licenseActivated = newMachine.license_activated,
-                createdAt = newMachine.created_at,
-                message = "Machine registered successfully"
-            };
+_logger.LogInformation("✅ Registered machine {MacAddress} for {UserEmail} in {DbType} database", 
+request.MacAddress, userEmail, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
 
-            return CreatedAtAction(nameof(GetMachineByMac), new { macAddress = newMachine.mac_address }, response);
-        }
+  var response = new {
+    fingerprintHash = newMachine.fingerprint_hash,
+    userEmail = newMachine.user_email,
+ subuserEmail = newMachine.subuser_email,
+  macAddress = newMachine.mac_address,
+   licenseActivated = newMachine.license_activated,
+     createdAt = newMachine.created_at,
+    message = "Machine registered successfully"
+     };
+
+return CreatedAtAction(nameof(GetMachineByMac), new { macAddress = newMachine.mac_address }, response);
+ }
+            catch (Exception ex)
+      {
+      _logger.LogError(ex, "Error registering machine for user {Email}", userEmail);
+     return StatusCode(500, new { message = "Error registering machine", error = ex.Message });
+    }
+     }
 
         /// <summary>
         /// Update machine by MAC address

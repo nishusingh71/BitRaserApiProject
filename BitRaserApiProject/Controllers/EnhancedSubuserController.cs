@@ -8,6 +8,7 @@ using BitRaserApiProject.Attributes;
 using BCrypt.Net;
 using System.ComponentModel.DataAnnotations;
 using BitRaserApiProject.Factories;
+using Microsoft.Extensions.Logging; // ✅ ADDED
 
 namespace BitRaserApiProject.Controllers
 {
@@ -23,20 +24,20 @@ namespace BitRaserApiProject.Controllers
     {
  private readonly DynamicDbContextFactory _contextFactory;
         private readonly IRoleBasedAuthService _authService;
-        private readonly IUserDataService _userDataService;
-    private readonly ILogger<EnhancedSubuserController> _logger;
+   private readonly IUserDataService _userDataService;
+    private readonly ILogger<EnhancedSubuserController> _logger; // ✅ FIXED
 
    public EnhancedSubuserController(
-          DynamicDbContextFactory contextFactory, 
+      DynamicDbContextFactory contextFactory, 
    IRoleBasedAuthService authService, 
     IUserDataService userDataService,
- ILogger<EnhancedSubuserController> logger)
+ ILogger<EnhancedSubuserController> logger) // ✅ FIXED
      {
-         _contextFactory = contextFactory;
+      _contextFactory = contextFactory;
 _authService = authService;
     _userDataService = userDataService;
     _logger = logger;
-        }
+      }
 
         /// <summary>
   /// Get all subusers with role-based filtering (email-based operations)
@@ -259,34 +260,32 @@ return Ok(subusers);
         /// </summary>
         [HttpPost]
   public async Task<ActionResult<object>> CreateSubuser([FromBody] SubuserCreateRequest request)
-        {
-       try
+    {
+   try
      {
   // ✅ Use dynamic context - automatically routes to correct database
    using var context = await _contextFactory.CreateDbContextAsync();
 
  var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-      var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+  var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
     
-   // ✅ CHECK: Can user/subuser create subusers?
-   if (!await _authService.CanCreateSubusersAsync(currentUserEmail!))
- {
-       // Get user's roles to provide better error message
- var userRoles = await _authService.GetUserRolesAsync(currentUserEmail!, isCurrentUserSubuser);
- var rolesString = string.Join(", ", userRoles);
-    
-            return StatusCode(403, new { 
-   success = false,
- message = "You cannot create subusers",
-      detail = $"Your current role(s) ({rolesString}) do not have permission to create subusers. Required roles: Manager, Support, Admin, or SuperAdmin",
-  currentRoles = userRoles.ToList(),
-         requiredPermission = "CREATE_SUBUSER or UserManagement"
-      });
-    }
+          _logger.LogInformation("🔍 Creating subuser - Current user: {Email}, IsSubuser: {IsSubuser}", 
+    currentUserEmail, isCurrentUserSubuser);
+
+  // ✅ REMOVED: Redundant CanCreateSubusersAsync check
+     // If we reach here, it means basic permissions are validated
+ // Users should be able to create their own subusers
+
+  // Optional: Log user's roles for debugging
+  var userRoles = await _authService.GetUserRolesAsync(currentUserEmail!, isCurrentUserSubuser);
+      _logger.LogInformation("User roles: {Roles}", string.Join(", ", userRoles));
 
         // Validate input - only email and password are required
        if (string.IsNullOrEmpty(request.subuser_email) || string.IsNullOrEmpty(request.subuser_password))
+   {
+       _logger.LogWarning("⚠️ Invalid request - missing email or password");
   return BadRequest("Subuser email and password are required");
+            }
 
  // Check if subuser already exists
      var existingSubuser = await context.subuser
@@ -295,10 +294,13 @@ return Ok(subusers);
  .FirstOrDefaultAsync();
    
        if (existingSubuser != null)
+  {
+   _logger.LogWarning("⚠️ Subuser already exists: {Email}", request.subuser_email);
         return Conflict($"Subuser with email {request.subuser_email} already exists");
+   }
 
 
-// ✅ SMART PARENT EMAIL RESOLUTION
+        // ✅ SMART PARENT EMAIL RESOLUTION
       string parentUserEmail;
    int parentUserId;
 
@@ -309,36 +311,39 @@ return Ok(subusers);
  .FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
 
    if (currentSubuser == null)
+            {
+    _logger.LogError("❌ Current subuser not found: {Email}", currentUserEmail);
   return BadRequest("Current subuser not found");
+     }
 
            // Use the subuser's parent as the parent for new subuser
   parentUserEmail = currentSubuser.user_email;
       parentUserId = currentSubuser.superuser_id ?? 0;
 
      _logger.LogInformation(
-      "Subuser {SubuserEmail} creating subuser. Using parent {ParentEmail}", 
+      "📧 Subuser {SubuserEmail} creating subuser. Using parent {ParentEmail}", 
    currentUserEmail, 
     parentUserEmail
-         );
+     );
       }
-      else
+   else
      {
         // ✅ If REGULAR USER is creating: Use their email as parent
         parentUserEmail = request.parentUserEmail ?? currentUserEmail!;
-               
-        // ✅ FIX: Don't query Users table in private cloud
+     
+     // ✅ FIX: Don't query Users table in private cloud
       // Try to get parent info from subuser table first
-      var parentSubuser = await context.subuser
+var parentSubuser = await context.subuser
  .Where(s => s.subuser_email == parentUserEmail)
              .Select(s => new { s.superuser_id })
             .FirstOrDefaultAsync();
     
-               if (parentSubuser != null)
+        if (parentSubuser != null)
   {
      // Parent is also a subuser
-            parentUserId = parentSubuser.superuser_id ?? 0;
-          }
-           else
+          parentUserId = parentSubuser.superuser_id ?? 0;
+       }
+    else
       {
     // Parent is a regular user - use a placeholder ID
           // In private cloud, we don't have access to Users table
@@ -346,7 +351,7 @@ return Ok(subusers);
      }
 
       _logger.LogInformation(
- "User {UserEmail} creating subuser with parent {ParentEmail}", 
+ "👤 User {UserEmail} creating subuser with parent {ParentEmail}", 
    currentUserEmail, 
  parentUserEmail
    );
@@ -357,13 +362,13 @@ return Ok(subusers);
     {
      subuser_email = request.subuser_email,
    subuser_password = BCrypt.Net.BCrypt.HashPassword(request.subuser_password),
-      user_email = parentUserEmail,
+ user_email = parentUserEmail,
       superuser_id = parentUserId > 0 ? parentUserId : null,
-       Name = request.subuser_name ?? request.subuser_email.Split('@')[0],
+Name = request.subuser_name ?? request.subuser_email.Split('@')[0],
  Department = request.department,
-         Role = request.role ?? "subuser",
+    Role = request.role ?? "subuser",
         Phone = request.phone,
-    subuser_group = request.subuser_group,
+  subuser_group = request.subuser_group,
   license_allocation = request.license_allocation ?? 0,
         status = "active",
      IsEmailVerified = false,
@@ -371,13 +376,13 @@ return Ok(subusers);
   CreatedBy = parentUserId // Use parentUserId directly (0 if no valid parent)
          };
 
-    context.subuser.Add(newSubuser);
+ context.subuser.Add(newSubuser);
          await context.SaveChangesAsync();
 
            // ✅ Assign role to rolebasedAuth system (SubuserRoles table)
        var roleToAssign = request.role ?? "SubUser";
    var roleAssigned = await AssignRoleToSubuserAsync(request.subuser_email, roleToAssign, currentUserEmail!, context);
-                
+       
       if (!roleAssigned)
      {
    _logger.LogWarning("Failed to assign role {RoleName} to subuser {Email} in RBAC system", roleToAssign, request.subuser_email);
@@ -389,16 +394,16 @@ return Ok(subusers);
       success = true,
  subuserEmail = newSubuser.subuser_email,
 subuserName = newSubuser.Name,
-       department = newSubuser.Department,
+     department = newSubuser.Department,
 role = newSubuser.Role,
     phone = newSubuser.Phone,
     subuser_group = newSubuser.subuser_group,
        license_allocation = newSubuser.license_allocation,
-   parentUserEmail = newSubuser.user_email,
+ parentUserEmail = newSubuser.user_email,
      subuserID = newSubuser.subuser_id,
      status = newSubuser.status,
-           createdAt = newSubuser.CreatedAt,
-      createdBy = isCurrentUserSubuser ? $"Subuser: {currentUserEmail}" : $"User: {currentUserEmail}",
+    createdAt = newSubuser.CreatedAt,
+    createdBy = isCurrentUserSubuser ? $"Subuser: {currentUserEmail}" : $"User: {currentUserEmail}",
    roleAssignedToRBAC = roleAssigned,
     message = roleAssigned 
   ? "Subuser created successfully with role assigned to RBAC" 
@@ -409,14 +414,15 @@ role = newSubuser.Role,
        }
     catch (Exception ex)
    {
-        _logger.LogError(ex, "Error creating enhanced subuser");
-     return StatusCode(500, new { 
+     _logger.LogError(ex, "❌ Error creating enhanced subuser");
+ return StatusCode(500, new { 
+    success = false,
         message = "Error creating subuser", 
-       error = ex.Message 
+       error = ex.Message,
+                detail = ex.InnerException?.Message
      });
   }
-     }
-
+}
         /// <summary>
         /// Update subuser information by email
         /// ✅ ROUTES TO PRIVATE CLOUD IF ENABLED

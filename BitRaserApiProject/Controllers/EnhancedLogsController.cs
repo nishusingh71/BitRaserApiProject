@@ -23,17 +23,20 @@ namespace BitRaserApiProject.Controllers
         private readonly DynamicDbContextFactory _contextFactory; // ✅ CHANGED
   private readonly IRoleBasedAuthService _authService;
   private readonly IUserDataService _userDataService;
+        private readonly ITenantConnectionService _tenantService; // ✅ ADDED
         private readonly ILogger<EnhancedLogsController> _logger; // ✅ ADDED
 
         public EnhancedLogsController(
          DynamicDbContextFactory contextFactory, // ✅ CHANGED
             IRoleBasedAuthService authService,
             IUserDataService userDataService,
+        ITenantConnectionService tenantService, // ✅ ADDED
             ILogger<EnhancedLogsController> logger) // ✅ ADDED
         {
             _contextFactory = contextFactory; // ✅ CHANGED
     _authService = authService;
      _userDataService = userDataService;
+         _tenantService = tenantService; // ✅ ADDED
   _logger = logger; // ✅ ADDED
         }
 
@@ -44,93 +47,106 @@ namespace BitRaserApiProject.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetLogs([FromQuery] LogFilterRequest? filter)
         {
-     using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-            
-  var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-       var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+   try
+     {
+    using var _context = await _contextFactory.CreateDbContextAsync();
+         
+   var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+  var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+     
+ _logger.LogInformation("🔍 Fetching logs for user: {Email}", userEmail);
     
-            IQueryable<logs> query = _context.logs;
+    IQueryable<logs> query = _context.logs;
 
-            // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_LOGS", isCurrentUserSubuser))
-       {
+    // Apply role-based filtering
+     if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_LOGS", isCurrentUserSubuser))
+ {
    if (await _authService.HasPermissionAsync(userEmail!, "READ_USER_LOGS", isCurrentUserSubuser))
-              {
-           // Managers and Support can see logs for users they manage
-     var managedUsers = await GetManagedUsersAsync(userEmail!, _context);
+          {
+    // Managers and Support can see logs for users they manage
+   var managedUsers = await GetManagedUsersAsync(userEmail!, _context);
    query = query.Where(l => managedUsers.Contains(l.user_email) || l.user_email == userEmail);
-             }
-          else if (isCurrentUserSubuser)
-  {
-      // ❌ Subuser - only own logs
-              query = query.Where(l => l.user_email == userEmail);
+         }
+ else if (isCurrentUserSubuser)
+        {
+    // ❌ Subuser - only own logs
+   query = query.Where(l => l.user_email == userEmail);
    }
-       else
-             {
+  else
+       {
        // ✅ ENHANCED: User - own logs + subuser logs
-   var subuserEmails = await _context.subuser
+var subuserEmails = await _context.subuser
      .Where(s => s.user_email == userEmail)
-     .Select(s => s.subuser_email)
-       .ToListAsync();
-        
-                    query = query.Where(l => 
-       l.user_email == userEmail ||  // Own logs
-   subuserEmails.Contains(l.user_email)  // Subuser logs
-          );
+   .Select(s => s.subuser_email)
+ .ToListAsync();
+      
+     query = query.Where(l => 
+      l.user_email == userEmail ||  // Own logs
+       subuserEmails.Contains(l.user_email)  // Subuser logs
+   );
+}
     }
-        }
 
-            // Apply additional filters if provided
-         if (filter != null)
-  {
+    // Apply additional filters if provided
+    if (filter != null)
+   {
      if (!string.IsNullOrEmpty(filter.UserEmail))
        query = query.Where(l => l.user_email != null && l.user_email.Contains(filter.UserEmail));
 
-       if (!string.IsNullOrEmpty(filter.LogLevel))
+    if (!string.IsNullOrEmpty(filter.LogLevel))
    query = query.Where(l => l.log_level.Contains(filter.LogLevel));
 
-  if (!string.IsNullOrEmpty(filter.LogMessage))
-       query = query.Where(l => l.log_message.Contains(filter.LogMessage));
+     if (!string.IsNullOrEmpty(filter.LogMessage))
+        query = query.Where(l => l.log_message.Contains(filter.LogMessage));
 
-        if (filter.DateFrom.HasValue)
-  query = query.Where(l => l.created_at >= filter.DateFrom.Value);
+ if (filter.DateFrom.HasValue)
+    query = query.Where(l => l.created_at >= filter.DateFrom.Value);
 
-    if (filter.DateTo.HasValue)
-          query = query.Where(l => l.created_at <= filter.DateTo.Value);
+      if (filter.DateTo.HasValue)
+  query = query.Where(l => l.created_at <= filter.DateTo.Value);
 
-       if (filter.ErrorsOnly.HasValue && filter.ErrorsOnly.Value)
-        query = query.Where(l => l.log_level.ToLower().Contains("error"));
+     if (filter.ErrorsOnly.HasValue && filter.ErrorsOnly.Value)
+   query = query.Where(l => l.log_level.ToLower().Contains("error"));
 
-            if (filter.WarningsOnly.HasValue && filter.WarningsOnly.Value)
- query = query.Where(l => l.log_level.ToLower().Contains("warning"));
-            }
+    if (filter.WarningsOnly.HasValue && filter.WarningsOnly.Value)
+   query = query.Where(l => l.log_level.ToLower().Contains("warning"));
+        }
 
-        var logEntries = await query
-              .OrderByDescending(l => l.created_at)
-        .Take(filter?.PageSize ?? 100)
-     .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-              .Select(l => new {
-       l.log_id,
-         l.user_email,
-  l.log_level,
+    var logEntries = await query
+       .OrderByDescending(l => l.created_at)
+    .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+.Take(filter?.PageSize ?? 100)
+    .Select(l => new {
+     l.log_id,
+   l.user_email,
+   l.log_level,
+ l.log_message,
+ l.created_at,
+ log_details_json = l.log_details_json
+   })
+   .ToListAsync();
+
+_logger.LogInformation("✅ Found {Count} logs from {DbType} database", 
+   logEntries.Count, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+        // Process HasDetails safely after materialization
+   var processedLogEntries = logEntries.Select(l => new {
+      l.log_id,
+   l.user_email,
+     l.log_level,
   l.log_message,
-              l.created_at,
-  log_details_json = l.log_details_json
-  })
-         .ToListAsync();
-
-            // Process HasDetails safely after materialization
-            var processedLogEntries = logEntries.Select(l => new {
-             l.log_id,
-    l.user_email,
-        l.log_level,
-  l.log_message,
-          l.created_at,
-       HasDetails = SafeJsonCheck(l.log_details_json)
-   }).ToList();
+ l.created_at,
+      HasDetails = SafeJsonCheck(l.log_details_json)
+     }).ToList();
 
      return Ok(processedLogEntries);
-      }
+  }
+        catch (Exception ex)
+     {
+     _logger.LogError(ex, "Error fetching logs");
+  return StatusCode(500, new { message = "Error retrieving logs", error = ex.Message });
+     }
+   }
 
         /// <summary>
         /// Get log by ID with role validation
@@ -191,40 +207,52 @@ namespace BitRaserApiProject.Controllers
 [HttpPost]
         public async Task<ActionResult<logs>> CreateLog([FromBody] LogCreateRequest request)
         {
-            using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-       
+   try
+    {
+    using var _context = await _contextFactory.CreateDbContextAsync();
+ 
         var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-         
-  // Allow users and subusers to create logs for themselves, or if they have special permissions
-            var targetUserEmail = request.UserEmail ?? userEmail;
+var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
     
-            bool canCreate = targetUserEmail == userEmail ||
-     await _authService.HasPermissionAsync(userEmail!, "CREATE_LOG", isCurrentUserSubuser);
+     // Allow users and subusers to create logs for themselves, or if they have special permissions
+     var targetUserEmail = request.UserEmail ?? userEmail;
+      
+       bool canCreate = targetUserEmail == userEmail ||
+       await _authService.HasPermissionAsync(userEmail!, "CREATE_LOG", isCurrentUserSubuser);
 
-        if (!canCreate)
+ if (!canCreate)
   return StatusCode(403, new { error = "You can only create logs for yourself or if you have special permissions" });
 
-     if (string.IsNullOrEmpty(request.LogMessage))
-       return BadRequest("Log message is required");
+if (string.IsNullOrEmpty(request.LogMessage))
+  return BadRequest("Log message is required");
 
-        var validLogLevels = new[] { "Trace", "Debug", "Info", "Information", "Warning", "Error", "Critical", "Fatal" };
-            if (!validLogLevels.Contains(request.LogLevel, StringComparer.OrdinalIgnoreCase))
-           return BadRequest($"Invalid log level. Valid levels: {string.Join(", ", validLogLevels)}");
+   var validLogLevels = new[] { "Trace", "Debug", "Info", "Information", "Warning", "Error", "Critical", "Fatal" };
+    if (!validLogLevels.Contains(request.LogLevel, StringComparer.OrdinalIgnoreCase))
+    return BadRequest($"Invalid log level. Valid levels: {string.Join(", ", validLogLevels)}");
 
-      var log = new logs
-         {
-            user_email = targetUserEmail,
-         log_level = request.LogLevel,
-        log_message = request.LogMessage,
+    var log = new logs
+   {
+    user_email = targetUserEmail,
+   log_level = request.LogLevel,
+  log_message = request.LogMessage,
 log_details_json = request.LogDetailsJson ?? "{}",
-       created_at = DateTime.UtcNow
-    };
+  created_at = DateTime.UtcNow
+     };
 
-       _context.logs.Add(log);
-            await _context.SaveChangesAsync();
+  _context.logs.Add(log);
+    await _context.SaveChangesAsync();
 
-      return CreatedAtAction(nameof(GetLog), new { id = log.log_id }, log);
+_logger.LogInformation("✅ Created log {LogId} for {Email} in {DbType} database", 
+ log.log_id, targetUserEmail, 
+   await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+    return CreatedAtAction(nameof(GetLog), new { id = log.log_id }, log);
+     }
+   catch (Exception ex)
+   {
+     _logger.LogError(ex, "Error creating log");
+ return StatusCode(500, new { message = "Error creating log", error = ex.Message });
+   }
         }
 
         /// <summary>

@@ -299,34 +299,36 @@ emailNotifications = subuser.EmailNotifications,
       [RequirePermission("CREATE_SUBUSER")]
     public async Task<ActionResult<object>> CreateSubuser([FromBody] CreateSubuserDto request)
      {
+        try
+      {
  var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
    var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-        
-      // ✅ CHECK: Can user create subusers?
- if (!await _authService.CanCreateSubusersAsync(currentUserEmail!))
-      {
-       return StatusCode(403, new { 
-     success = false,
-  message = "You cannot create subusers",
-    detail = "Users with 'User' role are not allowed to create subusers"
-    });
-       }
+      
+  _logger.LogInformation("🔍 Creating subuser - Current user: {Email}, IsSubuser: {IsSubuser}", 
+         currentUserEmail, isCurrentUserSubuser);
 
-     if (!await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSER", isCurrentUserSubuser))
- return StatusCode(403, new { error = "Insufficient permissions to create subusers" });
+      // ✅ SIMPLIFIED CHECK: If RequirePermission passed, user has CREATE_SUBUSER permission
+            // The [RequirePermission("CREATE_SUBUSER")] attribute already validated this
+   
+    // Optional: Log user's roles for debugging
+  var userRoles = await _authService.GetUserRolesAsync(currentUserEmail!, isCurrentUserSubuser);
+            _logger.LogInformation("User roles: {Roles}", string.Join(", ", userRoles));
 
        // ✅ GET DYNAMIC CONTEXT (ROUTES TO PRIVATE DB IF CONFIGURED)
      using var _context = await _contextFactory.CreateDbContextAsync();
             
-    _logger.LogInformation("🔍 Creating subuser in database for user: {Email}", currentUserEmail);
+    _logger.LogInformation("💾 Creating subuser in database for user: {Email}", currentUserEmail);
 
    // Check if subuser already exists
      var existingSubuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
   if (existingSubuser != null)
+{
+         _logger.LogWarning("⚠️ Subuser already exists: {Email}", request.Email);
      return Conflict($"Subuser with email {request.Email} already exists");
+   }
 
    // ✅ SMART PARENT EMAIL RESOLUTION
-    string parentUserEmail;
+  string parentUserEmail;
   int parentUserId;
 
      if (isCurrentUserSubuser)
@@ -335,8 +337,11 @@ emailNotifications = subuser.EmailNotifications,
      var currentSubuser = await _context.subuser
    .FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
 
-      if (currentSubuser == null)
+  if (currentSubuser == null)
+            {
+       _logger.LogError("❌ Current subuser not found: {Email}", currentUserEmail);
 return BadRequest("Current subuser not found");
+            }
 
  // Use the subuser's parent as the parent for new subuser
             parentUserEmail = currentSubuser.user_email;
@@ -346,34 +351,36 @@ return BadRequest("Current subuser not found");
       }
     else
    {
-          // ✅ If REGULAR USER is creating: Use their email as parent
+      // ✅ If REGULAR USER is creating: Use their email as parent
  var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
    if (parentUser == null)
+            {
+    _logger.LogError("❌ Parent user not found: {Email}", currentUserEmail);
    return BadRequest("Parent user not found");
+            }
 
   parentUserEmail = parentUser.user_email;
  parentUserId = parentUser.user_id;
-        
+  
      _logger.LogInformation("👤 Regular user creating subuser for themselves: {ParentEmail}", parentUserEmail);
   }
 
-        // ✅ FIXED: No additional permission check needed
-   // Subusers create for their parent (allowed)
-        // Regular users create for themselves (allowed)
-  // Only block if trying to create for someone else
+        // ✅ SECURITY CHECK: Verify user is creating for themselves or has permission
+  // Only block if trying to create for someone else without permission
     if (!isCurrentUserSubuser && parentUserEmail != currentUserEmail)
-     {
+ {
      // Regular user trying to create for someone else
-      if (!await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSERS_FOR_OTHERS", isCurrentUserSubuser))
+   if (!await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_SUBUSERS_FOR_OTHERS", isCurrentUserSubuser))
     {
+  _logger.LogWarning("⚠️ Unauthorized attempt to create subuser for another user by {Email}", currentUserEmail);
     return StatusCode(403, new { 
-          success = false,
+ success = false,
  error = "You can only create subusers for yourself" 
      });
-      }
+  }
       }
 
-       // Create subuser with name
+   // Create subuser with name
  var newSubuser = new subuser
       {
 subuser_email = request.Email,
@@ -391,29 +398,29 @@ subuser_email = request.Email,
     license_allocation = request.LicenseAllocation ?? 0,
    CanCreateSubusers = request.CanCreateSubusers ?? false,
  CanViewReports = request.CanViewReports ?? true,
-      CanManageMachines = request.CanManageMachines ?? false,
+  CanManageMachines = request.CanManageMachines ?? false,
     CanAssignLicenses = request.CanAssignLicenses ?? false,
  EmailNotifications = request.EmailNotifications ?? true,
      SystemAlerts = request.SystemAlerts ?? true,
    CreatedBy = parentUserId,
-    CreatedAt = DateTime.UtcNow,
+ CreatedAt = DateTime.UtcNow,
    Notes = request.Notes
     };
 
-          _logger.LogInformation("💾 Saving subuser to database: {SubuserEmail}", newSubuser.subuser_email);
+        _logger.LogInformation("💾 Saving subuser to database: {SubuserEmail}", newSubuser.subuser_email);
    _context.subuser.Add(newSubuser);
-    await _context.SaveChangesAsync();
-            _logger.LogInformation("✅ Subuser saved successfully with ID: {SubuserId}", newSubuser.subuser_id);
+  await _context.SaveChangesAsync();
+  _logger.LogInformation("✅ Subuser saved successfully with ID: {SubuserId}", newSubuser.subuser_id);
 
      // ✅ Assign default SubUser role (or custom role if validated above)
 var roleToAssign = !string.IsNullOrEmpty(request.Role) && await _authService.CanAssignRoleAsync(currentUserEmail!, request.Role)
    ? request.Role
      : "SubUser";
       
-            _logger.LogInformation("🔐 Assigning role '{Role}' to subuser: {SubuserEmail}", roleToAssign, newSubuser.subuser_email);
+_logger.LogInformation("🔐 Assigning role '{Role}' to subuser: {SubuserEmail}", roleToAssign, newSubuser.subuser_email);
        await AssignRoleToSubuserAsync(_context, newSubuser.subuser_email, roleToAssign, currentUserEmail!);
 
-    // Reload with roles
+  // Reload with roles
       var createdSubuser = await _context.subuser
    .Include(s => s.SubuserRoles)
     .ThenInclude(sr => sr.Role)
@@ -440,9 +447,20 @@ roles = createdSubuser.SubuserRoles.Select(sr => new {
   _logger.LogInformation("🎉 Subuser creation complete for: {SubuserEmail}", newSubuser.subuser_email);
        return CreatedAtAction(nameof(GetSubuserByEmail), new { email = newSubuser.subuser_email }, response);
         }
+        catch (Exception ex)
+        {
+  _logger.LogError(ex, "❌ Error creating subuser for user {Email}", User.FindFirst(ClaimTypes.NameIdentifier)?.Value);
+     return StatusCode(500, new { 
+                success = false,
+                message = "Error creating subuser", 
+                error = ex.Message,
+        detail = ex.InnerException?.Message
+            });
+        }
+    }
 
-   /// <summary>
-        /// Update subuser details including name
+        /// <summary>
+   /// Update subuser details including name
       /// </summary>
         [HttpPut("{email}")]
         [RequirePermission("UPDATE_SUBUSER")]

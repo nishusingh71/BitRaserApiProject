@@ -338,7 +338,7 @@ builder.Services.AddScoped<IDatabaseContextFactory, DatabaseContextFactory>();
 // ✅ HYBRID MULTI-TENANT SUPPORT - Automatic tenant routing
 builder.Services.AddHttpContextAccessor();  // Required for reading JWT claims
 builder.Services.AddScoped<ITenantConnectionService, TenantConnectionService>();
-builder.Services.AddScoped<DynamicDbContextFactory>();
+builder.Services.AddScoped< DynamicDbContextFactory>();
 
 // Add memory cache
 builder.Services.AddMemoryCache();

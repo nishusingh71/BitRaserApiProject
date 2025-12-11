@@ -24,7 +24,7 @@ namespace BitRaserApiProject
         public DbSet<logs> logs { get; set; }
         public DbSet<subuser> subuser { get; set; }
         public DbSet<Group> Groups { get; set; }
-        
+
         // New DbSets for role-based system
         public DbSet<Role> Roles { get; set; }
         public DbSet<Permission> Permissions { get; set; }
@@ -33,19 +33,25 @@ namespace BitRaserApiProject
         public DbSet<SubuserRole> SubuserRoles { get; set; }
         public DbSet<Models.Route> Routes { get; set; }
         public DbSet<PermissionRoute> PermissionRoutes { get; set; }
-        
+
         // System Settings and Report Generation
         public DbSet<SystemSetting> SystemSettings { get; set; }
         public DbSet<GeneratedReport> GeneratedReports { get; set; }
         public DbSet<ReportTemplate> ReportTemplates { get; set; }
         public DbSet<ScheduledReport> ScheduledReports { get; set; }
-        
+
         // Private Cloud Database Management
         public DbSet<PrivateCloudDatabase> PrivateCloudDatabases { get; set; }
-        
+        public DbSet<DatabaseRoutingCache> DatabaseRoutingCache { get; set; }
+        public DbSet<PrivateDatabaseAuditLog> PrivateDatabaseAuditLogs { get; set; }
+
+        // License Activation System (Separate from License Management)
+        public DbSet<LicenseActivation> LicenseActivations { get; set; }
+        public DbSet<LicenseUsageLog> LicenseUsageLogs { get; set; }
+
         // ✅ Forgot Password Requests (NO EMAIL - OTP returned in API response)
         public DbSet<ForgotPasswordRequest> ForgotPasswordRequests { get; set; }
-        
+
         public static string HashLicenseKey(string licenseKey)
         {
             using var sha256 = SHA256.Create();
@@ -325,7 +331,7 @@ namespace BitRaserApiProject
                 .HasMaxLength(50);
 
             // Role-based system configurations
-            
+
             // Roles table
             modelBuilder.Entity<Role>()
                 .HasKey(r => r.RoleId);
@@ -403,10 +409,10 @@ namespace BitRaserApiProject
                 .HasKey(sr => new { sr.SubuserId, sr.RoleId });
 
             //modelBuilder.Entity<SubuserRole>()
-                //.HasOne(sr => sr.Subuser)
-                //.WithMany(s => s.SubuserRoles)
-                //.HasForeignKey(sr => sr.SubuserId)
-                //.OnDelete(DeleteBehavior.Cascade);
+            //.HasOne(sr => sr.Subuser)
+            //.WithMany(s => s.SubuserRoles)
+            //.HasForeignKey(sr => sr.SubuserId)
+            //.OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<SubuserRole>()
                 .HasOne(sr => sr.Role)
@@ -627,7 +633,7 @@ namespace BitRaserApiProject
                 new RolePermission { RoleId = 1, PermissionId = 5 },
                 new RolePermission { RoleId = 1, PermissionId = 6 },
                 new RolePermission { RoleId = 1, PermissionId = 7 },
-                
+
                 // Admin gets most permissions except FullAccess
                 new RolePermission { RoleId = 2, PermissionId = 2 },
                 new RolePermission { RoleId = 2, PermissionId = 3 },
@@ -637,22 +643,22 @@ namespace BitRaserApiProject
                 new RolePermission { RoleId = 2, PermissionId = 7 },
                 // ✅ Admin gets CREATE_SUBUSER permission
                 new RolePermission { RoleId = 2, PermissionId = 32 },
-       
+
                 // Manager gets limited permissions
                 new RolePermission { RoleId = 3, PermissionId = 3 },
                 new RolePermission { RoleId = 3, PermissionId = 4 },
                 new RolePermission { RoleId = 3, PermissionId = 5 },
-     // ✅ Manager gets CREATE_SUBUSER permission
+      // ✅ Manager gets CREATE_SUBUSER permission
       new RolePermission { RoleId = 3, PermissionId = 32 },
-       
-       // Support gets support-related permissions
+
+                // Support gets support-related permissions
                 new RolePermission { RoleId = 4, PermissionId = 3 },
                 new RolePermission { RoleId = 4, PermissionId = 5 },
   new RolePermission { RoleId = 4, PermissionId = 7 },
-       // ✅ Support gets CREATE_SUBUSER permission
+// ✅ Support gets CREATE_SUBUSER permission
 new RolePermission { RoleId = 4, PermissionId = 32 },
-    
-         // User gets only view access (NO CREATE_SUBUSER)
+
+   // User gets only view access (NO CREATE_SUBUSER)
    new RolePermission { RoleId = 5, PermissionId = 5 }
        );
 
@@ -660,45 +666,45 @@ new RolePermission { RoleId = 4, PermissionId = 32 },
             modelBuilder.Entity<ForgotPasswordRequest>()
          .HasKey(f => f.Id);
 
-  modelBuilder.Entity<ForgotPasswordRequest>()
-     .Property(f => f.Email)
-  .HasMaxLength(255)
-      .IsRequired();
+            modelBuilder.Entity<ForgotPasswordRequest>()
+               .Property(f => f.Email)
+            .HasMaxLength(255)
+                .IsRequired();
 
-     modelBuilder.Entity<ForgotPasswordRequest>()
-     .Property(f => f.UserType)
-    .HasMaxLength(20)
-        .HasDefaultValue("user");
+            modelBuilder.Entity<ForgotPasswordRequest>()
+            .Property(f => f.UserType)
+           .HasMaxLength(20)
+               .HasDefaultValue("user");
 
-  modelBuilder.Entity<ForgotPasswordRequest>()
-      .Property(f => f.Otp)
-       .HasMaxLength(6)
-     .IsRequired();
+            modelBuilder.Entity<ForgotPasswordRequest>()
+                .Property(f => f.Otp)
+                 .HasMaxLength(6)
+               .IsRequired();
 
-          modelBuilder.Entity<ForgotPasswordRequest>()
-   .Property(f => f.ResetToken)
-        .HasMaxLength(500)
-         .IsRequired();
+            modelBuilder.Entity<ForgotPasswordRequest>()
+     .Property(f => f.ResetToken)
+          .HasMaxLength(500)
+           .IsRequired();
 
-        modelBuilder.Entity<ForgotPasswordRequest>()
-          .HasIndex(f => f.ResetToken)
-  .IsUnique();
+            modelBuilder.Entity<ForgotPasswordRequest>()
+              .HasIndex(f => f.ResetToken)
+      .IsUnique();
 
- modelBuilder.Entity<ForgotPasswordRequest>()
-   .HasIndex(f => new { f.Email, f.ExpiresAt });
+            modelBuilder.Entity<ForgotPasswordRequest>()
+              .HasIndex(f => new { f.Email, f.ExpiresAt });
 
-        modelBuilder.Entity<ForgotPasswordRequest>()
-          .HasIndex(f => new { f.UserId, f.UserType });
+            modelBuilder.Entity<ForgotPasswordRequest>()
+              .HasIndex(f => new { f.UserId, f.UserType });
 
-       modelBuilder.Entity<ForgotPasswordRequest>()
-.Property(f => f.IpAddress)
-       .HasMaxLength(50);
+            modelBuilder.Entity<ForgotPasswordRequest>()
+     .Property(f => f.IpAddress)
+            .HasMaxLength(50);
 
-        modelBuilder.Entity<ForgotPasswordRequest>()
-  .Property(f => f.UserAgent)
-     .HasMaxLength(500);
+            modelBuilder.Entity<ForgotPasswordRequest>()
+      .Property(f => f.UserAgent)
+         .HasMaxLength(500);
 
-   // ✅ PrivateCloudDatabase table configuration
+            // ✅ PrivateCloudDatabase table configuration
             modelBuilder.Entity<PrivateCloudDatabase>()
        .HasKey(p => p.ConfigId);
 
@@ -707,56 +713,70 @@ new RolePermission { RoleId = 4, PermissionId = 32 },
        .HasMaxLength(255)
     .IsRequired();
 
-     modelBuilder.Entity<PrivateCloudDatabase>()
-  .HasIndex(p => p.UserEmail)
-  .IsUnique();
+            modelBuilder.Entity<PrivateCloudDatabase>()
+         .HasIndex(p => p.UserEmail)
+         .IsUnique();
 
-     modelBuilder.Entity<PrivateCloudDatabase>()
-       .Property(p => p.ConnectionString)
-       .IsRequired();
+            modelBuilder.Entity<PrivateCloudDatabase>()
+              .Property(p => p.ConnectionString)
+              .IsRequired();
 
-    modelBuilder.Entity<PrivateCloudDatabase>()
-     .Property(p => p.DatabaseType)
-        .HasMaxLength(50)
-         .IsRequired();
+            modelBuilder.Entity<PrivateCloudDatabase>()
+             .Property(p => p.DatabaseType)
+                .HasMaxLength(50)
+                 .IsRequired();
 
-    modelBuilder.Entity<PrivateCloudDatabase>()
-         .Property(p => p.ServerHost)
-       .HasMaxLength(255);
+            modelBuilder.Entity<PrivateCloudDatabase>()
+                 .Property(p => p.ServerHost)
+               .HasMaxLength(255);
 
-    modelBuilder.Entity<PrivateCloudDatabase>()
-   .Property(p => p.DatabaseName)
-  .HasMaxLength(255)
-    .IsRequired();
+            modelBuilder.Entity<PrivateCloudDatabase>()
+           .Property(p => p.DatabaseName)
+          .HasMaxLength(255)
+            .IsRequired();
 
-     modelBuilder.Entity<PrivateCloudDatabase>()
-      .Property(p => p.DatabaseUsername)
-  .HasMaxLength(255)
-          .IsRequired();
+            modelBuilder.Entity<PrivateCloudDatabase>()
+             .Property(p => p.DatabaseUsername)
+         .HasMaxLength(255)
+                 .IsRequired();
 
-        // ✅ NEW: SelectedTables JSON field configuration
-          modelBuilder.Entity<PrivateCloudDatabase>()
-  .Property(p => p.SelectedTables)
-         .HasColumnName("selected_tables")
- .HasColumnType("json");
+            // ✅ NEW: SelectedTables JSON field configuration
+            modelBuilder.Entity<PrivateCloudDatabase>()
+    .Property(p => p.SelectedTables)
+           .HasColumnName("selected_tables")
+   .HasColumnType("json");
 
-modelBuilder.Entity<PrivateCloudDatabase>()
-    .Property(p => p.TestStatus)
-       .HasMaxLength(50);
+            modelBuilder.Entity<PrivateCloudDatabase>()
+                .Property(p => p.TestStatus)
+                   .HasMaxLength(50);
 
             modelBuilder.Entity<PrivateCloudDatabase>()
   .Property(p => p.CreatedBy)
     .HasMaxLength(255);
 
- // Foreign key to users table
-         modelBuilder.Entity<PrivateCloudDatabase>()
-  .HasOne(p => p.User)
-     .WithMany()
-                .HasForeignKey(p => p.UserId)
-        .OnDelete(DeleteBehavior.Cascade);
+            // Foreign key to users table
+            modelBuilder.Entity<PrivateCloudDatabase>()
+     .HasOne(p => p.User)
+        .WithMany()
+                   .HasForeignKey(p => p.UserId)
+           .OnDelete(DeleteBehavior.Cascade);
         }
     }
-
+    public class LicenseDbContext : DbContext
+    {
+        public LicenseDbContext(DbContextOptions<LicenseDbContext> options) :
+            base(options)
+        { }
+        public DbSet<License> Licenses => Set<License>();
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            base.OnModelCreating(modelBuilder); modelBuilder.Entity<License>(entity =>
+            {
+                entity.ToTable("licenses");
+                entity.HasIndex(x => x.LicenseKey).IsUnique();
+            });
+        }
+    }
 
     public static class SecurityHelpers
     {

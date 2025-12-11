@@ -161,7 +161,7 @@ namespace BitRaserApiProject.Middleware
             }
             existing.Count++;
             return existing;
-                });
+        });
 
             AddRateLimitHeaders(context, _unauthenticatedLimit, entry.Count, entry.WindowStart, _windowDuration);
 
@@ -195,63 +195,63 @@ namespace BitRaserApiProject.Middleware
  _ => new ForgotPasswordRateLimitEntry { Count = 1, WindowStart = hourStart },
                 (_, existing) =>
       {
-   if (now - existing.WindowStart >= _forgotPasswordWindowDuration)
-    {
-             // New hour - reset counter
-    return new ForgotPasswordRateLimitEntry { Count = 1, WindowStart = hourStart };
-     }
-     existing.Count++;
-       return existing;
-  });
+          if (now - existing.WindowStart >= _forgotPasswordWindowDuration)
+          {
+              // New hour - reset counter
+              return new ForgotPasswordRateLimitEntry { Count = 1, WindowStart = hourStart };
+          }
+          existing.Count++;
+          return existing;
+      });
 
-   // Check email-based limit (if email provided)
-        ForgotPasswordRateLimitEntry? emailEntry = null;
+            // Check email-based limit (if email provided)
+            ForgotPasswordRateLimitEntry? emailEntry = null;
             if (!string.IsNullOrEmpty(emailKey))
             {
-    emailEntry = _forgotPasswordLimits.AddOrUpdate(
-          emailKey,
-           _ => new ForgotPasswordRateLimitEntry { Count = 1, WindowStart = hourStart },
-     (_, existing) =>
-    {
-             if (now - existing.WindowStart >= _forgotPasswordWindowDuration)
- {
-        return new ForgotPasswordRateLimitEntry { Count = 1, WindowStart = hourStart };
-    }
-    existing.Count++;
-         return existing;
-});
-      }
+                emailEntry = _forgotPasswordLimits.AddOrUpdate(
+                      emailKey,
+                       _ => new ForgotPasswordRateLimitEntry { Count = 1, WindowStart = hourStart },
+                 (_, existing) =>
+                {
+                    if (now - existing.WindowStart >= _forgotPasswordWindowDuration)
+                    {
+                        return new ForgotPasswordRateLimitEntry { Count = 1, WindowStart = hourStart };
+                    }
+                    existing.Count++;
+                    return existing;
+                });
+            }
 
-   // Calculate time until next hour reset
-  var nextHour = hourStart.AddHours(1);
+            // Calculate time until next hour reset
+            var nextHour = hourStart.AddHours(1);
             var timeUntilReset = nextHour - now;
 
-    // Add headers
-   var currentCount = Math.Max(ipEntry.Count, emailEntry?.Count ?? 0);
-        var remaining = Math.Max(0, _forgotPasswordHourlyLimit - currentCount);
+            // Add headers
+            var currentCount = Math.Max(ipEntry.Count, emailEntry?.Count ?? 0);
+            var remaining = Math.Max(0, _forgotPasswordHourlyLimit - currentCount);
 
-       context.Response.Headers["X-RateLimit-Limit"] = _forgotPasswordHourlyLimit.ToString();
-     context.Response.Headers["X-RateLimit-Remaining"] = remaining.ToString();
+            context.Response.Headers["X-RateLimit-Limit"] = _forgotPasswordHourlyLimit.ToString();
+            context.Response.Headers["X-RateLimit-Remaining"] = remaining.ToString();
             context.Response.Headers["X-RateLimit-Reset"] = ((int)timeUntilReset.TotalSeconds).ToString();
-      context.Response.Headers["X-RateLimit-Policy"] = $"{_forgotPasswordHourlyLimit};w=3600";
+            context.Response.Headers["X-RateLimit-Policy"] = $"{_forgotPasswordHourlyLimit};w=3600";
 
             // Check if either limit exceeded
             if (ipEntry.Count > _forgotPasswordHourlyLimit)
- {
-           _logger.LogWarning("⚠️ Forgot password hourly limit exceeded for IP {IP}: {Count}/{Limit} requests this hour",
-  clientIp, ipEntry.Count, _forgotPasswordHourlyLimit);
+            {
+                _logger.LogWarning("⚠️ Forgot password hourly limit exceeded for IP {IP}: {Count}/{Limit} requests this hour",
+       clientIp, ipEntry.Count, _forgotPasswordHourlyLimit);
 
-        await ReturnForgotPasswordHourlyLimitExceeded(context, timeUntilReset, "IP address");
-         return false;
-   }
+                await ReturnForgotPasswordHourlyLimitExceeded(context, timeUntilReset, "IP address");
+                return false;
+            }
 
             if (emailEntry != null && emailEntry.Count > _forgotPasswordHourlyLimit)
-  {
-         _logger.LogWarning("⚠️ Forgot password hourly limit exceeded for email {Email}: {Count}/{Limit} requests this hour",
-             email, emailEntry.Count, _forgotPasswordHourlyLimit);
+            {
+                _logger.LogWarning("⚠️ Forgot password hourly limit exceeded for email {Email}: {Count}/{Limit} requests this hour",
+                    email, emailEntry.Count, _forgotPasswordHourlyLimit);
 
-          await ReturnForgotPasswordHourlyLimitExceeded(context, timeUntilReset, "email address");
-      return false;
+                await ReturnForgotPasswordHourlyLimitExceeded(context, timeUntilReset, "email address");
+                return false;
             }
 
             _logger.LogInformation("📧 Forgot password request #{Count}/{Limit} this hour - IP: {IP}, Email: {Email}",
@@ -261,135 +261,135 @@ namespace BitRaserApiProject.Middleware
         }
 
         /// <summary>
-   /// Extract email from request body for forgot password tracking
-     /// </summary>
+        /// Extract email from request body for forgot password tracking
+        /// </summary>
         private async Task<string?> GetEmailFromRequestBody(HttpContext context)
- {
-    try
-   {
-         context.Request.EnableBuffering();
+        {
+            try
+            {
+                context.Request.EnableBuffering();
 
- using var reader = new StreamReader(context.Request.Body, leaveOpen: true);
-    var body = await reader.ReadToEndAsync();
-       context.Request.Body.Position = 0;
+                using var reader = new StreamReader(context.Request.Body, leaveOpen: true);
+                var body = await reader.ReadToEndAsync();
+                context.Request.Body.Position = 0;
 
-   if (string.IsNullOrEmpty(body))
-           return null;
+                if (string.IsNullOrEmpty(body))
+                    return null;
 
-     var jsonDoc = System.Text.Json.JsonDocument.Parse(body);
+                var jsonDoc = System.Text.Json.JsonDocument.Parse(body);
 
-     if (jsonDoc.RootElement.TryGetProperty("email", out var emailElement))
-          return emailElement.GetString();
+                if (jsonDoc.RootElement.TryGetProperty("email", out var emailElement))
+                    return emailElement.GetString();
 
                 if (jsonDoc.RootElement.TryGetProperty("Email", out var emailElement2))
-       return emailElement2.GetString();
+                    return emailElement2.GetString();
 
-     if (jsonDoc.RootElement.TryGetProperty("userEmail", out var emailElement3))
-   return emailElement3.GetString();
-     }
- catch (Exception ex)
+                if (jsonDoc.RootElement.TryGetProperty("userEmail", out var emailElement3))
+                    return emailElement3.GetString();
+            }
+            catch (Exception ex)
             {
-             _logger.LogDebug("Could not extract email from request body: {Message}", ex.Message);
-     }
+                _logger.LogDebug("Could not extract email from request body: {Message}", ex.Message);
+            }
 
             return null;
-   }
+        }
 
         /// <summary>
-   /// Check if user is a private cloud user
+        /// Check if user is a private cloud user
         /// </summary>
         private async Task<bool> IsPrivateCloudUserAsync(ApplicationDbContext dbContext, string userEmail)
         {
-       try
-          {
-       var user = await dbContext.Users
-     .AsNoTracking()
-     .FirstOrDefaultAsync(u => u.user_email == userEmail);
-
-            return user?.is_private_cloud == true;
-         }
-     catch (Exception ex)
+            try
             {
-_logger.LogError(ex, "Error checking private cloud status for {Email}", userEmail);
-          return false;
-          }
-     }
+                var user = await dbContext.Users
+              .AsNoTracking()
+              .FirstOrDefaultAsync(u => u.user_email == userEmail);
+
+                return user?.is_private_cloud == true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking private cloud status for {Email}", userEmail);
+                return false;
+            }
+        }
 
         /// <summary>
         /// Get user email from JWT token
-   /// </summary>
+        /// </summary>
         private string? GetUserEmail(HttpContext context)
-   {
+        {
             if (context.User?.Identity?.IsAuthenticated != true)
-      return null;
+                return null;
 
             return context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
          ?? context.User.FindFirst(ClaimTypes.Email)?.Value
        ?? context.User.FindFirst("email")?.Value
         ?? context.User.FindFirst("sub")?.Value;
-     }
+        }
 
-     /// <summary>
+        /// <summary>
         /// Get client IP address
-    /// </summary>
+        /// </summary>
         private string GetClientIpAddress(HttpContext context)
         {
-       var forwardedFor = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
-        if (!string.IsNullOrEmpty(forwardedFor))
-          {
-   return forwardedFor.Split(',')[0].Trim();
-   }
+            var forwardedFor = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
+            if (!string.IsNullOrEmpty(forwardedFor))
+            {
+                return forwardedFor.Split(',')[0].Trim();
+            }
 
-       var realIp = context.Request.Headers["X-Real-IP"].FirstOrDefault();
+            var realIp = context.Request.Headers["X-Real-IP"].FirstOrDefault();
             if (!string.IsNullOrEmpty(realIp))
-   {
-        return realIp;
-          }
+            {
+                return realIp;
+            }
 
-         return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-   }
+            return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        }
 
         /// <summary>
         /// Add standard rate limit headers to response
-   /// </summary>
+        /// </summary>
         private void AddRateLimitHeaders(HttpContext context, int limit, int current, DateTime windowStart, TimeSpan windowDuration)
         {
-     var remaining = Math.Max(0, limit - current);
-        var resetTime = windowStart.Add(windowDuration);
+            var remaining = Math.Max(0, limit - current);
+            var resetTime = windowStart.Add(windowDuration);
             var resetSeconds = Math.Max(0, (int)(resetTime - DateTime.UtcNow).TotalSeconds);
 
             context.Response.Headers["X-RateLimit-Limit"] = limit.ToString();
-    context.Response.Headers["X-RateLimit-Remaining"] = remaining.ToString();
-     context.Response.Headers["X-RateLimit-Reset"] = resetSeconds.ToString();
-          context.Response.Headers["X-RateLimit-Policy"] = $"{limit};w={(int)windowDuration.TotalSeconds}";
- }
+            context.Response.Headers["X-RateLimit-Remaining"] = remaining.ToString();
+            context.Response.Headers["X-RateLimit-Reset"] = resetSeconds.ToString();
+            context.Response.Headers["X-RateLimit-Policy"] = $"{limit};w={(int)windowDuration.TotalSeconds}";
+        }
 
-      /// <summary>
+        /// <summary>
         /// Return 429 Too Many Requests response
         /// </summary>
         private void ReturnRateLimitExceeded(HttpContext context, int limit, DateTime windowStart, TimeSpan windowDuration, string timeUnit)
-   {
-        var resetTime = windowStart.Add(windowDuration);
-var retryAfter = Math.Max(1, (int)(resetTime - DateTime.UtcNow).TotalSeconds);
+        {
+            var resetTime = windowStart.Add(windowDuration);
+            var retryAfter = Math.Max(1, (int)(resetTime - DateTime.UtcNow).TotalSeconds);
 
-    context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-       context.Response.Headers["Retry-After"] = retryAfter.ToString();
+            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            context.Response.Headers["Retry-After"] = retryAfter.ToString();
             context.Response.ContentType = "application/json";
 
-       var response = new
-   {
-  success = false,
-      error = "Rate limit exceeded",
-       message = $"Too many requests. Limit: {limit} requests per {timeUnit}.",
-      retryAfter = retryAfter,
-          retryAfterUnit = "seconds"
-       };
+            var response = new
+            {
+                success = false,
+                error = "Rate limit exceeded",
+                message = $"Too many requests. Limit: {limit} requests per {timeUnit}.",
+                retryAfter = retryAfter,
+                retryAfterUnit = "seconds"
+            };
 
- var json = System.Text.Json.JsonSerializer.Serialize(response);
-   context.Response.WriteAsync(json).Wait();
+            var json = System.Text.Json.JsonSerializer.Serialize(response);
+            context.Response.WriteAsync(json).Wait();
         }
 
-      /// <summary>
+        /// <summary>
         /// Return rate limit exceeded for forgot password (hourly limit)
         /// </summary>
         private async Task ReturnForgotPasswordHourlyLimitExceeded(HttpContext context, TimeSpan timeUntilReset, string limitType)
@@ -397,23 +397,23 @@ var retryAfter = Math.Max(1, (int)(resetTime - DateTime.UtcNow).TotalSeconds);
             var retryAfterSeconds = (int)timeUntilReset.TotalSeconds;
             var retryAfterMinutes = (int)Math.Ceiling(timeUntilReset.TotalMinutes);
 
-  context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-       context.Response.Headers["Retry-After"] = retryAfterSeconds.ToString();
+            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            context.Response.Headers["Retry-After"] = retryAfterSeconds.ToString();
             context.Response.ContentType = "application/json";
 
-    var response = new
-    {
-   success = false,
-       error = "Hourly limit exceeded",
-             message = $"For security reasons, you can only request {_forgotPasswordHourlyLimit} password resets per hour from this {limitType}. Please try again later.",
+            var response = new
+            {
+                success = false,
+                error = "Hourly limit exceeded",
+                message = $"For security reasons, you can only request {_forgotPasswordHourlyLimit} password resets per hour from this {limitType}. Please try again later.",
                 retryAfter = retryAfterSeconds,
                 retryAfterMinutes = retryAfterMinutes,
-        retryAfterUnit = "seconds",
-    resetsAt = DateTime.UtcNow.AddSeconds(retryAfterSeconds).ToString("yyyy-MM-ddTHH:mm:ssZ")
-         };
+                retryAfterUnit = "seconds",
+                resetsAt = DateTime.UtcNow.AddSeconds(retryAfterSeconds).ToString("yyyy-MM-ddTHH:mm:ssZ")
+            };
 
             var json = System.Text.Json.JsonSerializer.Serialize(response);
-      await context.Response.WriteAsync(json);
+            await context.Response.WriteAsync(json);
         }
 
         /// <summary>
@@ -443,50 +443,56 @@ var retryAfter = Math.Max(1, (int)(resetTime - DateTime.UtcNow).TotalSeconds);
   "/api/forgotpassword/verify-otp",
     "/api/forgotpassword/reset-password",
           "/api/forgotpassword/resend-otp"
+          //"/api/forgot/request",
+          // "/api/forgot/resend-otp",
+          //  "/api/forgot/validate-reset-link",
+          //   "/api/forgot/verify-otp",
+          //      "/api/forgot/reset"
+
         };
 
- return forgotPasswordPaths.Any(p => path.Equals(p, StringComparison.OrdinalIgnoreCase) ||
-    path.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+            return forgotPasswordPaths.Any(p => path.Equals(p, StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWith(p, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>
         /// Background task to clean up expired entries (call periodically)
         /// </summary>
         public static void CleanupExpiredEntries()
-     {
-      var now = DateTime.UtcNow;
-     var expiredWindow = TimeSpan.FromMinutes(2);
-        var expiredHourWindow = TimeSpan.FromHours(2); // Keep forgot password entries for 2 hours
+        {
+            var now = DateTime.UtcNow;
+            var expiredWindow = TimeSpan.FromMinutes(2);
+            var expiredHourWindow = TimeSpan.FromHours(2); // Keep forgot password entries for 2 hours
 
-     // Cleanup user rate limits (per minute)
+            // Cleanup user rate limits (per minute)
             foreach (var key in _userRateLimits.Keys.ToList())
-   {
-            if (_userRateLimits.TryGetValue(key, out var entry) &&
-         now - entry.WindowStart > expiredWindow)
-       {
-           _userRateLimits.TryRemove(key, out _);
-       }
-    }
-
- // Cleanup IP rate limits (per minute)
-            foreach (var key in _ipRateLimits.Keys.ToList())
             {
-if (_ipRateLimits.TryGetValue(key, out var entry) &&
-         now - entry.WindowStart > expiredWindow)
-    {
-       _ipRateLimits.TryRemove(key, out _);
-        }
+                if (_userRateLimits.TryGetValue(key, out var entry) &&
+             now - entry.WindowStart > expiredWindow)
+                {
+                    _userRateLimits.TryRemove(key, out _);
+                }
             }
 
-        // Cleanup forgot password limits (per hour) - keep for 2 hours then cleanup
-   foreach (var key in _forgotPasswordLimits.Keys.ToList())
-        {
-          if (_forgotPasswordLimits.TryGetValue(key, out var entry) &&
-  now - entry.WindowStart > expiredHourWindow)
-    {
-      _forgotPasswordLimits.TryRemove(key, out _);
-    }
-       }
+            // Cleanup IP rate limits (per minute)
+            foreach (var key in _ipRateLimits.Keys.ToList())
+            {
+                if (_ipRateLimits.TryGetValue(key, out var entry) &&
+                         now - entry.WindowStart > expiredWindow)
+                {
+                    _ipRateLimits.TryRemove(key, out _);
+                }
+            }
+
+            // Cleanup forgot password limits (per hour) - keep for 2 hours then cleanup
+            foreach (var key in _forgotPasswordLimits.Keys.ToList())
+            {
+                if (_forgotPasswordLimits.TryGetValue(key, out var entry) &&
+        now - entry.WindowStart > expiredHourWindow)
+                {
+                    _forgotPasswordLimits.TryRemove(key, out _);
+                }
+            }
         }
     }
 
@@ -495,8 +501,8 @@ if (_ipRateLimits.TryGetValue(key, out var entry) &&
     /// </summary>
     public class RateLimitEntry
     {
-  public int Count { get; set; }
-     public DateTime WindowStart { get; set; }
+        public int Count { get; set; }
+        public DateTime WindowStart { get; set; }
     }
 
     /// <summary>
@@ -504,7 +510,7 @@ if (_ipRateLimits.TryGetValue(key, out var entry) &&
     /// </summary>
     public class ForgotPasswordRateLimitEntry
     {
-      public int Count { get; set; }
+        public int Count { get; set; }
         public DateTime WindowStart { get; set; }
     }
 
@@ -513,9 +519,9 @@ if (_ipRateLimits.TryGetValue(key, out var entry) &&
     /// </summary>
     public static class RateLimitingMiddlewareExtensions
     {
-    public static IApplicationBuilder UseRateLimiting(this IApplicationBuilder builder)
+        public static IApplicationBuilder UseRateLimiting(this IApplicationBuilder builder)
         {
-return builder.UseMiddleware<RateLimitingMiddleware>();
+            return builder.UseMiddleware<RateLimitingMiddleware>();
         }
     }
 }

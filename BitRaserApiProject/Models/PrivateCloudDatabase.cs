@@ -139,12 +139,79 @@ public string? CreatedBy { get; set; }
         public DateTime? UpdatedAt { get; set; }
 
   // Navigation property
-    [ForeignKey("UserId")]
+  [ForeignKey("UserId")]
     public virtual users? User { get; set; }
     }
 
     /// <summary>
-    /// DTO for creating/updating private cloud database
+/// Cache for database routing decisions
+/// Improves performance by avoiding repeated lookups
+/// </summary>
+[Table("database_routing_cache")]
+public class DatabaseRoutingCache
+ {
+        [Key]
+        public int Id { get; set; }
+
+        [Required]
+        [MaxLength(255)]
+    public string UserEmail { get; set; } = string.Empty;
+
+    [MaxLength(255)]
+ public string? ParentEmail { get; set; } // For subusers
+
+        [Required]
+        [MaxLength(20)]
+ public string TargetDatabase { get; set; } = "main"; // main or private
+
+ [MaxLength(64)]
+public string? ConnectionStringHash { get; set; } // SHA256 hash for validation
+
+        public DateTime CachedAt { get; set; } = DateTime.UtcNow;
+
+        public DateTime? ExpiresAt { get; set; }
+
+     /// <summary>
+        /// Check if cache entry is still valid
+     /// </summary>
+        [NotMapped]
+        public bool IsValid => ExpiresAt.HasValue && ExpiresAt.Value > DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Audit log for private database operations
+    /// Tracks all create/update/delete/validate/migrate operations
+    /// </summary>
+    [Table("private_db_audit_log")]
+    public class PrivateDatabaseAuditLog
+    {
+    [Key]
+public int Id { get; set; }
+
+    [Required]
+        [MaxLength(255)]
+        public string UserEmail { get; set; } = string.Empty;
+
+        [Required]
+        [MaxLength(50)]
+        public string Operation { get; set; } = string.Empty; // create/update/delete/validate/migrate
+
+        [Required]
+        [MaxLength(20)]
+public string OperationStatus { get; set; } = string.Empty; // success/failed/pending
+
+   public string? Details { get; set; }
+
+        public string? ErrorMessage { get; set; }
+
+        public DateTime PerformedAt { get; set; } = DateTime.UtcNow;
+
+        [MaxLength(255)]
+    public string? PerformedBy { get; set; }
+    }
+
+    /// <summary>
+ /// DTO for creating/updating private cloud database
     /// </summary>
     public class PrivateCloudDatabaseDto
     {

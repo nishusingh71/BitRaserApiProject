@@ -6,29 +6,41 @@ using Microsoft.EntityFrameworkCore;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Attributes;
 using System.Text.Json;
+using BitRaserApiProject.Factories;
 
 namespace BitRaserApiProject.Controllers
 {
     /// <summary>
     /// Enhanced Audit Reports management controller with comprehensive role-based access control
     /// Supports both users and subusers with appropriate access levels
+    /// ✅ MULTI-TENANT: Uses DynamicDbContextFactory for automatic database routing
     /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class EnhancedAuditReportsController : ControllerBase
     {
-        private readonly ApplicationDbContext _context;
+      private readonly DynamicDbContextFactory _contextFactory;
+        private readonly ITenantConnectionService _tenantService;
         private readonly IRoleBasedAuthService _authService;
-        private readonly IUserDataService _userDataService;
-        private readonly PdfService _pdfService;
+private readonly IUserDataService _userDataService;
+     private readonly PdfService _pdfService;
+        private readonly ILogger<EnhancedAuditReportsController> _logger;
 
-        public EnhancedAuditReportsController(ApplicationDbContext context, IRoleBasedAuthService authService, IUserDataService userDataService, PdfService pdfService)
+        public EnhancedAuditReportsController(
+   DynamicDbContextFactory contextFactory,
+      ITenantConnectionService tenantService,
+         IRoleBasedAuthService authService,
+    IUserDataService userDataService,
+         PdfService pdfService,
+         ILogger<EnhancedAuditReportsController> logger)
         {
-            _context = context;
-            _authService = authService;
-            _userDataService = userDataService;
-            _pdfService = pdfService;
+            _contextFactory = contextFactory;
+   _tenantService = tenantService;
+      _authService = authService;
+     _userDataService = userDataService;
+         _pdfService = pdfService;
+      _logger = logger;
         }
 
         /// <summary>
@@ -37,70 +49,84 @@ namespace BitRaserApiProject.Controllers
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetAuditReports([FromQuery] ReportFilterRequest? filter)
-        {
-            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
-            IQueryable<audit_reports> query = _context.AuditReports;
+      {
+   try
+            {
+        // ✅ Use dynamic context for multi-tenant routing
+     using var context = await _contextFactory.CreateDbContextAsync();
+       
+           var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+      var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+      
+   IQueryable<audit_reports> query = context.AuditReports;
 
             // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser))
-            {
-                if (isCurrentUserSubuser)
-                {
-                    // ❌ Subuser - only own reports
-                    query = query.Where(r => r.client_email == userEmail);
-                }
-                else
-                {
-                    // ✅ ENHANCED: User - own reports + subuser reports
-                    var subuserEmails = await _context.subuser
-     .Where(s => s.user_email == userEmail)
-                      .Select(s => s.subuser_email)
-                      .ToListAsync();
-     
-                    query = query.Where(r => 
-r.client_email == userEmail ||// Own reports
-      subuserEmails.Contains(r.client_email)            // Subuser reports
+      if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser))
+    {
+       if (isCurrentUserSubuser)
+ {
+        // ❌ Subuser - only own reports
+      query = query.Where(r => r.client_email == userEmail);
+   }
+         else
+   {
+            // ✅ ENHANCED: User - own reports + subuser reports
+ var subuserEmails = await context.subuser
+        .Where(s => s.user_email == userEmail)
+          .Select(s => s.subuser_email)
+   .ToListAsync();
+             
+           query = query.Where(r => 
+     r.client_email == userEmail || // Own reports
+         subuserEmails.Contains(r.client_email) // Subuser reports
        );
-                }
-            }
+       }
+       }
 
-            // Apply additional filters if provided
-            if (filter != null)
-            {
-                if (!string.IsNullOrEmpty(filter.ClientEmail))
-                    query = query.Where(r => r.client_email.Contains(filter.ClientEmail));
+ // Apply additional filters if provided
+          if (filter != null)
+      {
+             if (!string.IsNullOrEmpty(filter.ClientEmail))
+       query = query.Where(r => r.client_email.Contains(filter.ClientEmail));
 
-                if (!string.IsNullOrEmpty(filter.ErasureMethod))
-                    query = query.Where(r => r.erasure_method.Contains(filter.ErasureMethod));
+   if (!string.IsNullOrEmpty(filter.ErasureMethod))
+     query = query.Where(r => r.erasure_method.Contains(filter.ErasureMethod));
 
-                if (filter.DateFrom.HasValue)
-                    query = query.Where(r => r.report_datetime >= filter.DateFrom.Value);
+     if (filter.DateFrom.HasValue)
+        query = query.Where(r => r.report_datetime >= filter.DateFrom.Value);
 
-                if (filter.DateTo.HasValue)
-                    query = query.Where(r => r.report_datetime <= filter.DateTo.Value);
+              if (filter.DateTo.HasValue)
+            query = query.Where(r => r.report_datetime <= filter.DateTo.Value);
 
-                if (filter.SyncedOnly.HasValue)
-                    query = query.Where(r => r.synced == filter.SyncedOnly.Value);
-            }
+           if (filter.SyncedOnly.HasValue)
+            query = query.Where(r => r.synced == filter.SyncedOnly.Value);
+      }
 
-            var reports = await query
-                .OrderByDescending(r => r.report_datetime)
-                .Take(filter?.PageSize ?? 100)
-                .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-                .Select(r => new {
-                    r.report_id,
-                    r.client_email,
-                    r.report_name,
-                    r.erasure_method,
-                    r.report_datetime,
-                    r.synced,
-                    HasDetails = !string.IsNullOrEmpty(r.report_details_json) && r.report_details_json != "{}"
-                })
-                .ToListAsync();
+    var reports = await query
+           .OrderByDescending(r => r.report_datetime)
+              .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+  .Take(filter?.PageSize ?? 100)
+      .Select(r => new {
+         r.report_id,
+          r.client_email,
+             r.report_name,
+         r.erasure_method,
+          r.report_datetime,
+             r.synced,
+    HasDetails = !string.IsNullOrEmpty(r.report_details_json) && r.report_details_json != "{}"
+  })
+    .ToListAsync();
 
-            return Ok(reports);
+   _logger.LogInformation("Retrieved {Count} reports for {Email} from {DbType} database", 
+   reports.Count, userEmail, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+     return Ok(reports);
+  }
+  catch (Exception ex)
+      {
+      _logger.LogError(ex, "Error getting audit reports");
+   return StatusCode(500, new { message = "Error retrieving reports", error = ex.Message });
+   }
         }
 
         /// <summary>
@@ -109,23 +135,34 @@ r.client_email == userEmail ||// Own reports
         [HttpGet("{id}")]
         public async Task<ActionResult<audit_reports>> GetAuditReport(int id)
         {
+try
+        {
+          // ✅ Use dynamic context
+    using var context = await _contextFactory.CreateDbContextAsync();
+      
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            var report = await _context.AuditReports.FindAsync(id);
-            
-            if (report == null) return NotFound();
+      var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+     var report = await context.AuditReports.FindAsync(id);
+ 
+  if (report == null) return NotFound();
 
-            // Users and subusers can only view their own reports unless they have admin permission
-            bool canView = report.client_email == userEmail ||
-                          await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser);
+      // Users and subusers can only view their own reports unless they have admin permission
+       bool canView = report.client_email == userEmail ||
+          await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser);
 
-            if (!canView)
-            {
-                return StatusCode(403, new { error = "You can only view your own reports" });
-            }
+        if (!canView)
+       {
+           return StatusCode(403, new { error = "You can only view your own reports" });
+ }
 
-            return Ok(report);
-        }
+   return Ok(report);
+}
+            catch (Exception ex)
+      {
+   _logger.LogError(ex, "Error getting audit report {Id}", id);
+        return StatusCode(500, new { message = "Error retrieving report", error = ex.Message });
+ }
+  }
 
         /// <summary>
         /// Get audit reports by client email with management hierarchy
@@ -133,25 +170,38 @@ r.client_email == userEmail ||// Own reports
         [HttpGet("by-email/{email}")]
         public async Task<ActionResult<IEnumerable<audit_reports>>> GetAuditReportsByEmail(string email)
         {
-            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
-            // Check if user can view reports for this email
-            bool canView = email == currentUserEmail ||
-                          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser) ||
-                          await _authService.CanManageUserAsync(currentUserEmail!, email);
+            try
+    {
+     using var context = await _contextFactory.CreateDbContextAsync();
+ 
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+ var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+       
+                // Check if user can view reports for this email
+ bool canView = email == currentUserEmail ||
+                  await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser) ||
+                await _authService.CanManageUserAsync(currentUserEmail!, email);
 
-            if (!canView)
-            {
-                return StatusCode(403, new { error = "You can only view your own reports or reports of users you manage" });
+              if (!canView)
+     {
+       return StatusCode(403, new { error = "You can only view your own reports or reports of users you manage" });
+     }
+
+     var reports = await context.AuditReports
+            .Where(r => r.client_email == email)
+   .OrderByDescending(r => r.report_datetime)
+               .ToListAsync();
+
+  _logger.LogInformation("Retrieved {Count} reports for {Email} from {DbType} database", 
+         reports.Count, email, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+      return reports.Any() ? Ok(reports) : NotFound();
             }
-
-            var reports = await _context.AuditReports
-                .Where(r => r.client_email == email)
-                .OrderByDescending(r => r.report_datetime)
-                .ToListAsync();
-
-            return reports.Any() ? Ok(reports) : NotFound();
+        catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting reports for {Email}", email);
+  return StatusCode(500, new { message = "Error retrieving reports", error = ex.Message });
+        }
         }
 
         /// <summary>
@@ -159,46 +209,60 @@ r.client_email == userEmail ||// Own reports
         /// Supports both users and subusers
         /// </summary>
         [AllowAnonymous]
-        [HttpPost]
+     [HttpPost]
         public async Task<ActionResult<audit_reports>> CreateAuditReport([FromBody] AuditReportCreateRequest request)
         {
-            // For anonymous requests, client_email must be provided
-            if (string.IsNullOrEmpty(request.ClientEmail))
-                return BadRequest("Client email is required for anonymous report creation");
+try
+        {
+    using var context = await _contextFactory.CreateDbContextAsync();
+
+       // For anonymous requests, client_email must be provided
+    if (string.IsNullOrEmpty(request.ClientEmail))
+   return BadRequest("Client email is required for anonymous report creation");
 
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var targetEmail = request.ClientEmail;
+                var targetEmail = request.ClientEmail;
 
-            var report = new audit_reports
+       var report = new audit_reports
             {
-                client_email = targetEmail,
-                report_name = request.ReportName ?? $"Audit Report {DateTime.UtcNow:yyyy-MM-dd HH:mm}",
-                erasure_method = request.ErasureMethod ?? "Unknown",
-                report_datetime = DateTime.UtcNow,
-                report_details_json = request.ReportDetailsJson ?? "{}",
-                synced = false
-            };
+     client_email = targetEmail,
+       report_name = request.ReportName ?? $"Audit Report {DateTime.UtcNow:yyyy-MM-dd HH:mm}",
+        erasure_method = request.ErasureMethod ?? "Unknown",
+     report_datetime = DateTime.UtcNow,
+          report_details_json = request.ReportDetailsJson ?? "{}",
+                 synced = false
+     };
 
-            // If user is authenticated, apply business rules
+   // If user is authenticated, apply business rules
             if (!string.IsNullOrEmpty(userEmail))
-            {
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail);
-                
-                // Allow users and subusers to create reports for themselves
-                // Allow users with special permissions to create for others
-                if (request.ClientEmail != userEmail)
-                {
-                    if (!await _authService.HasPermissionAsync(userEmail, "CREATE_REPORTS_FOR_OTHERS", isCurrentUserSubuser))
-                    {
-                        report.client_email = userEmail; // Override to current user
-                    }
-                }
-            }
+   {
+   var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+     
+        // Allow users and subusers to create reports for themselves
+        // Allow users with special permissions to create for others
+  if (request.ClientEmail != userEmail)
+       {
+ if (!await _authService.HasPermissionAsync(userEmail, "CREATE_REPORTS_FOR_OTHERS", isCurrentUserSubuser))
+    {
+              report.client_email = userEmail; // Override to current user
+          }
+    }
+     }
 
-            _context.AuditReports.Add(report);
-            await _context.SaveChangesAsync();
-            
-            return CreatedAtAction(nameof(GetAuditReport), new { id = report.report_id }, report);
+      context.AuditReports.Add(report);
+   await context.SaveChangesAsync();
+ 
+    _logger.LogInformation("✅ Created report {Id} for {Email} in {DbType} database", 
+ report.report_id, report.client_email, 
+      await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+     
+          return CreatedAtAction(nameof(GetAuditReport), new { id = report.report_id }, report);
+     }
+      catch (Exception ex)
+        {
+         _logger.LogError(ex, "Error creating audit report");
+          return StatusCode(500, new { message = "Error creating report", error = ex.Message });
+          }
         }
 
         /// <summary>
@@ -207,101 +271,140 @@ r.client_email == userEmail ||// Own reports
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateAuditReport(int id, [FromBody] AuditReportUpdateRequest request)
         {
+    try
+    {
+        using var context = await _contextFactory.CreateDbContextAsync();
+
             if (id != request.ReportId)
-                return BadRequest(new { message = "Report ID mismatch" });
+  return BadRequest(new { message = "Report ID mismatch" });
 
-            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+          var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            var report = await _context.AuditReports.FindAsync(id);
-            
-            if (report == null) return NotFound();
+        var report = await context.AuditReports.FindAsync(id);
+      
+    if (report == null) return NotFound();
 
-            // Users and subusers can only update their own reports unless they have admin permission
+  // Users and subusers can only update their own reports unless they have admin permission
             bool canUpdate = report.client_email == userEmail ||
-                           await _authService.HasPermissionAsync(userEmail!, "UPDATE_ALL_REPORTS", isCurrentUserSubuser);
+ await _authService.HasPermissionAsync(userEmail!, "UPDATE_ALL_REPORTS", isCurrentUserSubuser);
 
-            if (!canUpdate)
-            {
-                return StatusCode(403, new { error = "You can only update your own reports" });
+   if (!canUpdate)
+          {
+    return StatusCode(403, new { error = "You can only update your own reports" });
             }
 
-            // Don't allow changing client_email unless user has admin permission
+       // Don't allow changing client_email unless user has admin permission
             if (request.ClientEmail != report.client_email && 
-                !await _authService.HasPermissionAsync(userEmail!, "UPDATE_ALL_REPORTS", isCurrentUserSubuser))
+ !await _authService.HasPermissionAsync(userEmail!, "UPDATE_ALL_REPORTS", isCurrentUserSubuser))
+ {
+       return StatusCode(403, new { error = "You cannot change the client email of a report" });
+  }
+
+     if (!string.IsNullOrEmpty(request.ReportName))
+           report.report_name = request.ReportName;
+
+   if (!string.IsNullOrEmpty(request.ErasureMethod))
+     report.erasure_method = request.ErasureMethod;
+
+     if (!string.IsNullOrEmpty(request.ReportDetailsJson))
+       report.report_details_json = request.ReportDetailsJson;
+
+    context.Entry(report).State = EntityState.Modified;
+   await context.SaveChangesAsync();
+ 
+    _logger.LogInformation("✅ Updated report {Id} in {DbType} database", 
+    id, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+    return NoContent();
+  }
+            catch (Exception ex)
             {
-                return StatusCode(403, new { error = "You cannot change the client email of a report" });
-            }
-
-            if (!string.IsNullOrEmpty(request.ReportName))
-                report.report_name = request.ReportName;
-
-            if (!string.IsNullOrEmpty(request.ErasureMethod))
-                report.erasure_method = request.ErasureMethod;
-
-            if (!string.IsNullOrEmpty(request.ReportDetailsJson))
-                report.report_details_json = request.ReportDetailsJson;
-
-            _context.Entry(report).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
-            
-            return NoContent();
+      _logger.LogError(ex, "Error updating audit report {Id}", id);
+    return StatusCode(500, new { message = "Error updating report", error = ex.Message });
+  }
         }
 
         /// <summary>
         /// Delete audit report by ID with proper authorization
         /// </summary>
         [HttpDelete("{id}")]
-        public async Task<IActionResult> DeleteAuditReport(int id)
-        {
-            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+public async Task<IActionResult> DeleteAuditReport(int id)
+  {
+try
+{
+        using var context = await _contextFactory.CreateDbContextAsync();
+
+     var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            var report = await _context.AuditReports.FindAsync(id);
-            
-            if (report == null) return NotFound();
+          var report = await context.AuditReports.FindAsync(id);
+   
+     if (report == null) return NotFound();
 
-            // Users and subusers can only delete their own reports unless they have admin permission
-            bool canDelete = report.client_email == userEmail ||
-                           await _authService.HasPermissionAsync(userEmail!, "DELETE_ALL_REPORTS", isCurrentUserSubuser);
+  // Users and subusers can only delete their own reports unless they have admin permission
+      bool canDelete = report.client_email == userEmail ||
+     await _authService.HasPermissionAsync(userEmail!, "DELETE_ALL_REPORTS", isCurrentUserSubuser);
 
-            if (!canDelete)
-            {
-                return StatusCode(403, new { error = "You can only delete your own reports" });
-            }
+   if (!canDelete)
+  {
+            return StatusCode(403, new { error = "You can only delete your own reports" });
+  }
 
-            _context.AuditReports.Remove(report);
-            await _context.SaveChangesAsync();
-            
-            return NoContent();
+       context.AuditReports.Remove(report);
+     await context.SaveChangesAsync();
+   
+_logger.LogInformation("✅ Deleted report {Id} from {DbType} database", 
+      id, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+  return NoContent();
+   }
+            catch (Exception ex)
+   {
+    _logger.LogError(ex, "Error deleting audit report {Id}", id);
+  return StatusCode(500, new { message = "Error deleting report", error = ex.Message });
+   }
         }
 
         /// <summary>
         /// Reserve a unique report ID for client applications (both users and subusers)
         /// </summary>
-        [AllowAnonymous]
-        [HttpPost("reserve-id")]
+     [AllowAnonymous]
+      [HttpPost("reserve-id")]
         public async Task<ActionResult<int>> ReserveReportId([FromBody] ReportReservationRequest request)
         {
-            if (string.IsNullOrEmpty(request.ClientEmail))
-                return BadRequest("Client email is required");
-
-            var newReport = new audit_reports
+  try
             {
-                client_email = request.ClientEmail,
-                synced = false,
-                report_details_json = "{}",
-                report_name = "Reserved",
-                erasure_method = "Reserved",
-                report_datetime = DateTime.UtcNow
-            };
+        using var context = await _contextFactory.CreateDbContextAsync();
 
-            _context.AuditReports.Add(newReport);
-            await _context.SaveChangesAsync();
+if (string.IsNullOrEmpty(request.ClientEmail))
+  return BadRequest("Client email is required");
+
+ var newReport = new audit_reports
+      {
+ client_email = request.ClientEmail,
+    synced = false,
+   report_details_json = "{}",
+   report_name = "Reserved",
+     erasure_method = "Reserved",
+      report_datetime = DateTime.UtcNow
+   };
+
+          context.AuditReports.Add(newReport);
+     await context.SaveChangesAsync();
+
+ _logger.LogInformation("✅ Reserved report ID {Id} for {Email}", 
+        newReport.report_id, request.ClientEmail);
 
             return Ok(new { 
-                ReportId = newReport.report_id,
-                Message = "Report ID reserved successfully",
-                ExpiresIn = "24 hours if not uploaded"
-            });
+  ReportId = newReport.report_id,
+     Message = "Report ID reserved successfully",
+       ExpiresIn = "24 hours if not uploaded"
+  });
+     }
+         catch (Exception ex)
+ {
+_logger.LogError(ex, "Error reserving report ID");
+     return StatusCode(500, new { message = "Error reserving report ID", error = ex.Message });
+    }
         }
 
         /// <summary>
@@ -311,53 +414,77 @@ r.client_email == userEmail ||// Own reports
         [HttpPut("upload-report/{id}")]
         public async Task<IActionResult> UploadReportData(int id, [FromBody] ReportUploadRequest request)
         {
+            try
+    {
+     using var context = await _contextFactory.CreateDbContextAsync();
+
             if (id != request.ReportId)
-                return BadRequest(new { message = "Report ID mismatch" });
+       return BadRequest(new { message = "Report ID mismatch" });
 
-            var report = await _context.AuditReports.FindAsync(id);
-            if (report == null) return NotFound();
+       var report = await context.AuditReports.FindAsync(id);
+      if (report == null) return NotFound();
 
-            // Check if report is still in reserved state
+   // Check if report is still in reserved state
             if (report.synced)
-                return BadRequest("Report has already been finalized");
+   return BadRequest("Report has already been finalized");
 
-            // Validate that the client email matches
-            if (report.client_email != request.ClientEmail)
-                return BadRequest("Client email mismatch");
+   // Validate that the client email matches
+     if (report.client_email != request.ClientEmail)
+         return BadRequest("Client email mismatch");
 
-            report.report_name = request.ReportName;
-            report.erasure_method = request.ErasureMethod;
-            report.report_details_json = request.ReportDetailsJson;
-            report.report_datetime = DateTime.UtcNow;
+         report.report_name = request.ReportName;
+       report.erasure_method = request.ErasureMethod;
+   report.report_details_json = request.ReportDetailsJson;
+    report.report_datetime = DateTime.UtcNow;
 
-            _context.Entry(report).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
+     context.Entry(report).State = EntityState.Modified;
+   await context.SaveChangesAsync();
 
-            return Ok(new { message = "Report data uploaded successfully" });
+_logger.LogInformation("✅ Uploaded data for report {Id}", id);
+
+         return Ok(new { message = "Report data uploaded successfully" });
+  }
+      catch (Exception ex)
+  {
+  _logger.LogError(ex, "Error uploading report data for ID {Id}", id);
+    return StatusCode(500, new { message = "Error uploading report data", error = ex.Message });
+      }
         }
 
         /// <summary>
         /// Mark report as synced after full upload
         /// </summary>
         [AllowAnonymous]
-        [HttpPatch("mark-synced/{id}")]
-        public async Task<IActionResult> MarkReportSynced(int id, [FromBody] SyncConfirmationRequest request)
+    [HttpPatch("mark-synced/{id}")]
+ public async Task<IActionResult> MarkReportSynced(int id, [FromBody] SyncConfirmationRequest request)
         {
-            var report = await _context.AuditReports.FindAsync(id);
+   try
+      {
+       using var context = await _contextFactory.CreateDbContextAsync();
+
+     var report = await context.AuditReports.FindAsync(id);
             if (report == null) return NotFound();
 
-            // Validate client email for security
-            if (report.client_email != request.ClientEmail)
-                return BadRequest("Client email mismatch");
+        // Validate client email for security
+   if (report.client_email != request.ClientEmail)
+       return BadRequest("Client email mismatch");
 
-            if (report.synced)
-                return BadRequest("Report is already marked as synced");
+     if (report.synced)
+ return BadRequest("Report is already marked as synced");
 
-            report.synced = true;
-            _context.Entry(report).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
+  report.synced = true;
+     context.Entry(report).State = EntityState.Modified;
+   await context.SaveChangesAsync();
 
-            return Ok(new { message = "Report marked as synced successfully" });
+     _logger.LogInformation("✅ Marked report {Id} as synced", id);
+
+   return Ok(new { message = "Report marked as synced successfully" });
+  }
+        catch (Exception ex)
+      {
+    _logger.LogError(ex, "Error marking report {Id} as synced", id);
+   return StatusCode(500, new { message = "Error marking report as synced", error = ex.Message });
+  }
         }
 
         /// <summary>
@@ -366,42 +493,55 @@ r.client_email == userEmail ||// Own reports
         [HttpGet("statistics")]
         public async Task<ActionResult<object>> GetReportStatistics([FromQuery] string? clientEmail)
         {
-            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
-            IQueryable<audit_reports> query = _context.AuditReports;
+   try
+    {
+     using var context = await _contextFactory.CreateDbContextAsync();
 
-            // Apply role-based filtering
+      var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+ 
+    IQueryable<audit_reports> query = context.AuditReports;
+
+   // Apply role-based filtering
             if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORT_STATISTICS", isCurrentUserSubuser))
             {
-                // Users and subusers can only see their own statistics
-                clientEmail = userEmail;
-            }
+     // Users and subusers can only see their own statistics
+   clientEmail = userEmail;
+   }
 
-            if (!string.IsNullOrEmpty(clientEmail))
-                query = query.Where(r => r.client_email == clientEmail);
+    if (!string.IsNullOrEmpty(clientEmail))
+         query = query.Where(r => r.client_email == clientEmail);
 
-            var stats = new {
-                TotalReports = await query.CountAsync(),
-                SyncedReports = await query.CountAsync(r => r.synced),
-                PendingReports = await query.CountAsync(r => !r.synced),
-                ReportsThisMonth = await query.CountAsync(r => r.report_datetime.Month == DateTime.UtcNow.Month),
-                ReportsThisWeek = await query.CountAsync(r => r.report_datetime >= DateTime.UtcNow.AddDays(-7)),
-                ReportsToday = await query.CountAsync(r => r.report_datetime.Date == DateTime.UtcNow.Date),
-                ErasureMethods = await query
-                    .GroupBy(r => r.erasure_method)
-                    .Select(g => new { Method = g.Key, Count = g.Count() })
-                    .ToListAsync(),
-                ClientEmails = clientEmail == null ? 
-                    await query
-                        .GroupBy(r => r.client_email)
-                        .Select(g => new { Email = g.Key, Count = g.Count() })
-                        .OrderByDescending(x => x.Count)
-                        .Take(10)
-                        .ToListAsync() : null
-            };
+    var stats = new {
+   TotalReports = await query.CountAsync(),
+     SyncedReports = await query.CountAsync(r => r.synced),
+PendingReports = await query.CountAsync(r => !r.synced),
+   ReportsThisMonth = await query.CountAsync(r => r.report_datetime.Month == DateTime.UtcNow.Month),
+     ReportsThisWeek = await query.CountAsync(r => r.report_datetime >= DateTime.UtcNow.AddDays(-7)),
+    ReportsToday = await query.CountAsync(r => r.report_datetime.Date == DateTime.UtcNow.Date),
+   ErasureMethods = await query
+          .GroupBy(r => r.erasure_method)
+ .Select(g => new { Method = g.Key, Count = g.Count() })
+               .ToListAsync(),
+  ClientEmails = clientEmail == null ? 
+      await query
+        .GroupBy(r => r.client_email)
+  .Select(g => new { Email = g.Key, Count = g.Count() })
+        .OrderByDescending(x => x.Count)
+           .Take(10)
+         .ToListAsync() : null
+    };
 
-            return Ok(stats);
+_logger.LogInformation("Retrieved statistics from {DbType} database", 
+     await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+    return Ok(stats);
+   }
+  catch (Exception ex)
+      {
+    _logger.LogError(ex, "Error getting report statistics");
+ return StatusCode(500, new { message = "Error retrieving statistics", error = ex.Message });
+   }
         }
 
         /// <summary>
@@ -410,117 +550,156 @@ r.client_email == userEmail ||// Own reports
         [HttpGet("export-csv")]
         public async Task<IActionResult> ExportReportsCSV([FromQuery] ReportExportRequest request)
         {
-            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+   try
+{
+   using var context = await _contextFactory.CreateDbContextAsync();
+
+       var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
-            IQueryable<audit_reports> query = _context.AuditReports;
+ 
+       IQueryable<audit_reports> query = context.AuditReports;
 
-            // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser))
-            {
-                // Users and subusers can export their own reports
-                query = query.Where(r => r.client_email == userEmail);
-            }
+  // Apply role-based filtering
+  if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser))
+     {
+      // Users and subusers can export their own reports
+        query = query.Where(r => r.client_email == userEmail);
+  }
 
-            // Apply filters
-            if (!string.IsNullOrEmpty(request.ClientEmail))
-                query = query.Where(r => r.client_email == request.ClientEmail);
+  // Apply filters
+     if (!string.IsNullOrEmpty(request.ClientEmail))
+     query = query.Where(r => r.client_email == request.ClientEmail);
 
-            if (request.DateFrom.HasValue)
-                query = query.Where(r => r.report_datetime >= request.DateFrom.Value);
+ if (request.DateFrom.HasValue)
+   query = query.Where(r => r.report_datetime >= request.DateFrom.Value);
 
-            if (request.DateTo.HasValue)
-                query = query.Where(r => r.report_datetime <= request.DateTo.Value);
+     if (request.DateTo.HasValue)
+      query = query.Where(r => r.report_datetime <= request.DateTo.Value);
 
             var reports = await query.OrderByDescending(r => r.report_datetime).ToListAsync();
 
-            // Generate CSV content
-            var csv = GenerateCsvContent(reports);
+   _logger.LogInformation("Exporting {Count} reports to CSV from {DbType} database", 
+        reports.Count, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+     // Generate CSV content
+     var csv = GenerateCsvContent(reports);
             var fileName = $"audit_reports_{DateTime.UtcNow:yyyyMMdd_HHmmss}.csv";
 
             return File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", fileName);
-        }
+     }
+      catch (Exception ex)
+  {
+     _logger.LogError(ex, "Error exporting reports to CSV");
+     return StatusCode(500, new { message = "Error exporting reports", error = ex.Message });
+            }
+  }
 
         /// <summary>
         /// Export reports to PDF format using existing PDF service (Basic)
         /// </summary>
         [HttpGet("export-pdf")]
-        public async Task<IActionResult> ExportReportsPDF([FromQuery] ReportExportRequest request)
+   public async Task<IActionResult> ExportReportsPDF([FromQuery] ReportExportRequest request)
         {
-            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
-            IQueryable<audit_reports> query = _context.AuditReports;
+   try
+    {
+      using var context = await _contextFactory.CreateDbContextAsync();
 
-            // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser))
+     var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+ 
+       IQueryable<audit_reports> query = context.AuditReports;
+
+     // Apply role-based filtering
+  if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser))
             {
-                // Users and subusers can export their own reports
-                query = query.Where(r => r.client_email == userEmail);
-            }
+       // Users and subusers can export their own reports
+          query = query.Where(r => r.client_email == userEmail);
+     }
 
-            // Apply filters
+    // Apply filters
             if (!string.IsNullOrEmpty(request.ClientEmail))
-                query = query.Where(r => r.client_email == request.ClientEmail);
+      query = query.Where(r => r.client_email == request.ClientEmail);
 
-            if (request.DateFrom.HasValue)
-                query = query.Where(r => r.report_datetime >= request.DateFrom.Value);
+     if (request.DateFrom.HasValue)
+      query = query.Where(r => r.report_datetime >= request.DateFrom.Value);
 
-            if (request.DateTo.HasValue)
-                query = query.Where(r => r.report_datetime <= request.DateTo.Value);
+     if (request.DateTo.HasValue)
+   query = query.Where(r => r.report_datetime <= request.DateTo.Value);
 
-            var reports = await query.OrderByDescending(r => r.report_datetime).ToListAsync();
+    var reports = await query.OrderByDescending(r => r.report_datetime).ToListAsync();
 
-            if (!reports.Any())
-                return NotFound("No reports found for the specified criteria");
+if (!reports.Any())
+      return NotFound("No reports found for the specified criteria");
 
-            // Generate PDF for multiple reports
-            var pdfBytes = await GenerateReportsPDF(reports, request);
-            var fileName = $"audit_reports_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+ _logger.LogInformation("Exporting {Count} reports to PDF from {DbType} database", 
+     reports.Count, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
 
-            return File(pdfBytes, "application/pdf", fileName);
-        }
+  // Generate PDF for multiple reports
+ var pdfBytes = await GenerateReportsPDF(reports, request);
+  var fileName = $"audit_reports_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+
+     return File(pdfBytes, "application/pdf", fileName);
+  }
+      catch (Exception ex)
+ {
+    _logger.LogError(ex, "Error exporting reports to PDF");
+    return StatusCode(500, new { message = "Error exporting reports", error = ex.Message });
+     }
+     }
 
         /// <summary>
         /// Export reports to PDF with file uploads (Headers, Signatures, Watermark)
         /// </summary>
         [HttpPost("export-pdf-with-files")]
-        [Consumes("multipart/form-data")]
+  [Consumes("multipart/form-data")]
         public async Task<IActionResult> ExportReportsPDFWithFiles([FromForm] ReportExportWithFilesRequest request)
         {
-            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
-            IQueryable<audit_reports> query = _context.AuditReports;
+    try
+  {
+    using var context = await _contextFactory.CreateDbContextAsync();
 
-            // Apply role-based filtering
-            if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser))
-            {
-                // Users and subusers can export their own reports
-                query = query.Where(r => r.client_email == userEmail);
-            }
+   var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+ var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+      
+  IQueryable<audit_reports> query = context.AuditReports;
 
-            // Apply filters
-            if (!string.IsNullOrEmpty(request.ClientEmail))
-                query = query.Where(r => r.client_email == request.ClientEmail);
+  // Apply role-based filtering
+     if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser))
+     {
+      // Users and subusers can export their own reports
+    query = query.Where(r => r.client_email == userEmail);
+      }
 
-            if (request.DateFrom.HasValue)
-                query = query.Where(r => r.report_datetime >= request.DateFrom.Value);
+    // Apply filters
+     if (!string.IsNullOrEmpty(request.ClientEmail))
+      query = query.Where(r => r.client_email == request.ClientEmail);
 
-            if (request.DateTo.HasValue)
-                query = query.Where(r => r.report_datetime <= request.DateTo.Value);
+          if (request.DateFrom.HasValue)
+   query = query.Where(r => r.report_datetime >= request.DateFrom.Value);
 
-            var reports = await query.OrderByDescending(r => r.report_datetime).ToListAsync();
+  if (request.DateTo.HasValue)
+      query = query.Where(r => r.report_datetime <= request.DateTo.Value);
 
-            if (!reports.Any())
-                return NotFound("No reports found for the specified criteria");
+    var reports = await query.OrderByDescending(r => r.report_datetime).ToListAsync();
 
-            // Generate PDF with uploaded files
-            var pdfBytes = await GenerateReportsPDFWithFiles(reports, request);
-            var fileName = $"audit_reports_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+  if (!reports.Any())
+    return NotFound("No reports found for the specified criteria");
 
-            return File(pdfBytes, "application/pdf", fileName);
+ _logger.LogInformation("Exporting {Count} reports to PDF with files from {DbType} database", 
+  reports.Count, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+     // Generate PDF with uploaded files
+     var pdfBytes = await GenerateReportsPDFWithFiles(reports, request);
+  var fileName = $"audit_reports_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+
+  return File(pdfBytes, "application/pdf", fileName);
         }
+   catch (Exception ex)
+ {
+   _logger.LogError(ex, "Error exporting reports to PDF with files");
+     return StatusCode(500, new { message = "Error exporting reports", error = ex.Message });
+  }
+     }
 
         /// <summary>
         /// Export single report to PDF by ID (Basic)
@@ -528,56 +707,82 @@ r.client_email == userEmail ||// Own reports
         [HttpGet("{id}/export-pdf")]
         public async Task<IActionResult> ExportSingleReportPDF(int id, [FromQuery] PdfExportOptions? options)
         {
-            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            var report = await _context.AuditReports.FindAsync(id);
-            
-            if (report == null) return NotFound();
+   try
+  {
+   using var context = await _contextFactory.CreateDbContextAsync();
 
-            // Users and subusers can only export their own reports unless they have admin permission
-            bool canExport = report.client_email == userEmail ||
-                           await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser);
+       var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+         var report = await context.AuditReports.FindAsync(id);
+ 
+    if (report == null) return NotFound();
+
+  // Users and subusers can only export their own reports unless they have admin permission
+     bool canExport = report.client_email == userEmail ||
+     await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser);
 
             if (!canExport)
-            {
-                return StatusCode(403, new { error = "You can only export your own reports" });
-            }
+     {
+   return StatusCode(403, new { error = "You can only export your own reports" });
+       }
 
-            // Generate PDF for single report
-            var pdfBytes = await GenerateSingleReportPDF(report, options);
-            var fileName = $"report_{report.report_id}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+_logger.LogInformation("Exporting report {Id} to PDF from {DbType} database", 
+ id, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
 
-            return File(pdfBytes, "application/pdf", fileName);
+   // Generate PDF for single report
+     var pdfBytes = await GenerateSingleReportPDF(report, options);
+   var fileName = $"report_{report.report_id}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+
+     return File(pdfBytes, "application/pdf", fileName);
+     }
+catch (Exception ex)
+{
+ _logger.LogError(ex, "Error exporting single report {Id} to PDF", id);
+    return StatusCode(500, new { message = "Error exporting report", error = ex.Message });
+  }
         }
 
         /// <summary>
         /// Export single report to PDF with file uploads (Headers, Signatures, Watermark)
         /// </summary>
         [HttpPost("{id}/export-pdf-with-files")]
-        [Consumes("multipart/form-data")]
-        public async Task<IActionResult> ExportSingleReportPDFWithFiles(int id, [FromForm] SingleReportExportWithFilesRequest request)
+   [Consumes("multipart/form-data")]
+   public async Task<IActionResult> ExportSingleReportPDFWithFiles(int id, [FromForm] SingleReportExportWithFilesRequest request)
         {
-            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            var report = await _context.AuditReports.FindAsync(id);
-            
-            if (report == null) return NotFound();
+   try
+ {
+     using var context = await _contextFactory.CreateDbContextAsync();
 
-            // Users and subusers can only export their own reports unless they have admin permission
-            bool canExport = report.client_email == userEmail ||
-                           await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser);
+     var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+        var report = await context.AuditReports.FindAsync(id);
+    
+if (report == null) return NotFound();
+
+   // Users and subusers can only export their own reports unless they have admin permission
+  bool canExport = report.client_email == userEmail ||
+ await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser);
 
             if (!canExport)
-            {
-                return StatusCode(403, new { error = "You can only export your own reports" });
-            }
+      {
+         return StatusCode(403, new { error = "You can only export your own reports" });
+  }
 
-            // Generate PDF for single report with uploaded files
-            var pdfBytes = await GenerateSingleReportPDFWithFiles(report, request);
-            var fileName = $"report_{report.report_id}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+_logger.LogInformation("Exporting report {Id} to PDF with files from {DbType} database", 
+   id, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
 
-            return File(pdfBytes, "application/pdf", fileName);
-        }
+  // Generate PDF for single report with uploaded files
+   var pdfBytes = await GenerateSingleReportPDFWithFiles(report, request);
+  var fileName = $"report_{report.report_id}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+
+ return File(pdfBytes, "application/pdf", fileName);
+    }
+ catch (Exception ex)
+ {
+   _logger.LogError(ex, "Error exporting single report {Id} to PDF with files", id);
+ return StatusCode(500, new { message = "Error exporting report", error = ex.Message });
+      }
+    }
 
         #region Private Helper Methods
 
@@ -791,49 +996,59 @@ using var ms = new MemoryStream();
       reportRequest.ValidatorSignature = ms.ToArray();
     }
 
-   return _pdfService.GenerateReport(reportRequest);
+            return _pdfService.GenerateReport(reportRequest);
       }
 
         /// <summary>
         /// Get user details for PDF generation from logged-in user
-    /// Returns user name and department, handles both Users and Subusers
+        /// Returns user name and department, handles both Users and Subusers
         /// ✅ FIXED: No Users table query for private cloud compatibility
-   /// </summary>
-   private async Task<UserDetailsForPDF> GetUserDetailsForPDF(string? userEmail)
+        /// </summary>
+      private async Task<UserDetailsForPDF> GetUserDetailsForPDF(string? userEmail)
         {
-   var result = new UserDetailsForPDF
-        {
-   UserName = null,
-           Department = null
-      };
-
-    if (string.IsNullOrEmpty(userEmail))
-    return result;
-
-        // ✅ Try to find as subuser first
- var subuser = await _context.subuser
-            .Where(s => s.subuser_email == userEmail)
- .Select(s => new { s.Name, s.Department })
-        .FirstOrDefaultAsync();
-
-       if (subuser != null)
+      var result = new UserDetailsForPDF
   {
-   if (!string.IsNullOrWhiteSpace(subuser.Name))
-         result.UserName = subuser.Name.Trim();
+    UserName = null,
+     Department = null
+   };
 
-    if (!string.IsNullOrWhiteSpace(subuser.Department))
-       result.Department = subuser.Department.Trim();
+   if (string.IsNullOrEmpty(userEmail))
+ return result;
+
+            try
+            {
+    using var context = await _contextFactory.CreateDbContextAsync();
+      
+    // ✅ Try to find as subuser first
+  var subuser = await context.subuser
+             .Where(s => s.subuser_email == userEmail)
+ .Select(s => new { s.Name, s.Department })
+     .FirstOrDefaultAsync();
+
+     if (subuser != null)
+   {
+     if (!string.IsNullOrWhiteSpace(subuser.Name))
+          result.UserName = subuser.Name.Trim();
+
+         if (!string.IsNullOrWhiteSpace(subuser.Department))
+      result.Department = subuser.Department.Trim();
 
   return result;
-   }
+         }
 
-   // ✅ FIX: Don't query Users table for private cloud compatibility
-      // For private cloud users, if not a subuser, use email as fallback
-        // Main database users won't reach here as they authenticate separately
-        
-        // Use email as username fallback
-     result.UserName = userEmail.Split('@')[0]; // Use part before @
-        result.Department = null; // No department info available
+        // ✅ FIX: Don't query Users table for private cloud compatibility
+         // For private cloud users, if not a subuser, use email as fallback
+      // Main database users won't reach here as they authenticate separately
+                
+                // Use email as username fallback
+              result.UserName = userEmail.Split('@')[0]; // Use part before @
+    result.Department = null; // No department info available
+  }
+            catch (Exception ex)
+       {
+     _logger.LogWarning(ex, "Could not get user details for {Email}", userEmail);
+         // Return default result
+            }
 
    return result;
         }

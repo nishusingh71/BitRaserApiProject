@@ -23,24 +23,24 @@ namespace BitRaserApiProject.Controllers
     public class SessionsController : ControllerBase
     {
         private readonly DynamicDbContextFactory _contextFactory;
-    private readonly ILogger<SessionsController> _logger;
-        
+        private readonly ILogger<SessionsController> _logger;
+
         public SessionsController(
   DynamicDbContextFactory contextFactory,
-            ILogger<SessionsController> logger) 
-        { 
+            ILogger<SessionsController> logger)
+        {
             _contextFactory = contextFactory;
-        _logger = logger;
+            _logger = logger;
         }
 
-  /// <summary>
+        /// <summary>
         /// Get all sessions
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<Sessions>>> GetSessions()
-{
-     using var context = await _contextFactory.CreateDbContextAsync();
- return await context.Sessions.ToListAsync();
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.Sessions.ToListAsync();
         }
 
         /// <summary>
@@ -49,39 +49,39 @@ namespace BitRaserApiProject.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<Sessions>> GetSession(int id)
         {
-     using var context = await _contextFactory.CreateDbContextAsync();
-         var session = await context.Sessions.FindAsync(id);
+            using var context = await _contextFactory.CreateDbContextAsync();
+            var session = await context.Sessions.FindAsync(id);
             return session == null ? NotFound() : Ok(session);
         }
 
         /// <summary>
         /// Get sessions by user email
         /// </summary>
-   [HttpGet("by-email/{email}")]
-   public async Task<ActionResult<IEnumerable<Sessions>>> GetSessionsByEmail(string email)
-    {
+        [HttpGet("by-email/{email}")]
+        public async Task<ActionResult<IEnumerable<Sessions>>> GetSessionsByEmail(string email)
+        {
             using var context = await _contextFactory.CreateDbContextAsync();
-  
-  _logger.LogInformation("🔍 Fetching sessions for user: {Email}", email);
- 
-   var sessions = await context.Sessions.Where(s => s.user_email == email).ToListAsync();
-            
-     _logger.LogInformation("✅ Found {Count} sessions for user: {Email}", sessions.Count, email);
-            
-     return sessions.Any() ? Ok(sessions) : NotFound();
+
+            _logger.LogInformation("🔍 Fetching sessions for user: {Email}", email);
+
+            var sessions = await context.Sessions.Where(s => s.user_email == email).ToListAsync();
+
+            _logger.LogInformation("✅ Found {Count} sessions for user: {Email}", sessions.Count, email);
+
+            return sessions.Any() ? Ok(sessions) : NotFound();
         }
 
         /// <summary>
         /// Create a new session
-  /// </summary>
-   [HttpPost]
- public async Task<ActionResult<Sessions>> CreateSession([FromBody] Sessions session)
-      {
-     using var context = await _contextFactory.CreateDbContextAsync();
-      
+        /// </summary>
+        [HttpPost]
+        public async Task<ActionResult<Sessions>> CreateSession([FromBody] Sessions session)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
             context.Sessions.Add(session);
             await context.SaveChangesAsync();
-      return CreatedAtAction(nameof(GetSession), new { id = session.session_id }, session);
+            return CreatedAtAction(nameof(GetSession), new { id = session.session_id }, session);
         }
 
         /// <summary>
@@ -91,63 +91,73 @@ namespace BitRaserApiProject.Controllers
         public async Task<IActionResult> UpdateSession(int id, [FromBody] Sessions updatedSession)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
-            
-         if (id != updatedSession.session_id) return BadRequest();
-            var session = await context.Sessions.FindAsync(id);
-          if (session == null) return NotFound();
 
-     session.logout_time = updatedSession.logout_time;
+            if (id != updatedSession.session_id) return BadRequest();
+            var session = await context.Sessions.FindAsync(id);
+            if (session == null) return NotFound();
+
+            session.logout_time = updatedSession.logout_time;
             session.session_status = updatedSession.session_status;
             session.ip_address = updatedSession.ip_address;
-    session.device_info = updatedSession.device_info;
+            session.device_info = updatedSession.device_info;
 
             context.Entry(session).State = EntityState.Modified;
-       await context.SaveChangesAsync();
+            await context.SaveChangesAsync();
             return NoContent();
         }
 
         /// <summary>
-    /// Delete session by ID
+        /// Delete session by ID
         /// </summary>
-      [HttpDelete("{id}")]
+        [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteSession(int id)
         {
-         using var context = await _contextFactory.CreateDbContextAsync();
-            
- var session = await context.Sessions.FindAsync(id);
-     if (session == null) return NotFound();
-       context.Sessions.Remove(session);
-    await context.SaveChangesAsync();
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            var session = await context.Sessions.FindAsync(id);
+            if (session == null) return NotFound();
+            context.Sessions.Remove(session);
+            await context.SaveChangesAsync();
             return NoContent();
         }
     }
 
 
 
+    /// <summary>
+    /// Audit Reports management controller
+    /// ✅ NOW SUPPORTS PRIVATE CLOUD ROUTING
+    /// </summary>
     [Authorize]
     [Route("api/[controller]")]
     [ApiController]
     public class AuditReportsController : ControllerBase
     {
-        private readonly ApplicationDbContext _context;
+        private readonly DynamicDbContextFactory _contextFactory;
+        private readonly ILogger<AuditReportsController> _logger;
 
-        public AuditReportsController(ApplicationDbContext context)
+        public AuditReportsController(
+  DynamicDbContextFactory contextFactory,
+        ILogger<AuditReportsController> logger)
         {
-            _context = context;
+            _contextFactory = contextFactory;
+            _logger = logger;
         }
 
         // Get all reports
         [HttpGet]
         public async Task<ActionResult<IEnumerable<audit_reports>>> GetAuditReports()
         {
-            return await _context.AuditReports.ToListAsync();
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.AuditReports.ToListAsync();
         }
 
         // Get single report by id
         [HttpGet("{id}")]
         public async Task<ActionResult<audit_reports>> GetAuditReport(int id)
         {
-            var report = await _context.AuditReports.FindAsync(id);
+            using var context = await _contextFactory.CreateDbContextAsync();
+            var report = await context.AuditReports.FindAsync(id);
             return report == null ? NotFound() : Ok(report);
         }
 
@@ -155,7 +165,14 @@ namespace BitRaserApiProject.Controllers
         [HttpGet("by-email/{email}")]
         public async Task<ActionResult<IEnumerable<audit_reports>>> GetAuditReportsByEmail(string email)
         {
-            var reports = await _context.AuditReports.Where(r => r.client_email == email).ToListAsync();
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            _logger.LogInformation("🔍 Fetching audit reports for user: {Email}", email);
+
+            var reports = await context.AuditReports.Where(r => r.client_email == email).ToListAsync();
+
+            _logger.LogInformation("✅ Found {Count} reports for user: {Email}", reports.Count, email);
+
             return reports.Any() ? Ok(reports) : NotFound();
         }
 
@@ -164,8 +181,10 @@ namespace BitRaserApiProject.Controllers
         [HttpPost]
         public async Task<ActionResult<audit_reports>> CreateAuditReport([FromBody] audit_reports report)
         {
-            _context.AuditReports.Add(report);
-            await _context.SaveChangesAsync();
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            context.AuditReports.Add(report);
+            await context.SaveChangesAsync();
             return CreatedAtAction(nameof(GetAuditReport), new { id = report.report_id }, report);
         }
 
@@ -174,18 +193,20 @@ namespace BitRaserApiProject.Controllers
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateAuditReport(int id, [FromBody] audit_reports updatedReport)
         {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
             if (id != updatedReport.report_id)
                 return BadRequest(new { message = "Report ID mismatch" });
 
-            var report = await _context.AuditReports.FindAsync(id);
+            var report = await context.AuditReports.FindAsync(id);
             if (report == null) return NotFound();
 
             report.report_name = updatedReport.report_name;
             report.erasure_method = updatedReport.erasure_method;
             report.report_details_json = updatedReport.report_details_json;
 
-            _context.Entry(report).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
+            context.Entry(report).State = EntityState.Modified;
+            await context.SaveChangesAsync();
             return NoContent();
         }
 
@@ -193,11 +214,13 @@ namespace BitRaserApiProject.Controllers
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteAuditReport(int id)
         {
-            var report = await _context.AuditReports.FindAsync(id);
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            var report = await context.AuditReports.FindAsync(id);
             if (report == null) return NotFound();
 
-            _context.AuditReports.Remove(report);
-            await _context.SaveChangesAsync();
+            context.AuditReports.Remove(report);
+            await context.SaveChangesAsync();
             return NoContent();
         }
 
@@ -207,6 +230,8 @@ namespace BitRaserApiProject.Controllers
         [HttpPost("reserve-id")]
         public async Task<ActionResult<int>> ReserveReportId([FromBody] string clientEmail)
         {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
             var newReport = new audit_reports
             {
                 client_email = clientEmail,
@@ -216,8 +241,8 @@ namespace BitRaserApiProject.Controllers
                 erasure_method = "Reserved"
             };
 
-            _context.AuditReports.Add(newReport);
-            await _context.SaveChangesAsync();
+            context.AuditReports.Add(newReport);
+            await context.SaveChangesAsync();
 
             return Ok(newReport.report_id);
         }
@@ -227,10 +252,12 @@ namespace BitRaserApiProject.Controllers
         [HttpPut("upload-report/{id}")]
         public async Task<IActionResult> UploadReportData(int id, [FromBody] audit_reports updatedReport)
         {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
             if (id != updatedReport.report_id)
                 return BadRequest(new { message = "Report ID mismatch" });
 
-            var report = await _context.AuditReports.FindAsync(id);
+            var report = await context.AuditReports.FindAsync(id);
             if (report == null)
                 return NotFound();
 
@@ -240,8 +267,8 @@ namespace BitRaserApiProject.Controllers
 
             // synced flag remains unchanged here
 
-            _context.Entry(report).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
+            context.Entry(report).State = EntityState.Modified;
+            await context.SaveChangesAsync();
 
             return NoContent();
         }
@@ -251,13 +278,15 @@ namespace BitRaserApiProject.Controllers
         [HttpPatch("mark-synced/{id}")]
         public async Task<IActionResult> MarkReportSynced(int id)
         {
-            var report = await _context.AuditReports.FindAsync(id);
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            var report = await context.AuditReports.FindAsync(id);
             if (report == null)
                 return NotFound();
 
             report.synced = true;
-            _context.Entry(report).State = EntityState.Modified;
-            await _context.SaveChangesAsync();
+            context.Entry(report).State = EntityState.Modified;
+            await context.SaveChangesAsync();
 
             return NoContent();
         }
@@ -271,103 +300,103 @@ namespace BitRaserApiProject.Controllers
     [Route("api/[controller]")]
     [ApiController]
     public class LogsController : ControllerBase
-  {
+    {
         private readonly DynamicDbContextFactory _contextFactory;
         private readonly ILogger<LogsController> _logger;
-     
-  public LogsController(
-       DynamicDbContextFactory contextFactory,
-     ILogger<LogsController> logger) 
-      { 
-        _contextFactory = contextFactory;
-  _logger = logger;
-      }
 
-     /// <summary>
+        public LogsController(
+             DynamicDbContextFactory contextFactory,
+           ILogger<LogsController> logger)
+        {
+            _contextFactory = contextFactory;
+            _logger = logger;
+        }
+
+        /// <summary>
         /// Get all logs
-  /// </summary>
-    [HttpGet]
+        /// </summary>
+        [HttpGet]
         public async Task<ActionResult<IEnumerable<logs>>> GetLogs()
         {
-   using var context = await _contextFactory.CreateDbContextAsync();
-      return await context.logs.ToListAsync();
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.logs.ToListAsync();
         }
 
         /// <summary>
-  /// Get log by ID
-      /// </summary>
+        /// Get log by ID
+        /// </summary>
         [HttpGet("{id}")]
-public async Task<ActionResult<logs>> GetLog(int id)
+        public async Task<ActionResult<logs>> GetLog(int id)
         {
-    using var context = await _contextFactory.CreateDbContextAsync();
-    var log = await context.logs.FindAsync(id);
+            using var context = await _contextFactory.CreateDbContextAsync();
+            var log = await context.logs.FindAsync(id);
             return log == null ? NotFound() : Ok(log);
-   }
+        }
 
         /// <summary>
-    /// Get logs by user email
+        /// Get logs by user email
         /// </summary>
- [HttpGet("by-email/{email}")]
+        [HttpGet("by-email/{email}")]
         public async Task<ActionResult<IEnumerable<logs>>> GetLogsByEmail(string email)
         {
- using var context = await _contextFactory.CreateDbContextAsync();
-        
-    _logger.LogInformation("🔍 Fetching logs for user: {Email}", email);
-            
-      var logsList = await context.logs.Where(l => l.user_email == email).ToListAsync();
- 
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            _logger.LogInformation("🔍 Fetching logs for user: {Email}", email);
+
+            var logsList = await context.logs.Where(l => l.user_email == email).ToListAsync();
+
             _logger.LogInformation("✅ Found {Count} logs for user: {Email}", logsList.Count, email);
-    
-  return logsList.Any() ? Ok(logsList) : NotFound();
+
+            return logsList.Any() ? Ok(logsList) : NotFound();
         }
 
         /// <summary>
-/// Create a new log entry
+        /// Create a new log entry
         /// </summary>
         [HttpPost]
-  public async Task<ActionResult<logs>> CreateLog([FromBody] logs log)
+        public async Task<ActionResult<logs>> CreateLog([FromBody] logs log)
         {
-     using var context = await _contextFactory.CreateDbContextAsync();
-    
-  context.logs.Add(log);
-    await context.SaveChangesAsync();
-      return CreatedAtAction(nameof(GetLog), new { id = log.log_id }, log);
-   }
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            context.logs.Add(log);
+            await context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetLog), new { id = log.log_id }, log);
+        }
 
         /// <summary>
         /// Update log by ID
- /// </summary>
+        /// </summary>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateLog(int id, [FromBody] logs updatedLog)
         {
-      using var context = await _contextFactory.CreateDbContextAsync();
-      
-     if (id != updatedLog.log_id) return BadRequest();
-       var log = await context.logs.FindAsync(id);
-       if (log == null) return NotFound();
+            using var context = await _contextFactory.CreateDbContextAsync();
 
-    log.log_level = updatedLog.log_level;
-       log.log_message = updatedLog.log_message;
-          log.log_details_json = updatedLog.log_details_json;
+            if (id != updatedLog.log_id) return BadRequest();
+            var log = await context.logs.FindAsync(id);
+            if (log == null) return NotFound();
 
-    context.Entry(log).State = EntityState.Modified;
-    await context.SaveChangesAsync();
-         return NoContent();
-}
+            log.log_level = updatedLog.log_level;
+            log.log_message = updatedLog.log_message;
+            log.log_details_json = updatedLog.log_details_json;
+
+            context.Entry(log).State = EntityState.Modified;
+            await context.SaveChangesAsync();
+            return NoContent();
+        }
 
         /// <summary>
-    /// Delete log by ID
+        /// Delete log by ID
         /// </summary>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteLog(int id)
-     {
-     using var context = await _contextFactory.CreateDbContextAsync();
-      
-     var log = await context.logs.FindAsync(id);
-    if (log == null) return NotFound();
-  context.logs.Remove(log);
-      await context.SaveChangesAsync();
-    return NoContent();
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            var log = await context.logs.FindAsync(id);
+            if (log == null) return NotFound();
+            context.logs.Remove(log);
+            await context.SaveChangesAsync();
+            return NoContent();
         }
     }
 
@@ -382,12 +411,12 @@ public async Task<ActionResult<logs>> GetLog(int id)
     {
         private readonly DynamicDbContextFactory _contextFactory;
         private readonly ILogger<SubuserController> _logger;
-        
+
         public SubuserController(
             DynamicDbContextFactory contextFactory,
-            ILogger<SubuserController> logger) 
-        { 
-          _contextFactory = contextFactory;
+            ILogger<SubuserController> logger)
+        {
+            _contextFactory = contextFactory;
             _logger = logger;
         }
 
@@ -398,103 +427,103 @@ public async Task<ActionResult<logs>> GetLog(int id)
         public async Task<ActionResult<IEnumerable<subuser>>> GetSubusers()
         {
             using var context = await _contextFactory.CreateDbContextAsync();
-         return await context.subuser.ToListAsync();
+            return await context.subuser.ToListAsync();
         }
 
         /// <summary>
         /// Get subuser by ID
         /// </summary>
         [HttpGet("{id}")]
-public async Task<ActionResult<subuser>> GetSubuser(int id)
-      {
-          using var context = await _contextFactory.CreateDbContextAsync();
-      var sub = await context.subuser.FindAsync(id);
-  return sub == null ? NotFound() : Ok(sub);
+        public async Task<ActionResult<subuser>> GetSubuser(int id)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            var sub = await context.subuser.FindAsync(id);
+            return sub == null ? NotFound() : Ok(sub);
         }
 
- /// <summary>
+        /// <summary>
         /// Get subusers by parent user email
         /// ✅ FIXED: Now supports private cloud routing
         /// </summary>
         [HttpGet("by-superuser/{parentUserEmail}")]
         public async Task<ActionResult<IEnumerable<subuser>>> GetSubusersBySuperuser(string parentUserEmail)
-{
-   using var context = await _contextFactory.CreateDbContextAsync();
-       
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
             _logger.LogInformation("🔍 Fetching subusers for parent: {ParentEmail}", parentUserEmail);
-      
-          var subusers = await context.subuser
-         .Where(s => s.user_email == parentUserEmail)
-    .ToListAsync();
-    
-            _logger.LogInformation("✅ Found {Count} subusers for parent: {ParentEmail}", 
+
+            var subusers = await context.subuser
+           .Where(s => s.user_email == parentUserEmail)
+      .ToListAsync();
+
+            _logger.LogInformation("✅ Found {Count} subusers for parent: {ParentEmail}",
                 subusers.Count, parentUserEmail);
-  
-      return subusers.Any() ? Ok(subusers) : NotFound();
+
+            return subusers.Any() ? Ok(subusers) : NotFound();
         }
 
-     /// <summary>
+        /// <summary>
         /// Create a new subuser
         /// </summary>
         [HttpPost]
-    public async Task<ActionResult<subuser>> CreateSubuser([FromBody] subuser sub)
+        public async Task<ActionResult<subuser>> CreateSubuser([FromBody] subuser sub)
         {
-      using var context = await _contextFactory.CreateDbContextAsync();
-            
-       // Check for duplicate subuser email under this superuser
- if (await context.subuser.AnyAsync(s => s.user_email == sub.user_email && s.subuser_email == sub.subuser_email))
-        return Conflict("Subuser email already exists for this superuser.");
+            using var context = await _contextFactory.CreateDbContextAsync();
 
-      context.subuser.Add(sub);
+            // Check for duplicate subuser email under this superuser
+            if (await context.subuser.AnyAsync(s => s.user_email == sub.user_email && s.subuser_email == sub.subuser_email))
+                return Conflict("Subuser email already exists for this superuser.");
+
+            context.subuser.Add(sub);
             await context.SaveChangesAsync();
             return CreatedAtAction(nameof(GetSubuser), new { id = sub.subuser_id }, sub);
-     }
+        }
 
         /// <summary>
-   /// Update subuser by ID
+        /// Update subuser by ID
         /// </summary>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateSubuser(int id, [FromBody] subuser updatedSub)
         {
-          using var context = await _contextFactory.CreateDbContextAsync();
-       
+            using var context = await _contextFactory.CreateDbContextAsync();
+
             if (id != updatedSub.subuser_id) return BadRequest();
-   var sub = await context.subuser.FindAsync(id);
+            var sub = await context.subuser.FindAsync(id);
 
             if (sub == null) return NotFound();
 
-        sub.subuser_email = updatedSub.subuser_email;
-         sub.subuser_password = updatedSub.subuser_password;
-      sub.subuser_username = updatedSub.subuser_username;
-    sub.Name = updatedSub.Name;
-      sub.Phone = updatedSub.Phone;
+            sub.subuser_email = updatedSub.subuser_email;
+            sub.subuser_password = updatedSub.subuser_password;
+            sub.subuser_username = updatedSub.subuser_username;
+            sub.Name = updatedSub.Name;
+            sub.Phone = updatedSub.Phone;
             sub.Department = updatedSub.Department;
-   sub.Role = updatedSub.Role;
+            sub.Role = updatedSub.Role;
             sub.PermissionsJson = updatedSub.PermissionsJson;
             sub.AssignedMachines = updatedSub.AssignedMachines;
             sub.MaxMachines = updatedSub.MaxMachines;
             sub.MachineIdsJson = updatedSub.MachineIdsJson;
-  sub.LicenseIdsJson = updatedSub.LicenseIdsJson;
+            sub.LicenseIdsJson = updatedSub.LicenseIdsJson;
             sub.GroupId = updatedSub.GroupId;
             sub.subuser_group = updatedSub.subuser_group;
             sub.license_allocation = updatedSub.license_allocation;
-      sub.status = updatedSub.status;
+            sub.status = updatedSub.status;
             sub.timezone = updatedSub.timezone;
             sub.domain = updatedSub.domain;
-          sub.organization_name = updatedSub.organization_name;
-    sub.IsEmailVerified = updatedSub.IsEmailVerified;
+            sub.organization_name = updatedSub.organization_name;
+            sub.IsEmailVerified = updatedSub.IsEmailVerified;
             sub.CanCreateSubusers = updatedSub.CanCreateSubusers;
             sub.CanViewReports = updatedSub.CanViewReports;
             sub.CanManageMachines = updatedSub.CanManageMachines;
-  sub.CanAssignLicenses = updatedSub.CanAssignLicenses;
+            sub.CanAssignLicenses = updatedSub.CanAssignLicenses;
             sub.EmailNotifications = updatedSub.EmailNotifications;
-     sub.SystemAlerts = updatedSub.SystemAlerts;
-       sub.Notes = updatedSub.Notes;
- sub.UpdatedAt = DateTime.UtcNow;
+            sub.SystemAlerts = updatedSub.SystemAlerts;
+            sub.Notes = updatedSub.Notes;
+            sub.UpdatedAt = DateTime.UtcNow;
 
             context.Entry(sub).State = EntityState.Modified;
-       await context.SaveChangesAsync();
-      return NoContent();
+            await context.SaveChangesAsync();
+            return NoContent();
         }
 
         /// <summary>
@@ -505,12 +534,12 @@ public async Task<ActionResult<subuser>> GetSubuser(int id)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
 
-      var sub = await context.subuser.FindAsync(id);
+            var sub = await context.subuser.FindAsync(id);
             if (sub == null) return NotFound();
             context.subuser.Remove(sub);
-    await context.SaveChangesAsync();
-      return NoContent();
-      }
+            await context.SaveChangesAsync();
+            return NoContent();
+        }
     }
 
     /// <summary>
@@ -524,112 +553,112 @@ public async Task<ActionResult<subuser>> GetSubuser(int id)
     {
         private readonly DynamicDbContextFactory _contextFactory;
         private readonly ILogger<CommandsController> _logger;
-      
-   public CommandsController(
-    DynamicDbContextFactory contextFactory,
-        ILogger<CommandsController> logger) 
-        { 
-    _contextFactory = contextFactory;
- _logger = logger;
+
+        public CommandsController(
+         DynamicDbContextFactory contextFactory,
+             ILogger<CommandsController> logger)
+        {
+            _contextFactory = contextFactory;
+            _logger = logger;
         }
 
         /// <summary>
         /// Get all commands
-    /// </summary>
-      [HttpGet]
+        /// </summary>
+        [HttpGet]
         public async Task<ActionResult<IEnumerable<Commands>>> GetCommands()
         {
-      using var context = await _contextFactory.CreateDbContextAsync();
-      return await context.Commands.ToListAsync();
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.Commands.ToListAsync();
         }
 
         /// <summary>
-/// Get command by ID
+        /// Get command by ID
         /// </summary>
-   [HttpGet("{id}")]
+        [HttpGet("{id}")]
         public async Task<ActionResult<Commands>> GetCommand(int id)
         {
-    using var context = await _contextFactory.CreateDbContextAsync();
+            using var context = await _contextFactory.CreateDbContextAsync();
             var command = await context.Commands.FindAsync(id);
-    return command == null ? NotFound() : Ok(command);
-   }
+            return command == null ? NotFound() : Ok(command);
+        }
 
         /// <summary>
-    /// Get commands by machine hash (if machine_hash property exists)
+        /// Get commands by machine hash (if machine_hash property exists)
         /// </summary>
         [HttpGet("by-machine/{machine_hash}")]
-    public async Task<ActionResult<IEnumerable<Commands>>> GetCommandsByMachine(string machine_hash)
-{
-     using var context = await _contextFactory.CreateDbContextAsync();
- 
-        // Return all commands for now - modify this when machine_hash property is added to Commands model
-      var commands = await context.Commands.ToListAsync();
-       return Ok(commands);
-    }
-   
-        [HttpGet("by-email/{userEmail}")]
-    public async Task<ActionResult<IEnumerable<Commands>>> GetCommandsByEmail(string userEmail)
-  {
-   using var context = await _contextFactory.CreateDbContextAsync();
-      
-     _logger.LogInformation("🔍 Fetching commands for user: {Email}", userEmail);
-            
-     var commands = await context.Commands.Where(c => c.user_email == userEmail).ToListAsync();
-        
-       _logger.LogInformation("✅ Found {Count} commands for user: {Email}", commands.Count, userEmail);
-   
-       return commands.Any() ? Ok(commands) : NotFound();
+        public async Task<ActionResult<IEnumerable<Commands>>> GetCommandsByMachine(string machine_hash)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            // Return all commands for now - modify this when machine_hash property is added to Commands model
+            var commands = await context.Commands.ToListAsync();
+            return Ok(commands);
         }
-        
-  /// <summary>
+
+        [HttpGet("by-email/{userEmail}")]
+        public async Task<ActionResult<IEnumerable<Commands>>> GetCommandsByEmail(string userEmail)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            _logger.LogInformation("🔍 Fetching commands for user: {Email}", userEmail);
+
+            var commands = await context.Commands.Where(c => c.user_email == userEmail).ToListAsync();
+
+            _logger.LogInformation("✅ Found {Count} commands for user: {Email}", commands.Count, userEmail);
+
+            return commands.Any() ? Ok(commands) : NotFound();
+        }
+
+        /// <summary>
         /// Create a new command
-   /// </summary>
-    [HttpPost]
-    public async Task<ActionResult<Commands>> CreateCommand([FromBody] Commands command)
-    {
-     using var context = await _contextFactory.CreateDbContextAsync();
-      
-     context.Commands.Add(command);
-await context.SaveChangesAsync();
-  return CreatedAtAction(nameof(GetCommand), new { id = command.Command_id }, command);
+        /// </summary>
+        [HttpPost]
+        public async Task<ActionResult<Commands>> CreateCommand([FromBody] Commands command)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            context.Commands.Add(command);
+            await context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetCommand), new { id = command.Command_id }, command);
         }
 
         /// <summary>
         /// Update command by ID
-     /// </summary>
- [HttpPut("{id}")]
+        /// </summary>
+        [HttpPut("{id}")]
         public async Task<IActionResult> UpdateCommand(int id, [FromBody] Commands updatedCommand)
- {
-      using var context = await _contextFactory.CreateDbContextAsync();
-  
- if (id != updatedCommand.Command_id) return BadRequest();
-       var command = await context.Commands.FindAsync(id);
-      if (command == null) return NotFound();
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            if (id != updatedCommand.Command_id) return BadRequest();
+            var command = await context.Commands.FindAsync(id);
+            if (command == null) return NotFound();
 
             command.command_text = updatedCommand.command_text;
-        command.command_json = updatedCommand.command_json;
-command.command_status = updatedCommand.command_status;
- command.issued_at = updatedCommand.issued_at;
+            command.command_json = updatedCommand.command_json;
+            command.command_status = updatedCommand.command_status;
+            command.issued_at = updatedCommand.issued_at;
 
-     context.Entry(command).State = EntityState.Modified;
-   await context.SaveChangesAsync();
-      return NoContent();
- }
+            context.Entry(command).State = EntityState.Modified;
+            await context.SaveChangesAsync();
+            return NoContent();
+        }
 
         /// <summary>
         /// Delete command by ID
-    /// </summary>
+        /// </summary>
         [HttpDelete("{id}")]
-public async Task<IActionResult> DeleteCommand(int id)
-      {
-      using var context = await _contextFactory.CreateDbContextAsync();
-     
-    var command = await context.Commands.FindAsync(id);
-       if (command == null) return NotFound();
- context.Commands.Remove(command);
- await context.SaveChangesAsync();
-      return NoContent();
- }
+        public async Task<IActionResult> DeleteCommand(int id)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            var command = await context.Commands.FindAsync(id);
+            if (command == null) return NotFound();
+            context.Commands.Remove(command);
+            await context.SaveChangesAsync();
+            return NoContent();
+        }
     }
 
     /// <summary>
@@ -643,102 +672,102 @@ public async Task<IActionResult> DeleteCommand(int id)
     {
         private readonly DynamicDbContextFactory _contextFactory;
         private readonly ILogger<UserRoleProfileController> _logger;
-        
-      public UserRoleProfileController(
-         DynamicDbContextFactory contextFactory,
-         ILogger<UserRoleProfileController> logger) 
-        { 
-     _contextFactory = contextFactory;
-   _logger = logger;
-        }
 
- /// <summary>
-     /// Get all user role profiles
-        /// </summary>
-        [HttpGet]
-  public async Task<ActionResult<IEnumerable<User_role_profile>>> GetUserRoleProfiles()
-      {
-     using var context = await _contextFactory.CreateDbContextAsync();
-     return await context.User_role_profile.ToListAsync();
+        public UserRoleProfileController(
+           DynamicDbContextFactory contextFactory,
+           ILogger<UserRoleProfileController> logger)
+        {
+            _contextFactory = contextFactory;
+            _logger = logger;
         }
 
         /// <summary>
-/// Get user role profile by ID
+        /// Get all user role profiles
         /// </summary>
-   [HttpGet("{id}")]
-   public async Task<ActionResult<User_role_profile>> GetUserRoleProfile(int id)
-    {
-     using var context = await _contextFactory.CreateDbContextAsync();
-  var role = await context.User_role_profile.FindAsync(id);
-      return role == null ? NotFound() : Ok(role);
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<User_role_profile>>> GetUserRoleProfiles()
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.User_role_profile.ToListAsync();
+        }
+
+        /// <summary>
+        /// Get user role profile by ID
+        /// </summary>
+        [HttpGet("{id}")]
+        public async Task<ActionResult<User_role_profile>> GetUserRoleProfile(int id)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            var role = await context.User_role_profile.FindAsync(id);
+            return role == null ? NotFound() : Ok(role);
         }
 
         /// <summary>
         /// Get user role profiles by email
         /// </summary>
-     [HttpGet("by-email/{email}")]
+        [HttpGet("by-email/{email}")]
         public async Task<ActionResult<IEnumerable<User_role_profile>>> GetUserRoleProfilesByEmail(string email)
-   {
- using var context = await _contextFactory.CreateDbContextAsync();
-     
-     _logger.LogInformation("🔍 Fetching role profiles for user: {Email}", email);
- 
-       var roles = await context.User_role_profile.Where(r => r.user_email == email).ToListAsync();
-   
-     _logger.LogInformation("✅ Found {Count} role profiles for user: {Email}", roles.Count, email);
-    
-  return roles.Any() ? Ok(roles) : NotFound();
-   }
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
 
-   /// <summary>
-        /// Create a new user role profile
- /// </summary>
-    [HttpPost]
-        public async Task<ActionResult<User_role_profile>> CreateUserRoleProfile([FromBody] User_role_profile role)
-   {
-     using var context = await _contextFactory.CreateDbContextAsync();
-      
-      context.User_role_profile.Add(role);
-   await context.SaveChangesAsync();
-        return CreatedAtAction(nameof(GetUserRoleProfile), new { id = role.role_id }, role);
+            _logger.LogInformation("🔍 Fetching role profiles for user: {Email}", email);
+
+            var roles = await context.User_role_profile.Where(r => r.user_email == email).ToListAsync();
+
+            _logger.LogInformation("✅ Found {Count} role profiles for user: {Email}", roles.Count, email);
+
+            return roles.Any() ? Ok(roles) : NotFound();
         }
 
-  /// <summary>
-  /// Update user role profile by ID
-     /// </summary>
-        [HttpPut("{id}")]
-     public async Task<IActionResult> UpdateUserRoleProfile(int id, [FromBody] User_role_profile updatedRole)
+        /// <summary>
+        /// Create a new user role profile
+        /// </summary>
+        [HttpPost]
+        public async Task<ActionResult<User_role_profile>> CreateUserRoleProfile([FromBody] User_role_profile role)
         {
-       using var context = await _contextFactory.CreateDbContextAsync();
-    
-       if (id != updatedRole.role_id) return BadRequest();
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            context.User_role_profile.Add(role);
+            await context.SaveChangesAsync();
+            return CreatedAtAction(nameof(GetUserRoleProfile), new { id = role.role_id }, role);
+        }
+
+        /// <summary>
+        /// Update user role profile by ID
+        /// </summary>
+        [HttpPut("{id}")]
+        public async Task<IActionResult> UpdateUserRoleProfile(int id, [FromBody] User_role_profile updatedRole)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            if (id != updatedRole.role_id) return BadRequest();
             var role = await context.User_role_profile.FindAsync(id);
-        if (role == null) return NotFound();
+            if (role == null) return NotFound();
 
             role.user_email = updatedRole.user_email;
-       role.manage_user_id = updatedRole.manage_user_id;
-   role.role_name = updatedRole.role_name;
+            role.manage_user_id = updatedRole.manage_user_id;
+            role.role_name = updatedRole.role_name;
             role.role_email = updatedRole.role_email;
 
- context.Entry(role).State = EntityState.Modified;
-  await context.SaveChangesAsync();
-    return NoContent();
+            context.Entry(role).State = EntityState.Modified;
+            await context.SaveChangesAsync();
+            return NoContent();
         }
 
-   /// <summary>
- /// Delete user role profile by ID
-    /// </summary>
-      [HttpDelete("{id}")]
-  public async Task<IActionResult> DeleteUserRoleProfile(int id)
+        /// <summary>
+        /// Delete user role profile by ID
+        /// </summary>
+        [HttpDelete("{id}")]
+        public async Task<IActionResult> DeleteUserRoleProfile(int id)
         {
-        using var context = await _contextFactory.CreateDbContextAsync();
-   
-     var role = await context.User_role_profile.FindAsync(id);
-       if (role == null) return NotFound();
-       context.User_role_profile.Remove(role);
-await context.SaveChangesAsync();
-       return NoContent();
-}
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            var role = await context.User_role_profile.FindAsync(id);
+            if (role == null) return NotFound();
+            context.User_role_profile.Remove(role);
+            await context.SaveChangesAsync();
+            return NoContent();
+        }
     }
 
     /// <summary>
@@ -748,193 +777,193 @@ await context.SaveChangesAsync();
     [Route("api/[controller]")]
     [ApiController]
     public class MachinesController : ControllerBase
-  {
-      private readonly DynamicDbContextFactory _contextFactory;
+    {
+        private readonly DynamicDbContextFactory _contextFactory;
         private readonly ILogger<MachinesController> _logger;
 
- public MachinesController(
- DynamicDbContextFactory contextFactory,
-  ILogger<MachinesController> logger)
-{
-      _contextFactory = contextFactory;
-       _logger = logger;
+        public MachinesController(
+        DynamicDbContextFactory contextFactory,
+         ILogger<MachinesController> logger)
+        {
+            _contextFactory = contextFactory;
+            _logger = logger;
         }
 
-    /// <summary>
+        /// <summary>
         /// Get all machines
-     /// </summary>
+        /// </summary>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<machines>>> GetMachines()
         {
-     using var context = await _contextFactory.CreateDbContextAsync();
-return await context.Machines.ToListAsync();
-     }
-
-   /// <summary>
-  /// Get machine by fingerprint hash
-     /// </summary>
-        [HttpGet("by-hash/{hash}")]
-     public async Task<ActionResult<machines>> GetMachineByHash(string hash)
-      {
-      using var context = await _contextFactory.CreateDbContextAsync();
-   var machine = await context.Machines.FirstOrDefaultAsync(m => m.fingerprint_hash == hash);
-  return machine == null ? NotFound() : Ok(machine);
-  }
-
- /// <summary>
-        /// Get machine by MAC address
-/// </summary>
-   [AllowAnonymous]
-  [HttpGet("by-mac/{mac}")]
-        public async Task<ActionResult<machines>> GetMachineByMac(string mac)
-{
-   using var context = await _contextFactory.CreateDbContextAsync();
-var machine = await context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
- return machine == null ? NotFound() : Ok(machine);
- }
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.Machines.ToListAsync();
+        }
 
         /// <summary>
-  /// Get machines by user email
-   /// </summary>
-  [HttpGet("by-email/{email}")]
-public async Task<ActionResult<IEnumerable<machines>>> GetMachinesByEmail(string email)
-  {
- using var context = await _contextFactory.CreateDbContextAsync();
-      
-    _logger.LogInformation("🔍 Fetching machines for user: {Email}", email);
-       
- var machines = await context.Machines.Where(m => m.user_email == email).ToListAsync();
-       
-       _logger.LogInformation("✅ Found {Count} machines for user: {Email}", machines.Count, email);
- 
-        return machines.Any() ? Ok(machines) : NotFound();
-}
+        /// Get machine by fingerprint hash
+        /// </summary>
+        [HttpGet("by-hash/{hash}")]
+        public async Task<ActionResult<machines>> GetMachineByHash(string hash)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            var machine = await context.Machines.FirstOrDefaultAsync(m => m.fingerprint_hash == hash);
+            return machine == null ? NotFound() : Ok(machine);
+        }
 
- /// <summary>
+        /// <summary>
+        /// Get machine by MAC address
+        /// </summary>
+        [AllowAnonymous]
+        [HttpGet("by-mac/{mac}")]
+        public async Task<ActionResult<machines>> GetMachineByMac(string mac)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            var machine = await context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
+            return machine == null ? NotFound() : Ok(machine);
+        }
+
+        /// <summary>
+        /// Get machines by user email
+        /// </summary>
+        [HttpGet("by-email/{email}")]
+        public async Task<ActionResult<IEnumerable<machines>>> GetMachinesByEmail(string email)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            _logger.LogInformation("🔍 Fetching machines for user: {Email}", email);
+
+            var machines = await context.Machines.Where(m => m.user_email == email).ToListAsync();
+
+            _logger.LogInformation("✅ Found {Count} machines for user: {Email}", machines.Count, email);
+
+            return machines.Any() ? Ok(machines) : NotFound();
+        }
+
+        /// <summary>
         /// Get license status by MAC Address
         /// </summary>
-    [HttpGet("license-status/{mac}")]
-  public async Task<IActionResult> GetLicenseStatus(string mac)
-  {
-   using var context = await _contextFactory.CreateDbContextAsync();
- 
-      var machine = await context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
-     if (machine == null) return NotFound(new { message = "Machine not found" });
+        [HttpGet("license-status/{mac}")]
+        public async Task<IActionResult> GetLicenseStatus(string mac)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
 
-  bool isActivated = machine.license_activated;
+            var machine = await context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
+            if (machine == null) return NotFound(new { message = "Machine not found" });
+
+            bool isActivated = machine.license_activated;
             bool isExpired = isActivated && DateTime.UtcNow > machine.license_activation_date?.AddDays(machine.license_days_valid);
 
-      return Ok(new
-      {
-    machine.mac_address,
-     isActivated,
-     isExpired,
-   ActivationDate = machine.license_activation_date
-      });
-}
+            return Ok(new
+            {
+                machine.mac_address,
+                isActivated,
+                isExpired,
+                ActivationDate = machine.license_activation_date
+            });
+        }
 
- /// <summary>
-   /// Get remaining license days for an activated machine
-  /// </summary>
-[HttpGet("remaining-days/{mac}")]
-public async Task<IActionResult> GetRemainingDays(string mac)
-{
-  using var context = await _contextFactory.CreateDbContextAsync();
-        
-       var machine = await context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
-    if (machine == null || !machine.license_activated)
-    return NotFound(new { message = "Machine not found or not activated" });
+        /// <summary>
+        /// Get remaining license days for an activated machine
+        /// </summary>
+        [HttpGet("remaining-days/{mac}")]
+        public async Task<IActionResult> GetRemainingDays(string mac)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            var machine = await context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
+            if (machine == null || !machine.license_activated)
+                return NotFound(new { message = "Machine not found or not activated" });
 
             int remainingDays = Math.Max(0, (machine.license_activation_date?.AddDays(machine.license_days_valid) - DateTime.UtcNow)?.Days ?? 0);
 
-      return Ok(new { machine.mac_address, remainingDays });
-}
-
-    /// <summary>
-   /// Create a new machine
-   /// </summary>
-    [HttpPost]
-        public async Task<ActionResult<machines>> CreateMachine([FromBody] machines machine)
-    {
-   using var context = await _contextFactory.CreateDbContextAsync();
-            
-      if (string.IsNullOrWhiteSpace(machine.mac_address) || string.IsNullOrWhiteSpace(machine.fingerprint_hash))
-    return BadRequest(new { message = "MAC Address and Fingerprint Hash are required" });
-
-       context.Machines.Add(machine);
-      await context.SaveChangesAsync();
-
-        return CreatedAtAction(nameof(GetMachineByHash), new { hash = machine.fingerprint_hash }, machine);
-}
+            return Ok(new { machine.mac_address, remainingDays });
+        }
 
         /// <summary>
-    /// Update machine by hash
+        /// Create a new machine
         /// </summary>
-  [HttpPut("{hash}")]
-     public async Task<IActionResult> UpdateMachine(string hash, [FromBody] machines updatedMachine)
-{
-       using var context = await _contextFactory.CreateDbContextAsync();
-         
-   if (hash != updatedMachine.fingerprint_hash)
-       return BadRequest(new { message = "Fingerprint hash mismatch" });
+        [HttpPost]
+        public async Task<ActionResult<machines>> CreateMachine([FromBody] machines machine)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
 
-    var machine = await context.Machines.FirstOrDefaultAsync(m => m.fingerprint_hash == hash);
-   if (machine == null) return NotFound();
+            if (string.IsNullOrWhiteSpace(machine.mac_address) || string.IsNullOrWhiteSpace(machine.fingerprint_hash))
+                return BadRequest(new { message = "MAC Address and Fingerprint Hash are required" });
 
- // Update allowed fields
-       machine.mac_address = updatedMachine.mac_address;
-       machine.cpu_id = updatedMachine.cpu_id;
-   machine.bios_serial = updatedMachine.bios_serial;
-      machine.os_version = updatedMachine.os_version;
+            context.Machines.Add(machine);
+            await context.SaveChangesAsync();
+
+            return CreatedAtAction(nameof(GetMachineByHash), new { hash = machine.fingerprint_hash }, machine);
+        }
+
+        /// <summary>
+        /// Update machine by hash
+        /// </summary>
+        [HttpPut("{hash}")]
+        public async Task<IActionResult> UpdateMachine(string hash, [FromBody] machines updatedMachine)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            if (hash != updatedMachine.fingerprint_hash)
+                return BadRequest(new { message = "Fingerprint hash mismatch" });
+
+            var machine = await context.Machines.FirstOrDefaultAsync(m => m.fingerprint_hash == hash);
+            if (machine == null) return NotFound();
+
+            // Update allowed fields
+            machine.mac_address = updatedMachine.mac_address;
+            machine.cpu_id = updatedMachine.cpu_id;
+            machine.bios_serial = updatedMachine.bios_serial;
+            machine.os_version = updatedMachine.os_version;
             machine.user_email = updatedMachine.user_email;
-  machine.license_activated = updatedMachine.license_activated;
-       machine.license_activation_date = updatedMachine.license_activation_date;
-         machine.license_days_valid = updatedMachine.license_days_valid;
-  machine.machine_details_json = updatedMachine.machine_details_json;
+            machine.license_activated = updatedMachine.license_activated;
+            machine.license_activation_date = updatedMachine.license_activation_date;
+            machine.license_days_valid = updatedMachine.license_days_valid;
+            machine.machine_details_json = updatedMachine.machine_details_json;
 
-  context.Entry(machine).State = EntityState.Modified;
-       await context.SaveChangesAsync();
+            context.Entry(machine).State = EntityState.Modified;
+            await context.SaveChangesAsync();
 
             return NoContent();
         }
 
-   /// <summary>
-   /// Delete machine by hash
+        /// <summary>
+        /// Delete machine by hash
         /// </summary>
         [HttpDelete("{hash}")]
-   public async Task<IActionResult> DeleteMachine(string hash)
+        public async Task<IActionResult> DeleteMachine(string hash)
         {
-  using var context = await _contextFactory.CreateDbContextAsync();
-         
-         var machine = await context.Machines.FirstOrDefaultAsync(m => m.fingerprint_hash == hash);
- if (machine == null) return NotFound();
+            using var context = await _contextFactory.CreateDbContextAsync();
 
-      context.Machines.Remove(machine);
-     await context.SaveChangesAsync();
+            var machine = await context.Machines.FirstOrDefaultAsync(m => m.fingerprint_hash == hash);
+            if (machine == null) return NotFound();
 
-   return NoContent();
-   }
+            context.Machines.Remove(machine);
+            await context.SaveChangesAsync();
 
- /// <summary>
-    /// Renew machine license by MAC address
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Renew machine license by MAC address
         /// </summary>
-   [HttpPatch("renew-license/{mac}")]
- public async Task<IActionResult> RenewLicense(string mac, [FromQuery] int additionalDays)
+        [HttpPatch("renew-license/{mac}")]
+        public async Task<IActionResult> RenewLicense(string mac, [FromQuery] int additionalDays)
         {
-  using var context = await _contextFactory.CreateDbContextAsync();
- 
-if (additionalDays <= 0)
-   return BadRequest(new { message = "Additional days must be greater than zero" });
+            using var context = await _contextFactory.CreateDbContextAsync();
 
-  var machine = await context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
-   if (machine == null) return NotFound(new { message = "Machine not found" });
+            if (additionalDays <= 0)
+                return BadRequest(new { message = "Additional days must be greater than zero" });
 
-      machine.license_days_valid += additionalDays;
-   context.Entry(machine).State = EntityState.Modified;
-   await context.SaveChangesAsync();
+            var machine = await context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
+            if (machine == null) return NotFound(new { message = "Machine not found" });
 
-     return Ok(new { message = $"License extended by {additionalDays} days", machine.license_days_valid });
-     }
+            machine.license_days_valid += additionalDays;
+            context.Entry(machine).State = EntityState.Modified;
+            await context.SaveChangesAsync();
+
+            return Ok(new { message = $"License extended by {additionalDays} days", machine.license_days_valid });
+        }
     }
 
     /// <summary>
@@ -945,165 +974,165 @@ if (additionalDays <= 0)
     [Route("api/[controller]")]
     [ApiController]
     public class UsersController : ControllerBase
-{
-        private readonly DynamicDbContextFactory _contextFactory;
-   private readonly ILogger<UsersController> _logger;
-
-    public UsersController(
-         DynamicDbContextFactory contextFactory,
-    ILogger<UsersController> logger)
     {
-     _contextFactory = contextFactory;
-   _logger = logger;
-}
+        private readonly DynamicDbContextFactory _contextFactory;
+        private readonly ILogger<UsersController> _logger;
 
-   /// <summary>
-    /// Get all users
-   /// </summary>
-  [HttpGet]
-public async Task<ActionResult<IEnumerable<users>>> GetUsers()
-  {
-     using var context = await _contextFactory.CreateDbContextAsync();
-   return await context.Users.ToListAsync();
-  }
+        public UsersController(
+             DynamicDbContextFactory contextFactory,
+        ILogger<UsersController> logger)
+        {
+            _contextFactory = contextFactory;
+            _logger = logger;
+        }
 
-/// <summary>
- /// Get user by email
- /// </summary>
-   [HttpGet("{email}")]
-    public async Task<ActionResult<users>> GetUserByEmail(string email)
-{
-using var context = await _contextFactory.CreateDbContextAsync();
-      
-     _logger.LogInformation("🔍 Fetching user: {Email}", email);
-   
-      var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
-   
- _logger.LogInformation(user != null ? "✅ User found: {Email}" : "❌ User not found: {Email}", email);
-    
+        /// <summary>
+        /// Get all users
+        /// </summary>
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<users>>> GetUsers()
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+            return await context.Users.ToListAsync();
+        }
+
+        /// <summary>
+        /// Get user by email
+        /// </summary>
+        [HttpGet("{email}")]
+        public async Task<ActionResult<users>> GetUserByEmail(string email)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            _logger.LogInformation("🔍 Fetching user: {Email}", email);
+
+            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+
+            _logger.LogInformation(user != null ? "✅ User found: {Email}" : "❌ User not found: {Email}", email);
+
             return user == null ? NotFound() : Ok(user);
         }
 
         /// <summary>
-  /// Create a new user
+        /// Create a new user
         /// </summary>
         [AllowAnonymous]
-  [HttpPost]
- public async Task<ActionResult<users>> CreateUser([FromBody] users user)
+        [HttpPost]
+        public async Task<ActionResult<users>> CreateUser([FromBody] users user)
         {
-     using var context = await _contextFactory.CreateDbContextAsync();
-      
-     if (user == null || string.IsNullOrEmpty(user.user_password) || string.IsNullOrEmpty(user.user_email))
-    return BadRequest("User, email, and password are required.");
- 
-       var existingUser = await context.Users.FirstOrDefaultAsync(u => u.user_email == user.user_email);
-     if (existingUser != null)
-  return Conflict("Email already in use.");
-  
-   user.hash_password = BCrypt.Net.BCrypt.HashPassword(user.user_password);
-context.Users.Add(user);
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            if (user == null || string.IsNullOrEmpty(user.user_password) || string.IsNullOrEmpty(user.user_email))
+                return BadRequest("User, email, and password are required.");
+
+            var existingUser = await context.Users.FirstOrDefaultAsync(u => u.user_email == user.user_email);
+            if (existingUser != null)
+                return Conflict("Email already in use.");
+
+            user.hash_password = BCrypt.Net.BCrypt.HashPassword(user.user_password);
+            context.Users.Add(user);
             await context.SaveChangesAsync();
-       return CreatedAtAction(nameof(GetUserByEmail), new { email = user.user_email }, user);
- }
-
-/// <summary>
-     /// Update user by email
-     /// </summary>
-   [HttpPut("{email}")]
-      public async Task<IActionResult> UpdateUser(string email, [FromBody] users updatedUser)
-   {
-      using var context = await _contextFactory.CreateDbContextAsync();
- 
-       var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
-    if (user == null)
-    return NotFound();
-
-     user.user_name = updatedUser.user_name;
-  user.phone_number = updatedUser.phone_number;
-   user.user_email = updatedUser.user_email;
-      user.department = updatedUser.department;
-      user.user_group = updatedUser.user_group;
-     user.user_role = updatedUser.user_role;
-       user.license_allocation = updatedUser.license_allocation;
-     user.status = updatedUser.status;
-            user.timezone = updatedUser.timezone;
-   user.domain = updatedUser.domain;
-       user.organization_name = updatedUser.organization_name;
- user.is_domain_admin = updatedUser.is_domain_admin;
-
-    context.Entry(user).State = EntityState.Modified;
-      await context.SaveChangesAsync();
-      return NoContent();
-}
-
-        /// <summary>
-        /// Update user license by email
-/// </summary>
-[HttpPatch("update-license/{email}")]
-  public async Task<IActionResult> UpdateUserLicense(string email, [FromBody] string licenseJson)
-   {
-    using var context = await _contextFactory.CreateDbContextAsync();
- 
- var decodedEmail = Uri.UnescapeDataString(email);
-     var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == decodedEmail);
-   if (user == null) return NotFound();
-
-   user.license_details_json = licenseJson;
- await context.SaveChangesAsync();
-    return NoContent();
+            return CreatedAtAction(nameof(GetUserByEmail), new { email = user.user_email }, user);
         }
 
         /// <summary>
-     /// Update user payment details by email
+        /// Update user by email
         /// </summary>
-    [HttpPatch("update-payment/{email}")]
-        public async Task<IActionResult> UpdatePaymentDetails(string email, [FromBody] string paymentJson)
+        [HttpPut("{email}")]
+        public async Task<IActionResult> UpdateUser(string email, [FromBody] users updatedUser)
         {
-  using var context = await _contextFactory.CreateDbContextAsync();
- 
-   var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
-       if (user == null)
-    return NotFound();
+            using var context = await _contextFactory.CreateDbContextAsync();
 
-      user.payment_details_json = paymentJson;
-await context.SaveChangesAsync();
-        return NoContent();
-  }
+            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            if (user == null)
+                return NotFound();
+
+            user.user_name = updatedUser.user_name;
+            user.phone_number = updatedUser.phone_number;
+            user.user_email = updatedUser.user_email;
+            user.department = updatedUser.department;
+            user.user_group = updatedUser.user_group;
+            user.user_role = updatedUser.user_role;
+            user.license_allocation = updatedUser.license_allocation;
+            user.status = updatedUser.status;
+            user.timezone = updatedUser.timezone;
+            user.domain = updatedUser.domain;
+            user.organization_name = updatedUser.organization_name;
+            user.is_domain_admin = updatedUser.is_domain_admin;
+
+            context.Entry(user).State = EntityState.Modified;
+            await context.SaveChangesAsync();
+            return NoContent();
+        }
 
         /// <summary>
- /// Change user password by email
-  /// </summary>
-     [HttpPatch("change-password/{email}")]
+        /// Update user license by email
+        /// </summary>
+        [HttpPatch("update-license/{email}")]
+        public async Task<IActionResult> UpdateUserLicense(string email, [FromBody] string licenseJson)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            var decodedEmail = Uri.UnescapeDataString(email);
+            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == decodedEmail);
+            if (user == null) return NotFound();
+
+            user.license_details_json = licenseJson;
+            await context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Update user payment details by email
+        /// </summary>
+        [HttpPatch("update-payment/{email}")]
+        public async Task<IActionResult> UpdatePaymentDetails(string email, [FromBody] string paymentJson)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            if (user == null)
+                return NotFound();
+
+            user.payment_details_json = paymentJson;
+            await context.SaveChangesAsync();
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Change user password by email
+        /// </summary>
+        [HttpPatch("change-password/{email}")]
         public async Task<IActionResult> ChangePassword(string email, [FromBody] string newPassword)
         {
-  using var context = await _contextFactory.CreateDbContextAsync();
-     
-     var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
-if (user == null)
-   return NotFound();
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            if (user == null)
+                return NotFound();
 
             user.user_password = newPassword;
-    user.hash_password = BCrypt.Net.BCrypt.HashPassword(newPassword);
-     await context.SaveChangesAsync();
-    return NoContent();
-   }
-
-      /// <summary>
-      /// Delete user by email
-        /// </summary>
-[HttpDelete("{email}")]
-public async Task<IActionResult> DeleteUser(string email)
-        {
-using var context = await _contextFactory.CreateDbContextAsync();
- 
-       var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
- if (user == null)
-       return NotFound();
-
-       context.Users.Remove(user);
+            user.hash_password = BCrypt.Net.BCrypt.HashPassword(newPassword);
             await context.SaveChangesAsync();
-   return NoContent();
-   }
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Delete user by email
+        /// </summary>
+        [HttpDelete("{email}")]
+        public async Task<IActionResult> DeleteUser(string email)
+        {
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            if (user == null)
+                return NotFound();
+
+            context.Users.Remove(user);
+            await context.SaveChangesAsync();
+            return NoContent();
+        }
     }
 
 
@@ -1129,99 +1158,99 @@ using var context = await _contextFactory.CreateDbContextAsync();
     [ApiController]
     public class AuthController : ControllerBase
     {
-      private readonly DynamicDbContextFactory _contextFactory;
+        private readonly DynamicDbContextFactory _contextFactory;
         private readonly IConfiguration _configuration;
         private readonly ILogger<AuthController> _logger;
 
-     public AuthController(
-     DynamicDbContextFactory contextFactory,
-            IConfiguration configuration,
-        ILogger<AuthController> logger)
+        public AuthController(
+        DynamicDbContextFactory contextFactory,
+               IConfiguration configuration,
+           ILogger<AuthController> logger)
         {
-_contextFactory = contextFactory;
-        _configuration = configuration;
+            _contextFactory = contextFactory;
+            _configuration = configuration;
             _logger = logger;
-     }
+        }
 
         /// <summary>
         /// Login request model
         /// </summary>
         public class LoginRequest
         {
-   public string Email { get; set; } = string.Empty;
-       public string Password { get; set; } = string.Empty;
-    }
+            public string Email { get; set; } = string.Empty;
+            public string Password { get; set; } = string.Empty;
+        }
 
         /// <summary>
         /// Login response model
         /// </summary>
         public class LoginResponse
-  {
-         public string Token { get; set; } = string.Empty;
-      public string UserType { get; set; } = string.Empty; // "user" or "subuser"
+        {
+            public string Token { get; set; } = string.Empty;
+            public string UserType { get; set; } = string.Empty; // "user" or "subuser"
             public string Role { get; set; } = string.Empty;
-        public string Email { get; set; } = string.Empty;
-      }
+            public string Email { get; set; } = string.Empty;
+        }
 
-   /// <summary>
+        /// <summary>
         /// User login endpoint
-      /// </summary>
-     [HttpPost("login")]
+        /// </summary>
+        [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest login)
         {
-     using var context = await _contextFactory.CreateDbContextAsync();
-       
-       _logger.LogInformation("🔐 Login attempt for: {Email}", login.Email);
-     
-     // First, check if it's a main user
-     var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == login.Email);
+            using var context = await _contextFactory.CreateDbContextAsync();
+
+            _logger.LogInformation("🔐 Login attempt for: {Email}", login.Email);
+
+            // First, check if it's a main user
+            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == login.Email);
             if (user != null && BCrypt.Net.BCrypt.Verify(login.Password, user.hash_password))
             {
-    var token = GenerateJwtToken(login.Email, user.user_role ?? "User", "user");
-    _logger.LogInformation("✅ User login successful: {Email}", login.Email);
-        return Ok(new LoginResponse
-       {
-     Token = token,
-   UserType = "user",
+                var token = GenerateJwtToken(login.Email, user.user_role ?? "User", "user");
+                _logger.LogInformation("✅ User login successful: {Email}", login.Email);
+                return Ok(new LoginResponse
+                {
+                    Token = token,
+                    UserType = "user",
                     Role = user.user_role ?? "User",
-        Email = login.Email
-           });
-    }
+                    Email = login.Email
+                });
+            }
 
-  // If not a main user, check if it's a subuser
-     var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == login.Email);
-   if (subuser != null && BCrypt.Net.BCrypt.Verify(login.Password, subuser.subuser_password))
-      {
-          var token = GenerateJwtToken(login.Email, subuser.Role ?? "Subuser", "subuser");
-          _logger.LogInformation("✅ Subuser login successful: {Email}", login.Email);
-          return Ok(new LoginResponse
-          {
-       Token = token,
-     UserType = "subuser",
-   Role = subuser.Role ?? "Subuser",
-     Email = login.Email
-             });
-       }
+            // If not a main user, check if it's a subuser
+            var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == login.Email);
+            if (subuser != null && BCrypt.Net.BCrypt.Verify(login.Password, subuser.subuser_password))
+            {
+                var token = GenerateJwtToken(login.Email, subuser.Role ?? "Subuser", "subuser");
+                _logger.LogInformation("✅ Subuser login successful: {Email}", login.Email);
+                return Ok(new LoginResponse
+                {
+                    Token = token,
+                    UserType = "subuser",
+                    Role = subuser.Role ?? "Subuser",
+                    Email = login.Email
+                });
+            }
 
-          _logger.LogWarning("❌ Login failed for: {Email}", login.Email);
+            _logger.LogWarning("❌ Login failed for: {Email}", login.Email);
             return Unauthorized(new { message = "Invalid credentials" });
-      }
+        }
 
-  private string GenerateJwtToken(string email, string role, string userType)
+        private string GenerateJwtToken(string email, string role, string userType)
         {
- var jwtSettings = _configuration.GetSection("Jwt");
-   var secretKey = jwtSettings["Key"];
-     var issuer = jwtSettings["Issuer"];
- var audience = jwtSettings["Audience"];
+            var jwtSettings = _configuration.GetSection("Jwt");
+            var secretKey = jwtSettings["Key"];
+            var issuer = jwtSettings["Issuer"];
+            var audience = jwtSettings["Audience"];
 
             if (string.IsNullOrEmpty(secretKey))
-    throw new InvalidOperationException("JWT secret key is not configured");
+                throw new InvalidOperationException("JWT secret key is not configured");
 
-      var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
-         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
+            var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
+            var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-        var claims = new[]
-       {
+            var claims = new[]
+           {
      new Claim(JwtRegisteredClaimNames.Sub, email),
  new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
   new Claim(ClaimTypes.Role, role),
@@ -1233,12 +1262,12 @@ _contextFactory = contextFactory;
     issuer,
         audience,
   claims,
-      expires: DateTime.UtcNow.AddHours(1),       
+      expires: DateTime.UtcNow.AddHours(1),
     signingCredentials: creds
             );
 
             return new JwtSecurityTokenHandler().WriteToken(token);
-     }
+        }
     }
 
     /// <summary>
@@ -1248,7 +1277,7 @@ _contextFactory = contextFactory;
     [Route("api/[controller]")]
     [ApiController]
     public class UpdatesController : ControllerBase
- {
+    {
         private readonly DynamicDbContextFactory _contextFactory;
         private readonly ILogger<UpdatesController> _logger;
 
@@ -1257,23 +1286,23 @@ _contextFactory = contextFactory;
             ILogger<UpdatesController> logger)
         {
             _contextFactory = contextFactory;
-    _logger = logger;
+            _logger = logger;
         }
 
- /// <summary>
+        /// <summary>
         /// Get latest software version
-     /// </summary>
-    [HttpGet("latest")]
+        /// </summary>
+        [HttpGet("latest")]
         public async Task<ActionResult<Update>> GetLatestVersion()
- {
+        {
             using var context = await _contextFactory.CreateDbContextAsync();
-      
+
             var latest = await context.Updates
      .OrderByDescending(u => u.version_id)
         .FirstOrDefaultAsync();
 
-       if (latest == null)
-     return NotFound("No update records found.");
+            if (latest == null)
+                return NotFound("No update records found.");
 
             return Ok(latest);
         }
@@ -1281,303 +1310,93 @@ _contextFactory = contextFactory;
         /// <summary>
         /// Check for updates based on current version ID
         /// </summary>
-      [HttpGet("check/{currentVersionId}")]
+        [HttpGet("check/{currentVersionId}")]
         public async Task<ActionResult<IEnumerable<Update>>> CheckForUpdates(int currentVersionId)
         {
-     using var context = await _contextFactory.CreateDbContextAsync();
-       
-       var updates = await context.Updates
-             .Where(u => u.version_id > currentVersionId)
-            .OrderBy(u => u.version_id)
-           .ToListAsync();
+            using var context = await _contextFactory.CreateDbContextAsync();
 
-     if (updates.Count == 0)
-              return NoContent();
+            var updates = await context.Updates
+                  .Where(u => u.version_id > currentVersionId)
+                 .OrderBy(u => u.version_id)
+                .ToListAsync();
 
-    return Ok(updates);
+            if (updates.Count == 0)
+                return NoContent();
+
+            return Ok(updates);
         }
     }
 
     /// <summary>
-    /// License management controller
+    /// License validation controller
     /// ✅ NOW SUPPORTS PRIVATE CLOUD ROUTING
     /// </summary>
     [Authorize]
-  [Route("api/[controller]")]
+    [Route("api/[controller]")]
     [ApiController]
-    public class LicenseController : ControllerBase
+    public class LicenseValidationController : ControllerBase
     {
-     private readonly DynamicDbContextFactory _contextFactory;
-        private readonly ILogger<LicenseController> _logger;
-    
-        public LicenseController(
-            DynamicDbContextFactory contextFactory,
-       ILogger<LicenseController> logger) 
-    { 
-      _contextFactory = contextFactory;
-  _logger = logger;
+        private readonly DynamicDbContextFactory _contextFactory;
+        private readonly ILogger<LicenseValidationController> _logger;
+
+        public LicenseValidationController(
+        DynamicDbContextFactory contextFactory,
+               ILogger<LicenseValidationController> logger)
+        {
+            _contextFactory = contextFactory;
+            _logger = logger;
         }
 
-     /// <summary>
+        /// <summary>
         /// Validate user license by email
+        /// GET /api/LicenseValidation/validate/{email}
         /// </summary>
         [HttpGet("validate/{email}")]
         public async Task<IActionResult> ValidateLicense(string email)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
-        
-   _logger.LogInformation("🔍 Validating license for: {Email}", email);
-     
+
+            _logger.LogInformation("🔍 Validating license for: {Email}", email);
+
             var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
             if (user == null)
-             return NotFound(new { message = "User not found" });
+                return NotFound(new { message = "User not found" });
 
-      DateTime? activationDate = null;
-    int daysValid = 0;
-        
-          if (!string.IsNullOrEmpty(user.license_details_json))
+            DateTime? activationDate = null;
+            int daysValid = 0;
+
+            if (!string.IsNullOrEmpty(user.license_details_json))
             {
-      try
-         {
-      var licenseObj = System.Text.Json.JsonDocument.Parse(user.license_details_json).RootElement;
-             if (licenseObj.TryGetProperty("activation_date", out var actDate))
-             activationDate = actDate.GetDateTime();
-      if (licenseObj.TryGetProperty("days_valid", out var dValid))
-            daysValid = dValid.GetInt32();
-       }
-       catch
- {
-         return BadRequest(new { message = "Invalid license details format" });
+                try
+                {
+                    var licenseObj = System.Text.Json.JsonDocument.Parse(user.license_details_json).RootElement;
+                    if (licenseObj.TryGetProperty("activation_date", out var actDate))
+                        activationDate = actDate.GetDateTime();
+                    if (licenseObj.TryGetProperty("days_valid", out var dValid))
+                        daysValid = dValid.GetInt32();
                 }
-    }
+                catch
+                {
+                    return BadRequest(new { message = "Invalid license details format" });
+                }
+            }
 
             if (activationDate == null || daysValid <= 0)
                 return Ok(new { isValid = false, message = "License not activated or invalid" });
 
-var expiryDate = activationDate.Value.AddDays(daysValid);
-  var now = DateTime.UtcNow;
-      var remaining = (expiryDate - now).TotalDays;
+            var expiryDate = activationDate.Value.AddDays(daysValid);
+            var now = DateTime.UtcNow;
+            var remaining = (expiryDate - now).TotalDays;
 
             bool isValid = now < expiryDate;
-   return Ok(new
-   {
-      isValid,
+            return Ok(new
+            {
+                isValid,
                 expiresOn = expiryDate,
-        remainingDays = remaining > 0 ? Math.Floor(remaining) : 0
+                remainingDays = remaining > 0 ? Math.Floor(remaining) : 0
             });
+        }
     }
-  }
-
-/// <summary>
-    /// PDF generation controller
-    /// ✅ NOW SUPPORTS PRIVATE CLOUD ROUTING
-    /// </summary>
-    [Authorize]
- [Route("api/[controller]")]
-    [ApiController]
-    public class PdfController : ControllerBase
-    {
-        private readonly PdfService _pdfService;
-        private readonly DynamicDbContextFactory _contextFactory;
-        private readonly ILogger<PdfController> _logger;
-
-        public PdfController(
-          PdfService pdfService,
-         DynamicDbContextFactory contextFactory,
-   ILogger<PdfController> logger)
-        {
-         _pdfService = pdfService;
-       _contextFactory = contextFactory;
-       _logger = logger;
-        }
-
-     /// <summary>
-        /// Generate PDF report from ReportRequest
-    /// </summary>
-        [HttpPost("generate-report")]
-        public IActionResult GenerateReport([FromBody] ReportRequest request)
-        {
-  var pdfBytes = _pdfService.GenerateReport(request);
-            return File(pdfBytes, "application/pdf", $"{request.ReportData?.ReportId ?? "report"}.pdf");
-        }
-
-        /// <summary>
-        /// Generate PDF report from audit_reports by ID - Parses JSON data correctly
-        /// </summary>
-     [HttpGet("generate-from-audit/{reportId}")]
-     public async Task<IActionResult> GenerateFromAuditReport(int reportId)
-        {
-      try
-            {
-           using var context = await _contextFactory.CreateDbContextAsync();
-       
-    // Get the audit report from database
-   var auditReport = await context.AuditReports.FindAsync(reportId);
-       if (auditReport == null)
-            return NotFound(new { message = $"Audit report {reportId} not found" });
-
-         ReportData reportData;
-
- // Parse the JSON data from report_details_json
-     if (!string.IsNullOrEmpty(auditReport.report_details_json) && auditReport.report_details_json != "{}")
-            {
-          try
-          {
-        reportData = System.Text.Json.JsonSerializer.Deserialize<ReportData>(
-auditReport.report_details_json,
-      new System.Text.Json.JsonSerializerOptions
-       {
-    PropertyNameCaseInsensitive = true
-              }) ?? new ReportData();
-                
-       _logger.LogInformation("Successfully parsed JSON for report {ReportId}", reportId);
-       }
-        catch (System.Text.Json.JsonException ex)
-             {
-             _logger.LogError(ex, "Failed to parse JSON for report {ReportId}", reportId);
-           reportData = new ReportData();
-     }
-           }
-            else
-    {
-       reportData = new ReportData();
-        }
-
-// Override with database values if JSON doesn't have them
-  if (string.IsNullOrEmpty(reportData.ReportId))
-          reportData.ReportId = auditReport.report_id.ToString();
-    
-      if (string.IsNullOrEmpty(reportData.ReportDate))
-        reportData.ReportDate = auditReport.report_datetime.ToString("yyyy-MM-dd HH:mm:ss");
-                
-    if (string.IsNullOrEmpty(reportData.EraserMethod))
-   reportData.EraserMethod = auditReport.erasure_method;
-
-        // Create the report request
-  var reportRequest = new ReportRequest
-{
-          ReportData = reportData,
-               ReportTitle = auditReport.report_name ?? "Data Erasure Report",
-        HeaderText = "D-Secure Audit Report",
- TechnicianName = "System",
-       TechnicianDept = "IT Department",
-  ValidatorName = "System Validator",
-                  ValidatorDept = "Quality Assurance"
-    };
-
-    // Generate PDF
-                var pdfBytes = _pdfService.GenerateReport(reportRequest);
-         
-        return File(pdfBytes, "application/pdf", $"report_{auditReport.report_id}.pdf");
-   }
-            catch (Exception ex)
-            {
-          _logger.LogError(ex, "Error generating PDF for audit report {ReportId}", reportId);
-  return StatusCode(500, new { message = "Error generating PDF", error = ex.Message });
-}
-        }
-
-        /// <summary>
-     /// Generate PDF report from audit_reports by ID with custom options
-        /// </summary>
-      [HttpPost("generate-from-audit/{reportId}")]
-  public async Task<IActionResult> GenerateFromAuditReportWithOptions(
-  int reportId,
-            [FromBody] PdfGenerationOptions? options)
-  {
- try
-   {
-        using var context = await _contextFactory.CreateDbContextAsync();
-                
-         // Get the audit report from database
-     var auditReport = await context.AuditReports.FindAsync(reportId);
-                if (auditReport == null)
-            return NotFound(new { message = $"Audit report {reportId} not found" });
-
-       ReportData reportData;
-
-    // Parse the JSON data from report_details_json
-  if (!string.IsNullOrEmpty(auditReport.report_details_json) && auditReport.report_details_json != "{}")
-   {
-       try
-             {
-         reportData = System.Text.Json.JsonSerializer.Deserialize<ReportData>(
-       auditReport.report_details_json,
-       new System.Text.Json.JsonSerializerOptions
-              {
-        PropertyNameCaseInsensitive = true
-       }) ?? new ReportData();
-       
-             _logger.LogInformation("Successfully parsed JSON for report {ReportId}", reportId);
-         }
-        catch (System.Text.Json.JsonException ex)
- {
- _logger.LogError(ex, "Failed to parse JSON for report {ReportId}", reportId);
-   reportData = new ReportData();
-   }
-           }
-    else
-  {
-      reportData = new ReportData();
-        }
-
-        // Override with database values if JSON doesn't have them
-      if (string.IsNullOrEmpty(reportData.ReportId))
-    reportData.ReportId = auditReport.report_id.ToString();
-     
-                if (string.IsNullOrEmpty(reportData.ReportDate))
-    reportData.ReportDate = auditReport.report_datetime.ToString("yyyy-MM-dd HH:mm:ss");
-                
-     if (string.IsNullOrEmpty(reportData.EraserMethod))
-            reportData.EraserMethod = auditReport.erasure_method;
-
-     // Create the report request with custom options
-        var reportRequest = new ReportRequest
-             {
-     ReportData = reportData,
-        ReportTitle = options?.ReportTitle ?? auditReport.report_name ?? "Data Erasure Report",
-             HeaderText = options?.HeaderText ?? "D-Secure Audit Report",
-        TechnicianName = options?.TechnicianName ?? "System",
-         TechnicianDept = options?.TechnicianDept ?? "IT Department",
-       ValidatorName = options?.ValidatorName ?? "System Validator",
-                 ValidatorDept = options?.ValidatorDept ?? "Quality Assurance",
- HeaderLeftLogo = options?.HeaderLeftLogo,
-          HeaderRightLogo = options?.HeaderRightLogo,
-    WatermarkImage = options?.WatermarkImage,
-          TechnicianSignature = options?.TechnicianSignature,
-       ValidatorSignature = options?.ValidatorSignature
-    };
-
-             // Generate PDF
-          var pdfBytes = _pdfService.GenerateReport(reportRequest);
-          
-      return File(pdfBytes, "application/pdf", $"report_{auditReport.report_id}.pdf");
-     }
-          catch (Exception ex)
-    {
-  _logger.LogError(ex, "Error generating PDF for audit report {ReportId}", reportId);
-        return StatusCode(500, new { message = "Error generating PDF", error = ex.Message });
- }
-   }
-    }
-
-    /// <summary>
-    /// PDF generation options
-    /// </summary>
-    public class PdfGenerationOptions
-    {
-        public string? ReportTitle { get; set; }
-public string? HeaderText { get; set; }
-   public string? TechnicianName { get; set; }
-        public string? TechnicianDept { get; set; }
-        public string? ValidatorName { get; set; }
-        public string? ValidatorDept { get; set; }
-      public byte[]? HeaderLeftLogo { get; set; }
-        public byte[]? HeaderRightLogo { get; set; }
-        public byte[]? WatermarkImage { get; set; }
-      public byte[]? TechnicianSignature { get; set; }
-        public byte[]? ValidatorSignature { get; set; }
-  }
 }
 
 
