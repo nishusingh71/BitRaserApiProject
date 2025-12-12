@@ -146,83 +146,120 @@ namespace BitRaserApiProject.Controllers
                 }
                 else
                 {
-                    // ✅ Try to authenticate as subuser - Check BOTH Main DB and Private Cloud DBs
-                    var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
-      
-                    if (subuser != null && BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
-                    {
-                       // Found in main database
-         userEmail = request.Email;
- isSubuser = true;
-         subuserData = subuser;
-        isPrivateCloudSubuser = false;
-  parentUserEmail = subuser.user_email;
-    
-_logger.LogInformation("✅ Subuser {Email} authenticated from Main DB", request.Email);
- }
-else
-       {
-   // ✅ NOT FOUND IN MAIN DB - Check Private Cloud databases
-                _logger.LogInformation("🔍 Subuser {Email} not found in Main DB, checking Private Cloud DBs...", request.Email);
+                    // ✅ Try to authenticate as subuser - Check if parent has private cloud FIRST
+                    _logger.LogInformation("🔍 User not found, trying subuser authentication for {Email}", request.Email);
    
-             // Get all users with private cloud enabled
-        var privateCloudUsers = await _context.Users
-         .Where(u => u.is_private_cloud == true)
-    .Select(u => new { u.user_email, u.user_id })
-        .ToListAsync();
-       
-       _logger.LogInformation("📊 Found {Count} private cloud users to check", privateCloudUsers.Count);
-         
-       // Check each private cloud database for the subuser
-       foreach (var pcUser in privateCloudUsers)
-      {
-     try
-     {
-  _logger.LogInformation("🔍 Checking private cloud DB for user {ParentEmail}...", pcUser.user_email);
-         
-     // Get private cloud connection string for this user
-    var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
-         var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUser.user_email);
-        
- // Check if this is a private cloud connection (not main DB)
-         var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
-    if (connectionString == mainConnectionString)
-        {
-          _logger.LogDebug("User {Email} does not have an active private cloud DB", pcUser.user_email);
-         continue;
-       }
-                  
-  // Create temporary context for this private database
-           var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
-        optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
-     
-        using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+         // ✅ STRATEGY: Check Private Cloud databases FIRST, then Main DB
+         // This ensures migrated subusers login to correct database
+
+         bool foundInPrivateCloud = false;
+  
+ // Get all users with private cloud enabled
+    var privateCloudUsers = await _context.Users
+    .Where(u => u.is_private_cloud == true)
+         .Select(u => new { u.user_email, u.user_id })
+         .ToListAsync();
           
-         // Try to find subuser in this private database
-        var privateSubuser = await privateContext.subuser
-    .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
- 
-              if (privateSubuser != null && BCrypt.Net.BCrypt.Verify(request.Password, privateSubuser.subuser_password))
+     if (privateCloudUsers.Any())
+         {
+ _logger.LogInformation("🔍 Found {Count} private cloud users, checking their databases...", privateCloudUsers.Count);
+   
+  // ✅ ADD: Timeout protection - max 30 seconds for all Private Cloud checks
+     var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+   
+  // Check each private cloud database FIRST
+  foreach (var pcUser in privateCloudUsers)
    {
- // ✅ FOUND in private cloud database!
- userEmail = request.Email;
-         isSubuser = true;
-        subuserData = privateSubuser;
-     isPrivateCloudSubuser = true;
-         parentUserEmail = pcUser.user_email;
+  try
+     {
+      // ✅ CHECK: If cancellation requested, break loop
+    if (cts.Token.IsCancellationRequested)
+      {
+_logger.LogWarning("⚠️ Private Cloud DB check timeout - breaking loop");
+   break;
+}
     
-          _logger.LogInformation("✅ Subuser {Email} authenticated from Private Cloud DB of parent {ParentEmail}", 
-     request.Email, pcUser.user_email);
-            break;
-  }
-            }
-       catch (Exception ex)
- {
-            _logger.LogWarning(ex, "⚠️ Failed to check private cloud DB for user {Email}", pcUser.user_email);
-     }
-             }
-             }
+      _logger.LogDebug("🔍 Checking private cloud DB for user {ParentEmail}...", pcUser.user_email);
+  
+      // Get private cloud connection string for this user
+       var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
+     var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUser.user_email);
+    
+ // Check if this is a private cloud connection (not main DB)
+ var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
+   if (connectionString == mainConnectionString)
+    {
+       _logger.LogDebug("User {Email} does not have an active private cloud DB", pcUser.user_email);
+           continue;
        }
+         
+// Create temporary context for this private database
+   var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+          optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+  
+      using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+   
+        // ✅ ADD: Set command timeout to prevent hanging
+      privateContext.Database.SetCommandTimeout(10); // 10 seconds max per query
+      
+   // Try to find subuser in this private database
+          var privateSubuser = await privateContext.subuser
+   .FirstOrDefaultAsync(s => s.subuser_email == request.Email, cts.Token);
+      
+  if (privateSubuser != null && BCrypt.Net.BCrypt.Verify(request.Password, privateSubuser.subuser_password))
+     {
+  // ✅ FOUND in private cloud database!
+   userEmail = request.Email;
+  isSubuser = true;
+           subuserData = privateSubuser;
+          isPrivateCloudSubuser = true;
+            parentUserEmail = pcUser.user_email;
+       foundInPrivateCloud = true;
+        
+     _logger.LogInformation("✅ Subuser {Email} authenticated from Private Cloud DB of parent {ParentEmail}", 
+ request.Email, pcUser.user_email);
+ break;
+    }
+       }
+  catch (OperationCanceledException)
+   {
+  _logger.LogWarning("⚠️ Private Cloud DB check cancelled due to timeout");
+      break;
+    }
+   catch (MySql.Data.MySqlClient.MySqlException mysqlEx)
+  {
+       _logger.LogWarning(mysqlEx, "⚠️ MySQL error checking private cloud DB for user {Email} - Code: {Code}", 
+     pcUser.user_email, mysqlEx.Number);
+ // Continue to next private cloud user
+        }
+    catch (Exception ex)
+     {
+        _logger.LogWarning(ex, "⚠️ Failed to check private cloud DB for user {Email}", pcUser.user_email);
+   // Continue to next private cloud user
+     }
+   }
+        }
+             
+   // ✅ If NOT found in private cloud, check MAIN DB
+ if (!foundInPrivateCloud)
+       {
+     _logger.LogInformation("🔍 Not found in Private Cloud, checking Main DB for {Email}", request.Email);
+ 
+var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+     
+  if (subuser != null && BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
+   {
+        // Found in main database
+   userEmail = request.Email;
+     isSubuser = true;
+         subuserData = subuser;
+      isPrivateCloudSubuser = false;
+          parentUserEmail = subuser.user_email;
+  
+    _logger.LogInformation("✅ Subuser {Email} authenticated from Main DB", request.Email);
+   }
+   }
+     }
 
       if (userEmail == null)
     {
@@ -724,86 +761,140 @@ return StatusCode(500, new { message = "An error occurred during login" });
         /// </summary>
         [HttpPost("logout")]
         [Authorize]
-        public async Task<IActionResult> Logout()
-        {
+     public async Task<IActionResult> Logout()
+  {
             try
-            {
-                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var userType = User.FindFirst("user_type")?.Value;
+    {
+      var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+     var userType = User.FindFirst("user_type")?.Value;
 
-                if (string.IsNullOrEmpty(userEmail))
-                {
-                    return Unauthorized(new { message = "Invalid token" });
-                }
+    if (string.IsNullOrEmpty(userEmail))
+        {
+       return Unauthorized(new { message = "Invalid token" });
+           }
 
-                var isSubuser = userType == "subuser";
+    var isSubuser = userType == "subuser";
 
-                // ✅ Get server time for logout
-                var logoutTime = await GetServerTimeAsync();
+       // ✅ Get server time for logout
+       var logoutTime = await GetServerTimeAsync();
 
-                // End all active sessions for this user
-                var activeSessions = await _context.Sessions
-              .Where(s => s.user_email == userEmail && s.session_status == "active")
+      // End all active sessions for this user (in MAIN DB)
+              var activeSessions = await _context.Sessions
+        .Where(s => s.user_email == userEmail && s.session_status == "active")
            .ToListAsync();
 
-                foreach (var session in activeSessions)
+     foreach (var session in activeSessions)
                 {
-                    session.logout_time = logoutTime;  // ✅ ISO 8601 via converter
-                    session.session_status = "closed";
-                }
+    session.logout_time = logoutTime;
+        session.session_status = "closed";
+           }
 
-                // ✅ Update last_logout and activity_status
-                if (isSubuser)
-                {
-                    var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == userEmail);
-                    if (subuser != null)
-                    {
-                        subuser.last_logout = logoutTime;
-                        subuser.activity_status = "offline";
-                        _context.Entry(subuser).State = EntityState.Modified;
-                    }
-                }
-                else
-                {
-                    var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
-                    if (user != null)
-                    {
-                        user.last_logout = logoutTime;
-                        user.activity_status = "offline";
-                        _context.Entry(user).State = EntityState.Modified;
-                    }
-                }
+      // ✅ Update last_logout and activity_status
+      if (isSubuser)
+      {
+    // ✅ Check MAIN DB first
+       var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+       if (subuser != null)
+      {
+      // Found in MAIN DB
+     subuser.last_logout = logoutTime;
+  subuser.activity_status = "offline";
+      _context.Entry(subuser).State = EntityState.Modified;
+      
+          _logger.LogInformation("✅ Updated logout in Main DB for subuser {Email}", userEmail);
+      }
+        else
+         {
+            // ✅ NOT IN MAIN DB - Check Private Cloud databases
+          _logger.LogInformation("🔍 Subuser {Email} not in Main DB, checking Private Cloud...", userEmail);
+    
+          var privateCloudUsers = await _context.Users
+          .Where(u => u.is_private_cloud == true)
+          .Select(u => new { u.user_email, u.user_id })
+      .ToListAsync();
+      
+ foreach (var pcUser in privateCloudUsers)
+        {
+  try
+ {
+  var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
+var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUser.user_email);
+        
+       var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
+        if (connectionString == mainConnectionString)
+                 continue;
+   
+  var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+         optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+   
+  using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+          
+   var privateSubuser = await privateContext.subuser
+            .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+            
+     if (privateSubuser != null)
+      {
+                // ✅ FOUND! Update logout in private DB
+ privateSubuser.last_logout = logoutTime;
+    privateSubuser.activity_status = "offline";
+             privateContext.Entry(privateSubuser).State = EntityState.Modified;
+        await privateContext.SaveChangesAsync();
+                     
+          _logger.LogInformation("✅ Updated logout in Private Cloud DB for subuser {Email}", userEmail);
+            break;
+        }
+     }
+                 catch (Exception ex)
+      {
+      _logger.LogWarning(ex, "⚠️ Failed to update logout in Private Cloud DB for user {Email}", pcUser.user_email);
+       }
+}
+         }
+     }
+ else
+         {
+     // Regular user logout (always in MAIN DB)
+ var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+      if (user != null)
+      {
+      user.last_logout = logoutTime;
+   user.activity_status = "offline";
+      _context.Entry(user).State = EntityState.Modified;
+               
+        _logger.LogInformation("✅ Updated logout in Main DB for user {Email}", userEmail);
+      }
+    }
 
-                await _context.SaveChangesAsync();
+      await _context.SaveChangesAsync();
 
-                _logger.LogInformation("User logout: {Email} ({UserType}) at {LogoutTime}",
-                       userEmail, isSubuser ? "subuser" : "user", DateTimeHelper.ToIso8601String(logoutTime));
+        _logger.LogInformation("User logout: {Email} ({UserType}) at {LogoutTime}",
+    userEmail, isSubuser ? "subuser" : "user", DateTimeHelper.ToIso8601String(logoutTime));
 
-                // Set response headers to help clear token from browser/Swagger
-                Response.Headers["Clear-Site-Data"] = "\"storage\"";
-                Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
+             // Set response headers to help clear token from browser/Swagger
+         Response.Headers["Clear-Site-Data"] = "\"storage\"";
+       Response.Headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
 
-                return Ok(new
-                {
-                    success = true,
-                    message = "Logout successful - JWT token cleared, user logged out automatically",
-                    email = userEmail,
-                    userType = isSubuser ? "subuser" : "user",
-                    logoutTime = logoutTime,  // ✅ ISO 8601 via converter
-                    activity_status = "offline",  // ✅ Confirm offline
-                    sessionsEnded = activeSessions.Count,
-                    // Add Swagger UI clearing instructions
-                    clearToken = true,
-                    swaggerLogout = true
-                });
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during logout");
-                return StatusCode(500, new { message = "Logout failed" });
+  return Ok(new
+     {
+      success = true,
+              message = "Logout successful - JWT token cleared, user logged out automatically",
+        email = userEmail,
+        userType = isSubuser ? "subuser" : "user",
+         logoutTime = logoutTime,
+          lastLogoutTime = logoutTime,  // ✅ Include for consistency
+             activity_status = "offline",
+            sessionsEnded = activeSessions.Count,
+      clearToken = true,
+       swaggerLogout = true
+    });
+    }
+        catch (Exception ex)
+        {
+      _logger.LogError(ex, "Error during logout");
+                return StatusCode(500, new { message = "Logout failed", error = ex.Message });
             }
         }
-
+        
         /// <summary>
         /// Update user roles - Replace existing roles with new ones
         /// Supports both main users and subusers
