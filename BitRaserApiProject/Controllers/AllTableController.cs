@@ -1,15 +1,16 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json.Serialization;
+using BCrypt.Net;
+using BitRaserApiProject.Attributes;
+using BitRaserApiProject.Factories;
 using BitRaserApiProject.Models;
+using BitRaserApiProject.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using BCrypt.Net;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Factories;
-using System.Text.Json.Serialization;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -58,6 +59,7 @@ namespace BitRaserApiProject.Controllers
         /// Get sessions by user email
         /// </summary>
         [HttpGet("by-email/{email}")]
+        [DecodeEmail]
         public async Task<ActionResult<IEnumerable<Sessions>>> GetSessionsByEmail(string email)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -163,6 +165,7 @@ namespace BitRaserApiProject.Controllers
 
         // Get all reports by client email
         [HttpGet("by-email/{email}")]
+        [DecodeEmail]
         public async Task<ActionResult<IEnumerable<audit_reports>>> GetAuditReportsByEmail(string email)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -337,6 +340,7 @@ namespace BitRaserApiProject.Controllers
         /// Get logs by user email
         /// </summary>
         [HttpGet("by-email/{email}")]
+        [DecodeEmail]
         public async Task<ActionResult<IEnumerable<logs>>> GetLogsByEmail(string email)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -446,6 +450,7 @@ namespace BitRaserApiProject.Controllers
         /// ✅ FIXED: Now supports private cloud routing
         /// </summary>
         [HttpGet("by-superuser/{parentUserEmail}")]
+        [DecodeEmail]
         public async Task<ActionResult<IEnumerable<subuser>>> GetSubusersBySuperuser(string parentUserEmail)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -597,6 +602,7 @@ namespace BitRaserApiProject.Controllers
         }
 
         [HttpGet("by-email/{userEmail}")]
+        [DecodeEmail]
         public async Task<ActionResult<IEnumerable<Commands>>> GetCommandsByEmail(string userEmail)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -706,6 +712,7 @@ namespace BitRaserApiProject.Controllers
         /// Get user role profiles by email
         /// </summary>
         [HttpGet("by-email/{email}")]
+        [DecodeEmail]
         public async Task<ActionResult<IEnumerable<User_role_profile>>> GetUserRoleProfilesByEmail(string email)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -826,6 +833,7 @@ namespace BitRaserApiProject.Controllers
         /// Get machines by user email
         /// </summary>
         [HttpGet("by-email/{email}")]
+        [DecodeEmail]
         public async Task<ActionResult<IEnumerable<machines>>> GetMachinesByEmail(string email)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -1000,6 +1008,7 @@ namespace BitRaserApiProject.Controllers
         /// Get user by email
         /// </summary>
         [HttpGet("{email}")]
+        [DecodeEmail]
         public async Task<ActionResult<users>> GetUserByEmail(string email)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -1039,6 +1048,7 @@ namespace BitRaserApiProject.Controllers
         /// Update user by email
         /// </summary>
         [HttpPut("{email}")]
+        [DecodeEmail]
         public async Task<IActionResult> UpdateUser(string email, [FromBody] users updatedUser)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -1069,6 +1079,7 @@ namespace BitRaserApiProject.Controllers
         /// Update user license by email
         /// </summary>
         [HttpPatch("update-license/{email}")]
+        [DecodeEmail]
         public async Task<IActionResult> UpdateUserLicense(string email, [FromBody] string licenseJson)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -1086,6 +1097,7 @@ namespace BitRaserApiProject.Controllers
         /// Update user payment details by email
         /// </summary>
         [HttpPatch("update-payment/{email}")]
+        [DecodeEmail]
         public async Task<IActionResult> UpdatePaymentDetails(string email, [FromBody] string paymentJson)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -1103,6 +1115,7 @@ namespace BitRaserApiProject.Controllers
         /// Change user password by email
         /// </summary>
         [HttpPatch("change-password/{email}")]
+        [DecodeEmail]
         public async Task<IActionResult> ChangePassword(string email, [FromBody] string newPassword)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
@@ -1352,6 +1365,7 @@ namespace BitRaserApiProject.Controllers
         /// GET /api/LicenseValidation/validate/{email}
         /// </summary>
         [HttpGet("validate/{email}")]
+        [DecodeEmail]
         public async Task<IActionResult> ValidateLicense(string email)
         {
             using var context = await _contextFactory.CreateDbContextAsync();

@@ -117,36 +117,36 @@ builder.Services.AddCors(options =>
          .AllowCredentials()
       .SetIsOriginAllowedToAllowWildcardSubdomains()
   .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
-  });
+    });
 
     // Development policy - allows all origins (for testing)
     options.AddPolicy("DevelopmentPolicy", policy =>
     {
-      policy.AllowAnyOrigin()
-          .AllowAnyMethod()
-   .AllowAnyHeader();
+        policy.AllowAnyOrigin()
+            .AllowAnyMethod()
+     .AllowAnyHeader();
     });
 
     // Production policy - restricted origins for security
     options.AddPolicy("ProductionPolicy", policy =>
     {
- var allowedOrigins = new List<string>();
+        var allowedOrigins = new List<string>();
 
         // Get allowed origins from environment variables
         var envOrigins = Environment.GetEnvironmentVariable("CORS__AllowedOrigins")
  ?? builder.Configuration["CORS:AllowedOrigins"];
 
-   if (!string.IsNullOrEmpty(envOrigins))
+        if (!string.IsNullOrEmpty(envOrigins))
         {
-      allowedOrigins.AddRange(envOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
-          .Select(origin => origin.Trim()));
+            allowedOrigins.AddRange(envOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(origin => origin.Trim()));
         }
 
         // Default allowed origins for common frontend frameworks + Vercel
-    if (allowedOrigins.Count == 0)
-      {
- allowedOrigins.AddRange(new[]
-     {
+        if (allowedOrigins.Count == 0)
+        {
+            allowedOrigins.AddRange(new[]
+                {
          "https://dsecure-frontend.vercel.app",
           "http://localhost:3000",
     "http://localhost:3001",
@@ -178,47 +178,47 @@ builder.Services.AddCors(options =>
         var strictOrigins = Environment.GetEnvironmentVariable("CORS__StrictOrigins")
       ?? builder.Configuration["CORS:StrictOrigins"];
 
-  if (!string.IsNullOrEmpty(strictOrigins))
+        if (!string.IsNullOrEmpty(strictOrigins))
         {
-       var origins = strictOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
-     .Select(origin => origin.Trim())
-        .ToArray();
+            var origins = strictOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries)
+          .Select(origin => origin.Trim())
+             .ToArray();
 
-  policy.WithOrigins(origins)
-         .WithMethods("GET", "POST", "PUT", "DELETE")
-        .WithHeaders("Authorization", "Content-Type")
-  .AllowCredentials();
+            policy.WithOrigins(origins)
+                   .WithMethods("GET", "POST", "PUT", "DELETE")
+                  .WithHeaders("Authorization", "Content-Type")
+            .AllowCredentials();
         }
         else
         {
             // Default to localhost + Vercel if no strict origins specified
-    policy.WithOrigins(
-   "http://localhost:3000", 
- "https://localhost:3000", 
-         "https://dsecure-frontend.vercel.app",
- "https://dsecuretech.com"
-                )
-          .WithMethods("GET", "POST", "PUT", "DELETE","PATCH")
-       .WithHeaders("Authorization", "Content-Type")
-        .AllowCredentials();
-  }
+            policy.WithOrigins(
+           "http://localhost:3000",
+         "https://localhost:3000",
+                 "https://dsecure-frontend.vercel.app",
+         "https://dsecuretech.com"
+                        )
+                  .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH")
+               .WithHeaders("Authorization", "Content-Type")
+                .AllowCredentials();
+        }
     });
 });
 
 // Configure database with enhanced options
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
-    options.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 21)), 
-        mysqlOptions =>
-    {
+    options.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 21)),
+            mysqlOptions =>
+        {
             mysqlOptions.EnableRetryOnFailure(
       maxRetryCount: 3,
     maxRetryDelay: TimeSpan.FromSeconds(10),
     errorNumbersToAdd: null);
-       
+
             mysqlOptions.CommandTimeout(30);
         });
-    
+
     // Enhanced logging and performance options
     if (builder.Environment.IsDevelopment())
     {
@@ -236,46 +236,46 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
-     {
-        ValidateIssuer = true,
-   ValidateAudience = true,
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
             ValidateLifetime = true,
             ValidateIssuerSigningKey = true,
-     ValidIssuer = jwtIssuer,
-    ValidAudience = jwtAudience,
-   IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-      ClockSkew = TimeSpan.Zero,
-         RequireExpirationTime = true,
-        RequireSignedTokens = true
- };
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ClockSkew = TimeSpan.Zero,
+            RequireExpirationTime = true,
+            RequireSignedTokens = true
+        };
 
         options.Events = new JwtBearerEvents
         {
             OnAuthenticationFailed = context =>
        {
-             if (builder.Environment.IsDevelopment())
-    {
-                    Console.WriteLine($"🔒 JWT Authentication failed: {context.Exception.Message}");
-   }
-return Task.CompletedTask;
-     },
-   OnTokenValidated = context =>
- {
-          if (builder.Environment.IsDevelopment())
-         {
-        Console.WriteLine($"🔒 JWT Token validated for: {context.Principal?.Identity?.Name}");
-       }
-     return Task.CompletedTask;
+           if (builder.Environment.IsDevelopment())
+           {
+               Console.WriteLine($"🔒 JWT Authentication failed: {context.Exception.Message}");
+           }
+           return Task.CompletedTask;
        },
+            OnTokenValidated = context =>
+          {
+              if (builder.Environment.IsDevelopment())
+              {
+                  Console.WriteLine($"🔒 JWT Token validated for: {context.Principal?.Identity?.Name}");
+              }
+              return Task.CompletedTask;
+          },
             OnChallenge = context =>
    {
-                if (builder.Environment.IsDevelopment())
-    {
-   Console.WriteLine($"🔒 JWT Challenge: {context.Error} - {context.ErrorDescription}");
-         }
-                return Task.CompletedTask;
-        }
-};
+       if (builder.Environment.IsDevelopment())
+       {
+           Console.WriteLine($"🔒 JWT Challenge: {context.Error} - {context.ErrorDescription}");
+       }
+       return Task.CompletedTask;
+   }
+        };
     });
 
 // Enhanced Authorization with policies
@@ -284,20 +284,20 @@ builder.Services.AddAuthorization(options =>
     // Define custom policies for different permission levels
     options.AddPolicy("SuperAdminOnly", policy =>
         policy.RequireRole("SuperAdmin"));
-    
+
     options.AddPolicy("AdminOrAbove", policy =>
    policy.RequireRole("SuperAdmin", "Admin"));
-    
+
     options.AddPolicy("ManagerOrAbove", policy =>
         policy.RequireRole("SuperAdmin", "Admin", "Manager"));
-    
+
     options.AddPolicy("SupportOrAbove", policy =>
   policy.RequireRole("SuperAdmin", "Admin", "Manager", "Support"));
 
     // Add permission-based policies
     options.AddPolicy("CanManageUsers", policy =>
    policy.RequireClaim("permission", "UserManagement", "FullAccess"));
-    
+
     options.AddPolicy("CanViewReports", policy =>
         policy.RequireClaim("permission", "ReportAccess", "FullAccess"));
 });
@@ -338,7 +338,7 @@ builder.Services.AddScoped<IDatabaseContextFactory, DatabaseContextFactory>();
 // ✅ HYBRID MULTI-TENANT SUPPORT - Automatic tenant routing
 builder.Services.AddHttpContextAccessor();  // Required for reading JWT claims
 builder.Services.AddScoped<ITenantConnectionService, TenantConnectionService>();
-builder.Services.AddScoped< DynamicDbContextFactory>();
+builder.Services.AddScoped<DynamicDbContextFactory>();
 
 // Add memory cache
 builder.Services.AddMemoryCache();
@@ -354,11 +354,11 @@ builder.Services.AddControllers()
     options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
     options.JsonSerializerOptions.WriteIndented = builder.Environment.IsDevelopment();
     options.JsonSerializerOptions.PropertyNameCaseInsensitive = true;
-    
+
     // ✅ ADD: Custom DateTime converters for ISO 8601 format with UTC
- options.JsonSerializerOptions.Converters.Add(new Iso8601DateTimeConverter());
+    options.JsonSerializerOptions.Converters.Add(new Iso8601DateTimeConverter());
     options.JsonSerializerOptions.Converters.Add(new Iso8601NullableDateTimeConverter());
-    
+
     // Add enum converter
     options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
 });
@@ -371,17 +371,17 @@ builder.Services.AddSwaggerGen(c =>
     c.SwaggerDoc("v1", new OpenApiInfo
     {
         Title = "DSecure API Project",
- Version = "v2.0",
-     Description = "Enhanced API for managing devices, users, licenses, and PDF reports with advanced Role-Based Access Control",
+        Version = "v2.0",
+        Description = "Enhanced API for managing devices, users, licenses, and PDF reports with advanced Role-Based Access Control",
         Contact = new OpenApiContact
         {
- Name = "Dhruv Rai",
-      Email = "Dhruv.rai@stellarinfo.com",
+            Name = "Dhruv Rai",
+            Email = "Dhruv.rai@stellarinfo.com",
         },
         License = new OpenApiLicense
         {
             Name = "MIT License",
-    Url = new Uri("https://opensource.org/licenses/MIT")
+            Url = new Uri("https://opensource.org/licenses/MIT")
         }
     });
 
@@ -389,22 +389,22 @@ builder.Services.AddSwaggerGen(c =>
     try
     {
         var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
- var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+        var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
         if (File.Exists(xmlPath))
         {
             c.IncludeXmlComments(xmlPath);
-   }
+        }
     }
     catch (Exception ex)
     {
-  Console.WriteLine($"⚠️ Could not load XML documentation: {ex.Message}");
+        Console.WriteLine($"⚠️ Could not load XML documentation: {ex.Message}");
     }
 
     // Enhanced schema configuration
     c.CustomSchemaIds(type =>
     {
         if (type.FullName != null)
-      {
+        {
             return type.FullName.Replace("+", ".");
         }
         return type.Name;
@@ -412,17 +412,24 @@ builder.Services.AddSwaggerGen(c =>
 
     c.SupportNonNullableReferenceTypes();
     c.OperationFilter<SwaggerDefaultValues>();
-    
+
     // ✅ NEW: Add X-No-Encryption header parameter to all endpoints
     c.OperationFilter<NoEncryptionHeaderOperationFilter>();
+
+    // ❌ BASE64 EMAIL ENCODING FILTERS - DISABLED FOR SWAGGER UI
+    // Backend still handles Base64 encoding/decoding automatically
+    // Swagger UI shows normal emails for better user experience
+    // c.ParameterFilter<BitRaserApiProject.Filters.Base64EmailParameterFilter>();
+    // c.OperationFilter<BitRaserApiProject.Filters.Base64EmailOperationFilter>();
+    // c.DocumentFilter<BitRaserApiProject.Filters.Base64EmailDocumentFilter>();
 
     // Enhanced security definitions
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Description = "JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\"",
         Name = "Authorization",
-    In = ParameterLocation.Header,
-   Type = SecuritySchemeType.ApiKey,
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey,
         Scheme = "Bearer",
         BearerFormat = "JWT"
     });
@@ -470,7 +477,7 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
         options.DefaultModelsExpandDepth(-1);
         options.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.None);
         options.EnableTryItOutByDefault();
-        
+
         // Inject JavaScript for automatic token clearing after logout
         options.HeadContent = @"
             <script>
@@ -557,14 +564,16 @@ app.Use(async (context, next) =>
     context.Response.Headers["X-Frame-Options"] = "DENY";
     context.Response.Headers["X-XSS-Protection"] = "1; mode=block";
     context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-    
-  if (!app.Environment.IsDevelopment())
+
+    if (!app.Environment.IsDevelopment())
     {
         context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
     }
-    
+
     await next();
 });
+
+app.UseEmailSecurity();
 
 app.UseHttpsRedirection();
 app.UseAuthentication();
@@ -592,16 +601,16 @@ if (app.Environment.IsDevelopment())
 {
     app.Use(async (context, next) =>
     {
-   var logger = app.Services.GetRequiredService<ILogger<Program>>();
-        logger.LogDebug("📡 {Method} {Path} - {Time}", 
-     context.Request.Method, 
-            context.Request.Path, 
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogDebug("📡 {Method} {Path} - {Time}",
+     context.Request.Method,
+            context.Request.Path,
             DateTime.Now.ToString("HH:mm:ss"));
-        
+
         await next();
- 
-        logger.LogDebug("📡 Response: {StatusCode} - {Time}", 
-  context.Response.StatusCode, 
+
+        logger.LogDebug("📡 Response: {StatusCode} - {Time}",
+  context.Response.StatusCode,
      DateTime.Now.ToString("HH:mm:ss"));
     });
 }
@@ -626,3 +635,6 @@ catch (Exception ex)
     appLogger.LogCritical(ex, "❌ Application terminated unexpectedly: {Message}", ex.Message);
     throw;
 }
+
+// Program.cs (add BEFORE app.UseRouting())
+

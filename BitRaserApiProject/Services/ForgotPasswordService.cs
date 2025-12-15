@@ -5,6 +5,7 @@ using BitRaserApiProject.Models.DTOs;
 using BitRaserApiProject.Repositories;
 using BitRaserApiProject.Helpers;  // ✅ ADD: For DateTimeHelper
 using Microsoft.EntityFrameworkCore;
+using MySql.Data.MySqlClient;  // ✅ ADD: For MySQL connection
 
 namespace BitRaserApiProject.Services
 {
@@ -28,17 +29,20 @@ namespace BitRaserApiProject.Services
         private readonly IForgotPasswordRepository _repository;
         private readonly ILogger<ForgotPasswordService> _logger;
         private readonly IConfiguration _configuration;
+        private readonly ITenantConnectionService _tenantService;  // ✅ ADD: For Private Cloud DB access
 
         public ForgotPasswordService(
             ApplicationDbContext context,
             IForgotPasswordRepository repository,
             ILogger<ForgotPasswordService> logger,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            ITenantConnectionService tenantService)  // ✅ ADD: Inject tenant service
         {
             _context = context;
             _repository = repository;
             _logger = logger;
             _configuration = configuration;
+            _tenantService = tenantService;  // ✅ ADD: Initialize tenant service
         }
 
         /// <summary>
@@ -52,19 +56,81 @@ namespace BitRaserApiProject.Services
         {
             try
             {
-                // Step 1: Verify email exists in users or subusers table
+                // ✅ Step 1: Check Main DB first
                 var user = await _context.Users
                     .FirstOrDefaultAsync(u => u.user_email == dto.Email);
 
                 var subuser = await _context.subuser
                     .FirstOrDefaultAsync(s => s.subuser_email == dto.Email);
 
+                bool isPrivateCloudUser = false;
+                string? parentUserEmail = null;
+
+                // ✅ Step 2: If not found in Main DB, check Private Cloud databases
+                if (user == null && subuser == null)
+                {
+                    _logger.LogInformation("🔍 User not in Main DB, checking Private Cloud databases for {Email}", dto.Email);
+
+                    // Get all Private Cloud users
+                    var privateCloudUsers = await _context.Users
+                        .Where(u => u.is_private_cloud == true)
+                        .Select(u => new { u.user_email, u.user_id })
+                        .ToListAsync();
+
+                    foreach (var pcUser in privateCloudUsers)
+                    {
+                        try
+                        {
+                            var connectionString = await _tenantService.GetConnectionStringForUserAsync(pcUser.user_email);
+                            var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
+
+                            if (connectionString == mainConnectionString)
+                                continue;
+
+                            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                            optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+
+                            using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+                            privateContext.Database.SetCommandTimeout(10);
+
+                            // Check for user
+                            user = await privateContext.Users
+                                .FirstOrDefaultAsync(u => u.user_email == dto.Email);
+
+                            if (user == null)
+                            {
+                                // Check for subuser
+                                subuser = await privateContext.subuser
+                                    .FirstOrDefaultAsync(s => s.subuser_email == dto.Email);
+
+                                if (subuser != null)
+                                {
+                                    isPrivateCloudUser = true;
+                                    parentUserEmail = pcUser.user_email;
+                                    _logger.LogInformation("✅ Found subuser in Private Cloud DB of {Parent}", pcUser.user_email);
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                isPrivateCloudUser = true;
+                                parentUserEmail = pcUser.user_email;
+                                _logger.LogInformation("✅ Found user in Private Cloud DB");
+                                break;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "⚠️ Failed to check Private Cloud DB for {Email}", pcUser.user_email);
+                        }
+                    }
+                }
+
+                // Step 3: If still not found, return error
                 if (user == null && subuser == null)
                 {
                     _logger.LogWarning("Password reset requested for non-existent email: {Email}", dto.Email);
 
-                    // ⚠️ Security: Don't reveal if email exists
-                    // But for testing, we'll be more explicit
                     return new ForgotPasswordResponseDto
                     {
                         Success = false,
@@ -162,12 +228,72 @@ namespace BitRaserApiProject.Services
             {
                 _logger.LogInformation("🔄 Resend OTP requested for {Email}", dto.Email);
 
-                // Step 1: Verify email exists
+                // ✅ Step 1: Check Main DB first
                 var user = await _context.Users
                     .FirstOrDefaultAsync(u => u.user_email == dto.Email);
 
                 var subuser = await _context.subuser
                     .FirstOrDefaultAsync(s => s.subuser_email == dto.Email);
+
+                bool isPrivateCloudUser = false;
+                string? parentUserEmail = null;
+
+                // ✅ Step 2: If not found in Main DB, check Private Cloud databases
+                if (user == null && subuser == null)
+                {
+                    _logger.LogInformation("🔍 User not in Main DB, checking Private Cloud databases for {Email}", dto.Email);
+
+                    var privateCloudUsers = await _context.Users
+                        .Where(u => u.is_private_cloud == true)
+                        .Select(u => new { u.user_email, u.user_id })
+                        .ToListAsync();
+
+                    foreach (var pcUser in privateCloudUsers)
+                    {
+                        try
+                        {
+                            var connectionString = await _tenantService.GetConnectionStringForUserAsync(pcUser.user_email);
+                            var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
+
+                            if (connectionString == mainConnectionString)
+                                continue;
+
+                            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                            optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+
+                            using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+                            privateContext.Database.SetCommandTimeout(10);
+
+                            user = await privateContext.Users
+                                .FirstOrDefaultAsync(u => u.user_email == dto.Email);
+
+                            if (user == null)
+                            {
+                                subuser = await privateContext.subuser
+                                    .FirstOrDefaultAsync(s => s.subuser_email == dto.Email);
+
+                                if (subuser != null)
+                                {
+                                    isPrivateCloudUser = true;
+                                    parentUserEmail = pcUser.user_email;
+                                    _logger.LogInformation("✅ Found subuser in Private Cloud DB of {Parent}", pcUser.user_email);
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                isPrivateCloudUser = true;
+                                parentUserEmail = pcUser.user_email;
+                                _logger.LogInformation("✅ Found user in Private Cloud DB");
+                                break;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "⚠️ Failed to check Private Cloud DB for {Email}", pcUser.user_email);
+                        }
+                    }
+                }
 
                 if (user == null && subuser == null)
                 {
@@ -376,12 +502,81 @@ namespace BitRaserApiProject.Services
                     };
                 }
 
-                // Step 3: Find user or subuser
+                // Step 3: Find user or subuser (check Main DB first, then Private Cloud)
                 var user = await _context.Users
                     .FirstOrDefaultAsync(u => u.user_email == dto.Email);
 
                 var subuser = await _context.subuser
                     .FirstOrDefaultAsync(s => s.subuser_email == dto.Email);
+
+                bool isPrivateCloudUser = false;
+                string? parentUserEmail = null;
+                ApplicationDbContext? privateContext = null;
+
+                // ✅ If not in Main DB, check Private Cloud databases
+                if (user == null && subuser == null)
+                {
+                    _logger.LogInformation("🔍 User not in Main DB, checking Private Cloud for password reset: {Email}", dto.Email);
+
+                    var privateCloudUsers = await _context.Users
+                        .Where(u => u.is_private_cloud == true)
+                        .Select(u => new { u.user_email, u.user_id })
+                        .ToListAsync();
+
+                    foreach (var pcUser in privateCloudUsers)
+                    {
+                        try
+                        {
+                            var connectionString = await _tenantService.GetConnectionStringForUserAsync(pcUser.user_email);
+                            var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
+
+                            if (connectionString == mainConnectionString)
+                                continue;
+
+                            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                            optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+
+                            var tempContext = new ApplicationDbContext(optionsBuilder.Options);
+                            tempContext.Database.SetCommandTimeout(10);
+
+                            user = await tempContext.Users
+                                .FirstOrDefaultAsync(u => u.user_email == dto.Email);
+
+                            if (user == null)
+                            {
+                                subuser = await tempContext.subuser
+                                    .FirstOrDefaultAsync(s => s.subuser_email == dto.Email);
+
+                                if (subuser != null)
+                                {
+                                    isPrivateCloudUser = true;
+                                    parentUserEmail = pcUser.user_email;
+                                    privateContext = tempContext;
+                                    _logger.LogInformation("✅ Found subuser in Private Cloud DB for password reset");
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                isPrivateCloudUser = true;
+                                parentUserEmail = pcUser.user_email;
+                                privateContext = tempContext;
+                                _logger.LogInformation("✅ Found user in Private Cloud DB for password reset");
+                                break;
+                            }
+
+                            // If not found, dispose temp context
+                            if (!isPrivateCloudUser)
+                            {
+                                await tempContext.DisposeAsync();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "⚠️ Failed to check Private Cloud DB for {Email}", pcUser.user_email);
+                        }
+                    }
+                }
 
                 if (user == null && subuser == null)
                 {
@@ -396,22 +591,46 @@ namespace BitRaserApiProject.Services
                 // Step 4: Hash new password using BCrypt
                 string hashedPassword = BCrypt.Net.BCrypt.HashPassword(dto.NewPassword);
 
-                // ✅ Step 5: Update password with DateTimeHelper
+                // ✅ Step 5: Update password in correct database
                 if (user != null)
                 {
                     user.user_password = dto.NewPassword;  // Plain text (as per your current schema)
                     user.hash_password = hashedPassword;  // BCrypt hashed
-                    user.updated_at = DateTimeHelper.GetUtcNow();  // ✅ Use DateTimeHelper
-                    _context.Entry(user).State = EntityState.Modified;
+                    user.updated_at = DateTimeHelper.GetUtcNow();
+
+                    if (isPrivateCloudUser && privateContext != null)
+                    {
+                        privateContext.Entry(user).State = EntityState.Modified;
+                        await privateContext.SaveChangesAsync();
+                        await privateContext.DisposeAsync();
+                        _logger.LogInformation("✅ Password updated in Private Cloud DB for user {Email}", dto.Email);
+                    }
+                    else
+                    {
+                        _context.Entry(user).State = EntityState.Modified;
+                        await _context.SaveChangesAsync();
+                        _logger.LogInformation("✅ Password updated in Main DB for user {Email}", dto.Email);
+                    }
                 }
                 else
                 {
                     subuser!.subuser_password = hashedPassword;  // BCrypt hashed
-                    subuser.UpdatedAt = DateTimeHelper.GetUtcNow();  // ✅ Use DateTimeHelper
-                    _context.Entry(subuser).State = EntityState.Modified;
-                }
+                    subuser.UpdatedAt = DateTimeHelper.GetUtcNow();
 
-                await _context.SaveChangesAsync();
+                    if (isPrivateCloudUser && privateContext != null)
+                    {
+                        privateContext.Entry(subuser).State = EntityState.Modified;
+                        await privateContext.SaveChangesAsync();
+                        await privateContext.DisposeAsync();
+                        _logger.LogInformation("✅ Password updated in Private Cloud DB for subuser {Email}", dto.Email);
+                    }
+                    else
+                    {
+                        _context.Entry(subuser).State = EntityState.Modified;
+                        await _context.SaveChangesAsync();
+                        _logger.LogInformation("✅ Password updated in Main DB for subuser {Email}", dto.Email);
+                    }
+                }
 
                 // Step 6: Mark request as used
                 request.IsUsed = true;

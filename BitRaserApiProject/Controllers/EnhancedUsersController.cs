@@ -22,7 +22,7 @@ namespace BitRaserApiProject.Controllers
         private readonly IUserDataService _userDataService;
 
         public EnhancedUsersController(
-            ApplicationDbContext context, 
+            ApplicationDbContext context,
             IRoleBasedAuthService authService,
             IUserDataService userDataService)
         {
@@ -36,144 +36,147 @@ namespace BitRaserApiProject.Controllers
         /// </summary>
         [HttpGet]
         [RequirePermission("READ_ALL_USERS")]
-     public async Task<ActionResult<IEnumerable<object>>> GetUsers([FromQuery] UserFilterRequest? filter)
+        public async Task<ActionResult<IEnumerable<object>>> GetUsers([FromQuery] UserFilterRequest? filter)
         {
-   var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-   
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
             IQueryable<users> query = _context.Users;
 
- // ✅ HIERARCHICAL FILTERING: Apply role-based access control
-     if (await _authService.IsSuperAdminAsync(currentUserEmail!, false))
-      {
-     // SuperAdmin sees all users - no filtering
-     }
-     else if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_USERS"))
-  {
-    // Has READ_ALL_USERS permission - can see manageable users
-     var managedUserEmails = await _authService.GetManagedUserEmailsAsync(currentUserEmail!);
-   
-       // Filter to only show users at lower hierarchy level
-  query = query.Where(u => managedUserEmails.Contains(u.user_email) || u.user_email == currentUserEmail);
-   }
-      else if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_MANAGED_USERS"))
-   {
-     // Get users this person can manage
-      var managedUserEmails = await _authService.GetManagedUserEmailsAsync(currentUserEmail!);
-    query = query.Where(u => managedUserEmails.Contains(u.user_email));
- }
-  else
-       {
-    // Only show own profile
-     query = query.Where(u => u.user_email == currentUserEmail);
-  }
+            // ✅ HIERARCHICAL FILTERING: Apply role-based access control
+            if (await _authService.IsSuperAdminAsync(currentUserEmail!, false))
+            {
+                // SuperAdmin sees all users - no filtering
+            }
+            else if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_USERS"))
+            {
+                // Has READ_ALL_USERS permission - can see manageable users
+                var managedUserEmails = await _authService.GetManagedUserEmailsAsync(currentUserEmail!);
+
+                // Filter to only show users at lower hierarchy level
+                query = query.Where(u => managedUserEmails.Contains(u.user_email) || u.user_email == currentUserEmail);
+            }
+            else if (await _authService.HasPermissionAsync(currentUserEmail!, "READ_MANAGED_USERS"))
+            {
+                // Get users this person can manage
+                var managedUserEmails = await _authService.GetManagedUserEmailsAsync(currentUserEmail!);
+                query = query.Where(u => managedUserEmails.Contains(u.user_email));
+            }
+            else
+            {
+                // Only show own profile
+                query = query.Where(u => u.user_email == currentUserEmail);
+            }
 
             // Apply additional filters if provided
-       if (filter != null)
-      {
-     if (!string.IsNullOrEmpty(filter.UserEmail))
-    query = query.Where(u => u.user_email.Contains(filter.UserEmail));
+            if (filter != null)
+            {
+                if (!string.IsNullOrEmpty(filter.UserEmail))
+                    query = query.Where(u => u.user_email.Contains(filter.UserEmail));
 
-         if (!string.IsNullOrEmpty(filter.UserName))
-   query = query.Where(u => u.user_name.Contains(filter.UserName));
+                if (!string.IsNullOrEmpty(filter.UserName))
+                    query = query.Where(u => u.user_name.Contains(filter.UserName));
 
-     if (!string.IsNullOrEmpty(filter.PhoneNumber))
-           query = query.Where(u => u.phone_number != null && u.phone_number.Contains(filter.PhoneNumber));
+                if (!string.IsNullOrEmpty(filter.PhoneNumber))
+                    query = query.Where(u => u.phone_number != null && u.phone_number.Contains(filter.PhoneNumber));
 
-       // NEW FIELD FILTERS
-     if (!string.IsNullOrEmpty(filter.Department))
-    query = query.Where(u => u.department != null && u.department.Contains(filter.Department));
+                // NEW FIELD FILTERS
+                if (!string.IsNullOrEmpty(filter.Department))
+                    query = query.Where(u => u.department != null && u.department.Contains(filter.Department));
 
-          if (!string.IsNullOrEmpty(filter.UserGroup))
-query = query.Where(u => u.user_group != null && u.user_group.Contains(filter.UserGroup));
+                if (!string.IsNullOrEmpty(filter.UserGroup))
+                    query = query.Where(u => u.user_group != null && u.user_group.Contains(filter.UserGroup));
 
-     if (!string.IsNullOrEmpty(filter.UserRole))
- query = query.Where(u => u.user_role != null && u.user_role.Contains(filter.UserRole));
+                if (!string.IsNullOrEmpty(filter.UserRole))
+                    query = query.Where(u => u.user_role != null && u.user_role.Contains(filter.UserRole));
 
-   if (!string.IsNullOrEmpty(filter.Status))
-      query = query.Where(u => u.status == filter.Status);
+                if (!string.IsNullOrEmpty(filter.Status))
+                    query = query.Where(u => u.status == filter.Status);
 
-        if (filter.MinLicenseAllocation.HasValue)
-     query = query.Where(u => u.license_allocation >= filter.MinLicenseAllocation.Value);
+                if (filter.MinLicenseAllocation.HasValue)
+                    query = query.Where(u => u.license_allocation >= filter.MinLicenseAllocation.Value);
 
-     if (filter.MaxLicenseAllocation.HasValue)
-       query = query.Where(u => u.license_allocation <= filter.MaxLicenseAllocation.Value);
+                if (filter.MaxLicenseAllocation.HasValue)
+                    query = query.Where(u => u.license_allocation <= filter.MaxLicenseAllocation.Value);
 
-    if (filter.LastLoginFrom.HasValue)
-         query = query.Where(u => u.last_login >= filter.LastLoginFrom.Value);
+                if (filter.LastLoginFrom.HasValue)
+                    query = query.Where(u => u.last_login >= filter.LastLoginFrom.Value);
 
-         if (filter.LastLoginTo.HasValue)
-      query = query.Where(u => u.last_login <= filter.LastLoginTo.Value);
+                if (filter.LastLoginTo.HasValue)
+                    query = query.Where(u => u.last_login <= filter.LastLoginTo.Value);
 
-    // EXISTING FILTERS
-       if (filter.CreatedFrom.HasValue)
-      query = query.Where(u => u.created_at >= filter.CreatedFrom.Value);
+                // EXISTING FILTERS
+                if (filter.CreatedFrom.HasValue)
+                    query = query.Where(u => u.created_at >= filter.CreatedFrom.Value);
 
-        if (filter.CreatedTo.HasValue)
-   query = query.Where(u => u.created_at <= filter.CreatedTo.Value);
+                if (filter.CreatedTo.HasValue)
+                    query = query.Where(u => u.created_at <= filter.CreatedTo.Value);
 
-   if (filter.HasLicenses.HasValue)
-  {
-    if (filter.HasLicenses.Value)
-    query = query.Where(u => !string.IsNullOrEmpty(u.license_details_json) && u.license_details_json != "{}");
-          else
-        query = query.Where(u => string.IsNullOrEmpty(u.license_details_json) || u.license_details_json == "{}");
-      }
-  }
+                if (filter.HasLicenses.HasValue)
+                {
+                    if (filter.HasLicenses.Value)
+                        query = query.Where(u => !string.IsNullOrEmpty(u.license_details_json) && u.license_details_json != "{}");
+                    else
+                        query = query.Where(u => string.IsNullOrEmpty(u.license_details_json) || u.license_details_json == "{}");
+                }
+            }
 
-       var users = await query
-     .Include(u => u.UserRoles)
-     .ThenInclude(ur => ur.Role)
-  .OrderByDescending(u => u.created_at)
-        .Take(filter?.PageSize ?? 100)
-     .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-    .Select(u => new {
-      userEmail = u.user_email,
-     userName = u.user_name,
-         phoneNumber = u.phone_number,
-     // NEW FIELDS
-       department = u.department,
-   userGroup = u.user_group,
-   lastLogin = u.last_login,
-       userRole = u.user_role,
-    licenseAllocation = u.license_allocation,
-    status = u.status,
-         // EXISTING FIELDS
-    createdAt = u.created_at,
-    updatedAt = u.updated_at,
- roles = u.UserRoles.Select(ur => ur.Role.RoleName).ToList(),
-    hasLicenses = !string.IsNullOrEmpty(u.license_details_json) && u.license_details_json != "{}",
-           hasPaymentDetails = !string.IsNullOrEmpty(u.payment_details_json) && u.payment_details_json != "{}"
- })
-     .ToListAsync();
+            var users = await query
+          .Include(u => u.UserRoles)
+          .ThenInclude(ur => ur.Role)
+       .OrderByDescending(u => u.created_at)
+             .Take(filter?.PageSize ?? 100)
+          .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+         .Select(u => new
+         {
+             userEmail = u.user_email,
+             userName = u.user_name,
+             phoneNumber = u.phone_number,
+             // NEW FIELDS
+             department = u.department,
+             userGroup = u.user_group,
+             lastLogin = u.last_login,
+             userRole = u.user_role,
+             licenseAllocation = u.license_allocation,
+             status = u.status,
+             // EXISTING FIELDS
+             createdAt = u.created_at,
+             updatedAt = u.updated_at,
+             roles = u.UserRoles.Select(ur => ur.Role.RoleName).ToList(),
+             hasLicenses = !string.IsNullOrEmpty(u.license_details_json) && u.license_details_json != "{}",
+             hasPaymentDetails = !string.IsNullOrEmpty(u.payment_details_json) && u.payment_details_json != "{}"
+         })
+          .ToListAsync();
 
-        return Ok(users);
-     }
+            return Ok(users);
+        }
 
         /// <summary>
         /// Get user by email with comprehensive details
         /// </summary>
         [HttpGet("{email}")]
+        [DecodeEmail]
         [RequirePermission("READ_USER")]
         public async Task<ActionResult<object>> GetUser(string email)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
+
             var user = await _context.Users
                 .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
                 .ThenInclude(r => r.RolePermissions)
                 .ThenInclude(rp => rp.Permission)
                 .FirstOrDefaultAsync(u => u.user_email == email);
-            
+
             if (user == null) return NotFound($"User with email {email} not found");
 
             // Check if user can view this profile
             if (email != currentUserEmail && !await CanManageUserAsync(currentUserEmail!, email))
             {
-                return StatusCode(403,new { error = "You can only view your own profile or profiles you manage" });
+                return StatusCode(403, new { error = "You can only view your own profile or profiles you manage" });
             }
 
-            var userDetails = new {
+            var userDetails = new
+            {
                 userEmail = user.user_email,
                 userName = user.user_name,
                 phoneNumber = user.phone_number,
@@ -187,7 +190,8 @@ query = query.Where(u => u.user_group != null && u.user_group.Contains(filter.Us
                 // EXISTING FIELDS
                 createdAt = user.created_at,
                 updatedAt = user.updated_at,
-                roles = user.UserRoles.Select(ur => new {
+                roles = user.UserRoles.Select(ur => new
+                {
                     roleName = ur.Role.RoleName,
                     description = ur.Role.Description,
                     hierarchyLevel = ur.Role.HierarchyLevel,
@@ -212,79 +216,81 @@ query = query.Where(u => u.user_group != null && u.user_group.Contains(filter.Us
         [HttpPost]
         [RequirePermission("CREATE_USER")]
         public async Task<ActionResult<object>> CreateUser([FromBody] UserCreateRequest request)
-     {
-    var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-   
+        {
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
             if (!await _authService.HasPermissionAsync(currentUserEmail!, "CREATE_USER"))
-     return StatusCode(403,new { error = "Insufficient permissions to create users" });
+                return StatusCode(403, new { error = "Insufficient permissions to create users" });
 
-        // Validate input
-     if (string.IsNullOrEmpty(request.UserEmail) || string.IsNullOrEmpty(request.UserName) || string.IsNullOrEmpty(request.Password))
-  return BadRequest("User email, name, and password are required");
+            // Validate input
+            if (string.IsNullOrEmpty(request.UserEmail) || string.IsNullOrEmpty(request.UserName) || string.IsNullOrEmpty(request.Password))
+                return BadRequest("User email, name, and password are required");
 
-   // Check if user already exists
-     var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.UserEmail);
-     if (existingUser != null)
-       return Conflict($"User with email {request.UserEmail} already exists");
+            // Check if user already exists
+            var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.UserEmail);
+            if (existingUser != null)
+                return Conflict($"User with email {request.UserEmail} already exists");
 
-       // ✅ VALIDATE: Role assignment hierarchy
+            // ✅ VALIDATE: Role assignment hierarchy
             var roleToAssign = request.DefaultRole ?? "SuperAdmin";
-   
-       // ✅ CHECK: Can current user assign this role?
-   if (!await _authService.CanAssignRoleAsync(currentUserEmail!, roleToAssign))
-     {
-       return StatusCode(403, new {
-       success = false,
-         message = $"You cannot create user with role '{roleToAssign}'",
-    detail = "You can only assign roles with lower privilege than your own. Admins cannot create SuperAdmin users."
-       });
-   }
 
-    // Create user with both plain text and hashed password
-     var newUser = new users
+            // ✅ CHECK: Can current user assign this role?
+            if (!await _authService.CanAssignRoleAsync(currentUserEmail!, roleToAssign))
             {
-       user_email = request.UserEmail,
-   user_name = request.UserName,
-       user_password = request.Password,  // Plain text
-         hash_password = BCrypt.Net.BCrypt.HashPassword(request.Password),  // Hashed
-      phone_number = request.PhoneNumber ?? "",
-       // NEW FIELDS - All optional, use provided values or null
-    department = request.Department,
-   user_group = request.UserGroup,
- last_login = null, // Will be set on first login
-       user_role = request.UserRole,
-license_allocation = request.LicenseAllocation,
-    status = request.Status ?? "active", // Default to "active" if not provided
-     // EXISTING FIELDS
-       payment_details_json = request.PaymentDetailsJson ?? "{}",
-     license_details_json = request.LicenseDetailsJson ?? "{}",
-    created_at = DateTime.UtcNow,
-     updated_at = DateTime.UtcNow
-  };
+                return StatusCode(403, new
+                {
+                    success = false,
+                    message = $"You cannot create user with role '{roleToAssign}'",
+                    detail = "You can only assign roles with lower privilege than your own. Admins cannot create SuperAdmin users."
+                });
+            }
 
-       _context.Users.Add(newUser);
-  await _context.SaveChangesAsync();
+            // Create user with both plain text and hashed password
+            var newUser = new users
+            {
+                user_email = request.UserEmail,
+                user_name = request.UserName,
+                user_password = request.Password,  // Plain text
+                hash_password = BCrypt.Net.BCrypt.HashPassword(request.Password),  // Hashed
+                phone_number = request.PhoneNumber ?? "",
+                // NEW FIELDS - All optional, use provided values or null
+                department = request.Department,
+                user_group = request.UserGroup,
+                last_login = null, // Will be set on first login
+                user_role = request.UserRole,
+                license_allocation = request.LicenseAllocation,
+                status = request.Status ?? "active", // Default to "active" if not provided
+                                                     // EXISTING FIELDS
+                payment_details_json = request.PaymentDetailsJson ?? "{}",
+                license_details_json = request.LicenseDetailsJson ?? "{}",
+                created_at = DateTime.UtcNow,
+                updated_at = DateTime.UtcNow
+            };
 
-   // ✅ Assign role (already validated above)
-       var roleAssigned = await AssignRoleToUserAsync(request.UserEmail, roleToAssign, currentUserEmail!);
+            _context.Users.Add(newUser);
+            await _context.SaveChangesAsync();
 
-     var response = new {
-  userEmail = newUser.user_email,
-    userName = newUser.user_name,
-              // NEW FIELDS
-       department = newUser.department,
-        userGroup = newUser.user_group,
-      userRole = newUser.user_role,
-       licenseAllocation = newUser.license_allocation,
-      status = newUser.status,
-   // EXISTING FIELDS
- createdAt = newUser.created_at,
- assignedRole = roleToAssign,
-         roleAssignedToRBAC = roleAssigned,
-           message = roleAssigned ? $"User created successfully with {roleToAssign} role assigned to RBAC" : $"User created successfully ({roleToAssign} role assignment to RBAC failed)"
-   };
+            // ✅ Assign role (already validated above)
+            var roleAssigned = await AssignRoleToUserAsync(request.UserEmail, roleToAssign, currentUserEmail!);
 
-       return CreatedAtAction(nameof(GetUser), new { email = newUser.user_email }, response);
+            var response = new
+            {
+                userEmail = newUser.user_email,
+                userName = newUser.user_name,
+                // NEW FIELDS
+                department = newUser.department,
+                userGroup = newUser.user_group,
+                userRole = newUser.user_role,
+                licenseAllocation = newUser.license_allocation,
+                status = newUser.status,
+                // EXISTING FIELDS
+                createdAt = newUser.created_at,
+                assignedRole = roleToAssign,
+                roleAssignedToRBAC = roleAssigned,
+                message = roleAssigned ? $"User created successfully with {roleToAssign} role assigned to RBAC" : $"User created successfully ({roleToAssign} role assignment to RBAC failed)"
+            };
+
+            return CreatedAtAction(nameof(GetUser), new { email = newUser.user_email }, response);
         }
 
         /// <summary>
@@ -336,19 +342,20 @@ license_allocation = request.LicenseAllocation,
             _context.Users.Add(newUser);
             await _context.SaveChangesAsync();
 
-     // ✅ Auto-assign User role for public registration to rolebasedAuth system
-    var roleAssigned = await AssignRoleToUserAsync(request.UserEmail, "User", "system");
+            // ✅ Auto-assign User role for public registration to rolebasedAuth system
+            var roleAssigned = await AssignRoleToUserAsync(request.UserEmail, "User", "system");
 
-       var response = new {
-     userEmail = newUser.user_email,
+            var response = new
+            {
+                userEmail = newUser.user_email,
                 userName = newUser.user_name,
- createdAt = newUser.created_at,
-      assignedRole = "User",
-           roleAssignedToRBAC = roleAssigned,
-        message = roleAssigned ? "User registered successfully with default role" : "User registered successfully (role assignment to RBAC failed)"
-    };
+                createdAt = newUser.created_at,
+                assignedRole = "User",
+                roleAssignedToRBAC = roleAssigned,
+                message = roleAssigned ? "User registered successfully with default role" : "User registered successfully (role assignment to RBAC failed)"
+            };
 
-        return CreatedAtAction(nameof(GetUser), new { email = newUser.user_email }, response);
+            return CreatedAtAction(nameof(GetUser), new { email = newUser.user_email }, response);
         }
 
         /// <summary>
@@ -392,6 +399,7 @@ license_allocation = request.LicenseAllocation,
         /// Update user information by email
         /// </summary>
         [HttpPut("{email}")]
+        [DecodeEmail]
         [RequirePermission("UPDATE_USER")]
         public async Task<IActionResult> UpdateUser(string email, [FromBody] UserUpdateRequest request)
         {
@@ -400,7 +408,7 @@ license_allocation = request.LicenseAllocation,
 
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
-            
+
             if (user == null) return NotFound($"User with email {email} not found");
 
             // Check if user can update this profile
@@ -422,7 +430,7 @@ license_allocation = request.LicenseAllocation,
 
             if (request.UserGroup != null)
                 user.user_group = request.UserGroup;
-   
+
             if (request.UserRole != null)
                 user.user_role = request.UserRole;
 
@@ -444,8 +452,9 @@ license_allocation = request.LicenseAllocation,
             _context.Entry(user).State = EntityState.Modified;
             await _context.SaveChangesAsync();
 
-            return Ok(new { 
-                message = "User updated successfully", 
+            return Ok(new
+            {
+                message = "User updated successfully",
                 userEmail = email,
                 updatedAt = user.updated_at
             });
@@ -455,6 +464,7 @@ license_allocation = request.LicenseAllocation,
         /// Change user password by email
         /// </summary>
         [HttpPatch("{email}/change-password")]
+        [DecodeEmail]
         public async Task<IActionResult> ChangePassword(string email, [FromBody] ChangeUserPasswordRequest request)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -464,7 +474,7 @@ license_allocation = request.LicenseAllocation,
             }
 
             var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
-            if (user == null) 
+            if (user == null)
                 return NotFound(new { message = $"User with email {email} not found" });
 
             // Users can change their own password without permission check
@@ -497,7 +507,7 @@ license_allocation = request.LicenseAllocation,
 
                     // Check both password fields for verification
                     // Priority: hash_password (BCrypt) > user_password (plain text or legacy hash)
-                    
+
                     if (!string.IsNullOrEmpty(user.hash_password))
                     {
                         // Use hash_password field (preferred - BCrypt hashed)
@@ -544,8 +554,9 @@ license_allocation = request.LicenseAllocation,
                 }
                 catch (Exception ex)
                 {
-                    return StatusCode(500, new { 
-                        message = "Error verifying current password", 
+                    return StatusCode(500, new
+                    {
+                        message = "Error verifying current password",
                         error = ex.Message,
                         hint = "Your password may be in an old format. Please contact administrator."
                     });
@@ -557,18 +568,19 @@ license_allocation = request.LicenseAllocation,
             {
                 // Store plain text password in user_password field
                 user.user_password = request.NewPassword;
-                
+
                 // Store BCrypt hashed password in hash_password field
                 user.hash_password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
-                
+
                 // Update timestamp
                 user.updated_at = DateTime.UtcNow;
 
                 _context.Entry(user).State = EntityState.Modified;
                 await _context.SaveChangesAsync();
 
-                return Ok(new { 
-                    message = "Password changed successfully", 
+                return Ok(new
+                {
+                    message = "Password changed successfully",
                     userEmail = email,
                     updatedAt = user.updated_at,
                     passwordUpdated = true,
@@ -577,9 +589,10 @@ license_allocation = request.LicenseAllocation,
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { 
-                    message = "Error changing password", 
-                    error = ex.Message 
+                return StatusCode(500, new
+                {
+                    message = "Error changing password",
+                    error = ex.Message
                 });
             }
         }
@@ -588,6 +601,7 @@ license_allocation = request.LicenseAllocation,
         /// Update user license details by email
         /// </summary>
         [HttpPatch("{email}/update-license")]
+        [DecodeEmail]
         public async Task<IActionResult> UpdateLicense(string email, [FromBody] UpdateLicenseRequest request)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -597,7 +611,7 @@ license_allocation = request.LicenseAllocation,
             }
 
             var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
-            if (user == null) 
+            if (user == null)
                 return NotFound(new { message = $"User with email {email} not found" });
 
             // Users can update their own license, or admins can update others
@@ -627,17 +641,19 @@ license_allocation = request.LicenseAllocation,
                 _context.Entry(user).State = EntityState.Modified;
                 await _context.SaveChangesAsync();
 
-                return Ok(new { 
-                    message = "License details updated successfully", 
+                return Ok(new
+                {
+                    message = "License details updated successfully",
                     userEmail = email,
                     updatedAt = user.updated_at
                 });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { 
-                    message = "Error updating license details", 
-                    error = ex.Message 
+                return StatusCode(500, new
+                {
+                    message = "Error updating license details",
+                    error = ex.Message
                 });
             }
         }
@@ -646,6 +662,7 @@ license_allocation = request.LicenseAllocation,
         /// Update user payment details by email
         /// </summary>
         [HttpPatch("{email}/update-payment")]
+        [DecodeEmail]
         public async Task<IActionResult> UpdatePayment(string email, [FromBody] UpdatePaymentRequest request)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -655,7 +672,7 @@ license_allocation = request.LicenseAllocation,
             }
 
             var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
-            if (user == null) 
+            if (user == null)
                 return NotFound(new { message = $"User with email {email} not found" });
 
             // Users can update their own payment details, or admins can update others
@@ -685,17 +702,19 @@ license_allocation = request.LicenseAllocation,
                 _context.Entry(user).State = EntityState.Modified;
                 await _context.SaveChangesAsync();
 
-                return Ok(new { 
-                    message = "Payment details updated successfully", 
+                return Ok(new
+                {
+                    message = "Payment details updated successfully",
                     userEmail = email,
                     updatedAt = user.updated_at
                 });
             }
             catch (Exception ex)
             {
-                return StatusCode(500, new { 
-                    message = "Error updating payment details", 
-                    error = ex.Message 
+                return StatusCode(500, new
+                {
+                    message = "Error updating payment details",
+                    error = ex.Message
                 });
             }
         }
@@ -704,21 +723,23 @@ license_allocation = request.LicenseAllocation,
         /// Assign role to user by email - Admin access
         /// </summary>
         [HttpPost("{email}/assign-role")]
+        [DecodeEmail]
         [RequirePermission("ASSIGN_ROLES")]
         public async Task<IActionResult> AssignRole(string email, [FromBody] AssignUserRoleRequest request)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
+
             if (!await _authService.HasPermissionAsync(currentUserEmail!, "ASSIGN_ROLES"))
-                return StatusCode(403,new { error = "Insufficient permissions to assign roles" });
+                return StatusCode(403, new { error = "Insufficient permissions to assign roles" });
 
             var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
             if (user == null) return NotFound($"User with email {email} not found");
 
             await AssignRoleToUserAsync(email, request.RoleName, currentUserEmail!);
 
-            return Ok(new { 
-                message = $"Role {request.RoleName} assigned to user {email}", 
+            return Ok(new
+            {
+                message = $"Role {request.RoleName} assigned to user {email}",
                 userEmail = email,
                 roleName = request.RoleName,
                 assignedBy = currentUserEmail,
@@ -730,11 +751,12 @@ license_allocation = request.LicenseAllocation,
         /// Remove role from user by email
         /// </summary>
         [HttpDelete("{email}/remove-role/{roleName}")]
+        [DecodeEmail]
         [RequirePermission("ASSIGN_ROLES")]
         public async Task<IActionResult> RemoveRole(string email, string roleName)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
+
             var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
             if (user == null) return NotFound($"User with email {email} not found");
 
@@ -750,7 +772,8 @@ license_allocation = request.LicenseAllocation,
             _context.UserRoles.Remove(userRole);
             await _context.SaveChangesAsync();
 
-            return Ok(new { 
+            return Ok(new
+            {
                 message = $"Role {roleName} removed from user {email}",
                 userEmail = email,
                 roleName = roleName,
@@ -763,17 +786,18 @@ license_allocation = request.LicenseAllocation,
         /// Delete user by email
         /// </summary>
         [HttpDelete("{email}")]
+        [DecodeEmail]
         [RequirePermission("DELETE_USER")]
         public async Task<IActionResult> DeleteUser(string email)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
-            
+
             if (user == null) return NotFound($"User with email {email} not found");
 
             // Check if user can delete this profile
             if (!await _authService.HasPermissionAsync(currentUserEmail!, "DELETE_USER"))
-                return StatusCode(403,new { error = "Insufficient permissions to delete users" });
+                return StatusCode(403, new { error = "Insufficient permissions to delete users" });
 
             // Don't allow users to delete themselves
             if (email == currentUserEmail)
@@ -782,8 +806,9 @@ license_allocation = request.LicenseAllocation,
             _context.Users.Remove(user);
             await _context.SaveChangesAsync();
 
-            return Ok(new { 
-                message = "User deleted successfully", 
+            return Ok(new
+            {
+                message = "User deleted successfully",
                 userEmail = email,
                 deletedAt = DateTime.UtcNow
             });
@@ -793,21 +818,23 @@ license_allocation = request.LicenseAllocation,
         /// Get user statistics by email
         /// </summary>
         [HttpGet("{email}/statistics")]
+        [DecodeEmail]
         [RequirePermission("READ_USER_STATISTICS")]
         public async Task<ActionResult<object>> GetUserStatistics(string email)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            
+
             // Check if user can view statistics for this email
             if (email != currentUserEmail && !await CanManageUserAsync(currentUserEmail!, email))
             {
-                return StatusCode(403,new { error = "You can only view statistics for your own account or accounts you manage" });
+                return StatusCode(403, new { error = "You can only view statistics for your own account or accounts you manage" });
             }
 
             var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
             if (user == null) return NotFound($"User with email {email} not found");
 
-            var stats = new {
+            var stats = new
+            {
                 UserEmail = email,
                 UserName = user.user_name,
                 AccountAge = DateTime.UtcNow - user.created_at,
@@ -824,7 +851,8 @@ license_allocation = request.LicenseAllocation,
                 RoleHistory = await _context.UserRoles
                     .Where(ur => ur.User.user_email == email)
                     .Include(ur => ur.Role)
-                    .Select(ur => new {
+                    .Select(ur => new
+                    {
                         roleName = ur.Role.RoleName,
                         assignedAt = ur.AssignedAt,
                         assignedBy = ur.AssignedByEmail
@@ -854,7 +882,7 @@ license_allocation = request.LicenseAllocation,
 
             // Add logic to get users managed by this manager
             // This is a placeholder - implement based on your user hierarchy
-            
+
             return managedEmails;
         }
 
@@ -862,37 +890,37 @@ license_allocation = request.LicenseAllocation,
         {
             try
             {
-                 var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
-            var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
+                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+                var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
 
-         if (user != null && role != null)
-            {
-        // Check if role already assigned
-     var existingRole = await _context.UserRoles
- .FirstOrDefaultAsync(ur => ur.UserId == user.user_id && ur.RoleId == role.RoleId);
+                if (user != null && role != null)
+                {
+                    // Check if role already assigned
+                    var existingRole = await _context.UserRoles
+                .FirstOrDefaultAsync(ur => ur.UserId == user.user_id && ur.RoleId == role.RoleId);
 
-    if (existingRole == null)
-              {
-           var userRole = new UserRole
-            {
-  UserId = user.user_id,
-   RoleId = role.RoleId,
-   AssignedAt = DateTime.UtcNow,
-          AssignedByEmail = assignedByEmail
-        };
+                    if (existingRole == null)
+                    {
+                        var userRole = new UserRole
+                        {
+                            UserId = user.user_id,
+                            RoleId = role.RoleId,
+                            AssignedAt = DateTime.UtcNow,
+                            AssignedByEmail = assignedByEmail
+                        };
 
-      _context.UserRoles.Add(userRole);
-         await _context.SaveChangesAsync();
- }
-        return true; // Role assigned successfully or already exists
-         }
-     
-    return false; // User or role not found
-       }
+                        _context.UserRoles.Add(userRole);
+                        await _context.SaveChangesAsync();
+                    }
+                    return true; // Role assigned successfully or already exists
+                }
+
+                return false; // User or role not found
+            }
             catch (Exception)
- {
-             return false; // Assignment failed
-        }
+            {
+                return false; // Assignment failed
+            }
         }
 
         private async Task<DateTime?> GetLastActivityAsync(string userEmail)
@@ -928,51 +956,51 @@ license_allocation = request.LicenseAllocation,
         /// <summary>Filter by user email (partial match)</summary>
         /// <example>test@example.com</example>
         public string? UserEmail { get; set; }
-        
+
         /// <summary>Filter by user name (partial match)</summary>
         /// <example>John Doe</example>
         public string? UserName { get; set; }
-        
+
         /// <summary>Filter by phone number (partial match)</summary>
         /// <example>+1234567890</example>
         public string? PhoneNumber { get; set; }
-        
+
         /// <summary>Filter by department (partial match)</summary>
         /// <example>Engineering</example>
         public string? Department { get; set; }
-   
+
         /// <summary>Filter by user group (partial match)</summary>
         /// <example>Development Team</example>
         public string? UserGroup { get; set; }
-      
+
         /// <summary>Filter by user role (partial match)</summary>
         /// <example>manager</example>
         public string? UserRole { get; set; }
-        
+
         /// <summary>Filter by status (exact match)</summary>
         /// <example>active</example>
         public string? Status { get; set; }
-        
+
         /// <summary>Minimum license allocation</summary>
         /// <example>1</example>
         public int? MinLicenseAllocation { get; set; }
-   
+
         /// <summary>Maximum license allocation</summary>
         /// <example>100</example>
         public int? MaxLicenseAllocation { get; set; }
-   
+
         /// <summary>Filter users who logged in from this date</summary>
         /// <example>2024-01-01T00:00:00Z</example>
         public DateTime? LastLoginFrom { get; set; }
- 
+
         /// <summary>Filter users who logged in until this date</summary>
         /// <example>2024-12-31T23:59:59Z</example>
         public DateTime? LastLoginTo { get; set; }
-   
+
         /// <summary>Filter users created from this date</summary>
         /// <example>2024-01-01T00:00:00Z</example>
         public DateTime? CreatedFrom { get; set; }
-        
+
         /// <summary>Filter users created until this date</summary>
         /// <example>2024-12-31T23:59:59Z</example>
         public DateTime? CreatedTo { get; set; }
@@ -980,11 +1008,11 @@ license_allocation = request.LicenseAllocation,
         /// <summary>Filter by license presence</summary>
         /// <example>true</example>
         public bool? HasLicenses { get; set; }
-        
+
         /// <summary>Page number for pagination (0-based)</summary>
         /// <example>0</example>
         public int Page { get; set; } = 0;
-    
+
         /// <summary>Number of items per page</summary>
         /// <example>10</example>
         public int PageSize { get; set; } = 10;
@@ -1009,57 +1037,57 @@ license_allocation = request.LicenseAllocation,
         [System.ComponentModel.DataAnnotations.Required]
         [System.ComponentModel.DataAnnotations.EmailAddress]
         public string UserEmail { get; set; } = null!;
-        
+
         /// <summary>User's full name</summary>
         /// <example>John Doe</example>
         [System.ComponentModel.DataAnnotations.Required]
         public string UserName { get; set; } = null!;
-        
+
         /// <summary>User's password (min 8 chars, uppercase, lowercase, number, special char)</summary>
         /// <example>SecurePass@123</example>
         [System.ComponentModel.DataAnnotations.Required]
         [System.ComponentModel.DataAnnotations.MinLength(8)]
         public string Password { get; set; } = null!;
-      
+
         /// <summary>User's phone number (optional)</summary>
-    /// <example>+1234567890</example>
-   public string? PhoneNumber { get; set; }
-        
-     /// <summary>Department name (optional)</summary>
+        /// <example>+1234567890</example>
+        public string? PhoneNumber { get; set; }
+
+        /// <summary>Department name (optional)</summary>
         /// <example>Engineering</example>
- [System.ComponentModel.DataAnnotations.MaxLength(100)]
+        [System.ComponentModel.DataAnnotations.MaxLength(100)]
         public string? Department { get; set; }
-        
+
         /// <summary>User group (optional)</summary>
-   /// <example>Development Team</example>
+        /// <example>Development Team</example>
         [System.ComponentModel.DataAnnotations.MaxLength(100)]
         public string? UserGroup { get; set; }
-        
- /// <summary>User role (optional, defaults to 'user')</summary>
+
+        /// <summary>User role (optional, defaults to 'user')</summary>
         /// <example>manager</example>
         [System.ComponentModel.DataAnnotations.MaxLength(50)]
-   public string? UserRole { get; set; }
-        
-    /// <summary>License allocation (optional, defaults to 0)</summary>
+        public string? UserRole { get; set; }
+
+        /// <summary>License allocation (optional, defaults to 0)</summary>
         /// <example>5</example>
-  public int? LicenseAllocation { get; set; }
-        
-    /// <summary>User status (optional, defaults to 'active')</summary>
+        public int? LicenseAllocation { get; set; }
+
+        /// <summary>User status (optional, defaults to 'active')</summary>
         /// <example>active</example>
-     [System.ComponentModel.DataAnnotations.MaxLength(50)]
+        [System.ComponentModel.DataAnnotations.MaxLength(50)]
         public string? Status { get; set; }
-    
+
         /// <summary>Payment details as JSON (optional)</summary>
         /// <example>{"cardType":"Visa","last4":"1234"}</example>
-   public string? PaymentDetailsJson { get; set; }
-        
+        public string? PaymentDetailsJson { get; set; }
+
         /// <summary>License details as JSON (optional)</summary>
         /// <example>{"licenseKey":"ABC-123","plan":"premium"}</example>
-  public string? LicenseDetailsJson { get; set; }
-        
+        public string? LicenseDetailsJson { get; set; }
+
         /// <summary>Default role to assign (optional)</summary>
- /// <example>User</example>
-  public string? DefaultRole { get; set; }
+        /// <example>User</example>
+        public string? DefaultRole { get; set; }
     }
 
     /// <summary>
@@ -1080,18 +1108,18 @@ license_allocation = request.LicenseAllocation,
         [System.ComponentModel.DataAnnotations.Required]
         [System.ComponentModel.DataAnnotations.EmailAddress]
         public string UserEmail { get; set; } = null!;
-        
+
         /// <summary>User's full name</summary>
         /// <example>John Doe</example>
         [System.ComponentModel.DataAnnotations.Required]
         public string UserName { get; set; } = null!;
-        
+
         /// <summary>Password (min 8 chars with uppercase, lowercase, number, special char)</summary>
         /// <example>SecurePass@123</example>
         [System.ComponentModel.DataAnnotations.Required]
         [System.ComponentModel.DataAnnotations.MinLength(8)]
         public string Password { get; set; } = null!;
-        
+
         /// <summary>Phone number (optional)</summary>
         /// <example>+1234567890</example>
         public string? PhoneNumber { get; set; }
@@ -1113,47 +1141,47 @@ license_allocation = request.LicenseAllocation,
         /// <example>user@example.com</example>
         [System.ComponentModel.DataAnnotations.Required]
         public string UserEmail { get; set; } = null!;
-        
+
         /// <summary>New user name (optional)</summary>
         /// <example>Updated Name</example>
         public string? UserName { get; set; }
-        
+
         /// <summary>New phone number (optional)</summary>
         /// <example>+9876543210</example>
         public string? PhoneNumber { get; set; }
-  
-       /// <summary>Department (optional)</summary>
+
+        /// <summary>Department (optional)</summary>
         /// <example>IT Operations</example>
-     [System.ComponentModel.DataAnnotations.MaxLength(100)]
+        [System.ComponentModel.DataAnnotations.MaxLength(100)]
         public string? Department { get; set; }
-        
-     /// <summary>User group (optional)</summary>
+
+        /// <summary>User group (optional)</summary>
         /// <example>Senior Team</example>
-   [System.ComponentModel.DataAnnotations.MaxLength(100)]
+        [System.ComponentModel.DataAnnotations.MaxLength(100)]
         public string? UserGroup { get; set; }
-        
- /// <summary>User role (optional)</summary>
+
+        /// <summary>User role (optional)</summary>
         /// <example>admin</expert>
-  [System.ComponentModel.DataAnnotations.MaxLength(50)]
-     public string? UserRole { get; set; }
-      
-  /// <summary>License allocation (optional)</summary>
+        [System.ComponentModel.DataAnnotations.MaxLength(50)]
+        public string? UserRole { get; set; }
+
+        /// <summary>License allocation (optional)</summary>
         /// <example>10</example>
-  public int? LicenseAllocation { get; set; }
-        
-   /// <summary>User status (optional)</summary>
+        public int? LicenseAllocation { get; set; }
+
+        /// <summary>User status (optional)</summary>
         /// <example>active</example>
-[System.ComponentModel.DataAnnotations.MaxLength(50)]
+        [System.ComponentModel.DataAnnotations.MaxLength(50)]
         public string? Status { get; set; }
-        
+
         /// <summary>Payment details JSON (optional)</summary>
-      /// <example>{"cardType":"MasterCard","last4":"5678"}</example>
-  public string? PaymentDetailsJson { get; set; }
-        
-      /// <summary>License details JSON (optional)</summary>
-   /// <example>{"licenseKey":"XYZ-789","plan":"enterprise"}</example>
-   public string? LicenseDetailsJson { get; set; }
- }
+        /// <example>{"cardType":"MasterCard","last4":"5678"}</example>
+        public string? PaymentDetailsJson { get; set; }
+
+        /// <summary>License details JSON (optional)</summary>
+        /// <example>{"licenseKey":"XYZ-789","plan":"enterprise"}</example>
+        public string? LicenseDetailsJson { get; set; }
+    }
 
     /// <summary>
     /// Change password request model
@@ -1164,16 +1192,16 @@ license_allocation = request.LicenseAllocation,
     ///   "NewPassword": "NewSecure@456"
     /// }
     /// </example>
-public class ChangeUserPasswordRequest
+    public class ChangeUserPasswordRequest
     {
         /// <summary>Current password (required when changing own password)</summary>
         /// <example>OldPass@123</example>
-   public string? CurrentPassword { get; set; }
-   
+        public string? CurrentPassword { get; set; }
+
         /// <summary>New password (min 8 characters)</summary>
         /// <example>NewSecure@456</example>
-  [System.ComponentModel.DataAnnotations.Required]
-     [System.ComponentModel.DataAnnotations.MinLength(8)]
+        [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.MinLength(8)]
         public string NewPassword { get; set; } = null!;
     }
 
@@ -1187,8 +1215,8 @@ public class ChangeUserPasswordRequest
     /// </example>
     public class UpdateLicenseRequest
     {
-    /// <summary>License details as JSON string</summary>
-    /// <example>{"licenseKey":"ABC-123","plan":"premium","expiryDate":"2025-12-31"}</example>
+        /// <summary>License details as JSON string</summary>
+        /// <example>{"licenseKey":"ABC-123","plan":"premium","expiryDate":"2025-12-31"}</example>
         [System.ComponentModel.DataAnnotations.Required]
         public string LicenseDetailsJson { get; set; } = null!;
     }
@@ -1203,9 +1231,9 @@ public class ChangeUserPasswordRequest
     /// </example>
     public class UpdatePaymentRequest
     {
-   /// <summary>Payment details as JSON string</summary>
+        /// <summary>Payment details as JSON string</summary>
         /// <example>{"cardType":"Visa","last4":"1234","expiryMonth":12,"expiryYear":2026}</example>
-    [System.ComponentModel.DataAnnotations.Required]
+        [System.ComponentModel.DataAnnotations.Required]
         public string PaymentDetailsJson { get; set; } = null!;
     }
 
@@ -1220,8 +1248,8 @@ public class ChangeUserPasswordRequest
     public class AssignUserRoleRequest
     {
         /// <summary>Name of the role to assign</summary>
-      /// <example>Manager</example>
-      [System.ComponentModel.DataAnnotations.Required]
+        /// <example>Manager</example>
+        [System.ComponentModel.DataAnnotations.Required]
         public string RoleName { get; set; } = null!;
     }
 

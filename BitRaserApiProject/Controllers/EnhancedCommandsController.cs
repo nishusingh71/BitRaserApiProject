@@ -46,254 +46,261 @@ namespace BitRaserApiProject.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetCommands([FromQuery] CommandFilterRequest? filter)
         {
-   try
-     {
-  using var _context = await _contextFactory.CreateDbContextAsync();
-     
-     var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-         
-  _logger.LogInformation("🔍 Fetching commands for user: {Email}", userEmail);
-    
-         IQueryable<Commands> query = _context.Commands;
+            try
+            {
+                using var _context = await _contextFactory.CreateDbContextAsync();
 
-     // Apply role-based filtering
-  if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_COMMANDS", isCurrentUserSubuser))
-    {
-              // Regular users and subusers can see all commands for operational purposes
-         // No filtering applied - system-level commands
-      }
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
 
-      // Apply additional filters if provided (non-JSON filters first)
-           if (filter != null)
-     {
-               if (!string.IsNullOrEmpty(filter.CommandStatus))
-       query = query.Where(c => c.command_status.Contains(filter.CommandStatus));
+                _logger.LogInformation("🔍 Fetching commands for user: {Email}", userEmail);
 
-           if (!string.IsNullOrEmpty(filter.CommandText))
-   query = query.Where(c => c.command_text.Contains(filter.CommandText));
+                IQueryable<Commands> query = _context.Commands;
 
-        if (filter.IssuedFrom.HasValue)
-   query = query.Where(c => c.issued_at >= filter.IssuedFrom.Value);
+                // Apply role-based filtering
+                if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_COMMANDS", isCurrentUserSubuser))
+                {
+                    // Regular users and subusers can see all commands for operational purposes
+                    // No filtering applied - system-level commands
+                }
 
-   if (filter.IssuedTo.HasValue)
-       query = query.Where(c => c.issued_at <= filter.IssuedTo.Value);
-       }
+                // Apply additional filters if provided (non-JSON filters first)
+                if (filter != null)
+                {
+                    if (!string.IsNullOrEmpty(filter.CommandStatus))
+                        query = query.Where(c => c.command_status.Contains(filter.CommandStatus));
 
-       // Execute query first
- var commands = await query
-        .OrderByDescending(c => c.issued_at)
-     .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-     .Take(filter?.PageSize ?? 100)
-          .ToListAsync();
+                    if (!string.IsNullOrEmpty(filter.CommandText))
+                        query = query.Where(c => c.command_text.Contains(filter.CommandText));
 
-           // ✅ FIX: Apply user email filter in memory (MySQL JSON search issue)
-       if (filter != null && !string.IsNullOrEmpty(filter.UserEmail))
-         {
-          var userEmailFilter = filter.UserEmail.ToLower();
-     commands = commands
-    .Where(c => {
-           if (string.IsNullOrEmpty(c.command_json) || c.command_json == "{}")
-            return false;
-      
-              var json = c.command_json.ToLower();
-    return json.Contains($"\"user_email\":\"{userEmailFilter}\"") ||
-          json.Contains($"\"issued_by\":\"{userEmailFilter}\"");
-  })
-       .ToList();
-   }
+                    if (filter.IssuedFrom.HasValue)
+                        query = query.Where(c => c.issued_at >= filter.IssuedFrom.Value);
 
-_logger.LogInformation("✅ Found {Count} commands from {DbType} database", 
-         commands.Count, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+                    if (filter.IssuedTo.HasValue)
+                        query = query.Where(c => c.issued_at <= filter.IssuedTo.Value);
+                }
+
+                // Execute query first
+                var commands = await query
+                       .OrderByDescending(c => c.issued_at)
+                    .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+                    .Take(filter?.PageSize ?? 100)
+                         .ToListAsync();
+
+                // ✅ FIX: Apply user email filter in memory (MySQL JSON search issue)
+                if (filter != null && !string.IsNullOrEmpty(filter.UserEmail))
+                {
+                    var userEmailFilter = filter.UserEmail.ToLower();
+                    commands = commands
+                   .Where(c =>
+                   {
+                       if (string.IsNullOrEmpty(c.command_json) || c.command_json == "{}")
+                           return false;
+
+                       var json = c.command_json.ToLower();
+                       return json.Contains($"\"user_email\":\"{userEmailFilter}\"") ||
+              json.Contains($"\"issued_by\":\"{userEmailFilter}\"");
+                   })
+                      .ToList();
+                }
+
+                _logger.LogInformation("✅ Found {Count} commands from {DbType} database",
+                         commands.Count, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
 
                 // Parse and add user email from command_json
-   var commandsWithUser = commands.Select(c => {
-var userEmailFromJson = ExtractUserEmailFromJson(c.command_json);
-   return new {
-    c.Command_id,
-   c.command_text,
-    c.command_status,
-       c.issued_at,
-          IssuedByEmail = userEmailFromJson,
-         HasJsonData = !string.IsNullOrEmpty(c.command_json) && c.command_json != "{}"
-         };
-  }).ToList();
+                var commandsWithUser = commands.Select(c =>
+                {
+                    var userEmailFromJson = ExtractUserEmailFromJson(c.command_json);
+                    return new
+                    {
+                        c.Command_id,
+                        c.command_text,
+                        c.command_status,
+                        c.issued_at,
+                        IssuedByEmail = userEmailFromJson,
+                        HasJsonData = !string.IsNullOrEmpty(c.command_json) && c.command_json != "{}"
+                    };
+                }).ToList();
 
-           return Ok(commandsWithUser);
-         }
-catch (Exception ex)
-    {
-     _logger.LogError(ex, "Error fetching commands");
-     return StatusCode(500, new { message = "Error retrieving commands", error = ex.Message });
-     }
- }
+                return Ok(commandsWithUser);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching commands");
+                return StatusCode(500, new { message = "Error retrieving commands", error = ex.Message });
+            }
+        }
 
         /// <summary>
         /// ✅ NEW: Get commands by user email
         /// </summary>
         [HttpGet("by-email/{userEmail}")]
+        [DecodeEmail]
         public async Task<ActionResult<IEnumerable<object>>> GetCommandsByUserEmail(string userEmail)
         {
-   try
- {
- using var _context = await _contextFactory.CreateDbContextAsync();
-    
-      _logger.LogInformation("🔍 Fetching commands for user: {Email}", userEmail);
- 
- var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-  
-         // Check if user can view commands for this email
-       bool canView = userEmail == currentUserEmail ||
-   await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_COMMANDS", isCurrentUserSubuser);
+            try
+            {
+                using var _context = await _contextFactory.CreateDbContextAsync();
 
-    if (!canView)
-  {
-     _logger.LogWarning("Unauthorized access attempt for commands of {Email} by {CurrentEmail}", 
-      userEmail, currentUserEmail);
- return StatusCode(403, new { error = "You can only view your own commands" });
-  }
+                _logger.LogInformation("🔍 Fetching commands for user: {Email}", userEmail);
 
-    // ✅ FIX: Get all commands first, then filter in memory (MySQL JSON search issue)
-var allCommands = await _context.Commands
-     .OrderByDescending(c => c.issued_at)
-    .ToListAsync();
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
-          // Filter by user email in command_json (client-side)
-    var userEmailLower = userEmail.ToLower();
-var commands = allCommands
-       .Where(c => {
-    if (string.IsNullOrEmpty(c.command_json) || c.command_json == "{}")
-    return false;
-  
-         var json = c.command_json.ToLower();
-    return json.Contains($"\"user_email\":\"{userEmailLower}\"") ||
-      json.Contains($"\"issued_by\":\"{userEmailLower}\"");
-        })
- .ToList();
+                // Check if user can view commands for this email
+                bool canView = userEmail == currentUserEmail ||
+            await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_COMMANDS", isCurrentUserSubuser);
 
-       _logger.LogInformation("✅ Found {Count} commands for user {Email} from {DbType} database", 
-  commands.Count, userEmail, 
-    await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+                if (!canView)
+                {
+                    _logger.LogWarning("Unauthorized access attempt for commands of {Email} by {CurrentEmail}",
+                     userEmail, currentUserEmail);
+                    return StatusCode(403, new { error = "You can only view your own commands" });
+                }
 
-       var commandsWithUser = commands.Select(c => {
-      var userEmailFromJson = ExtractUserEmailFromJson(c.command_json);
-    return new {
- c.Command_id,
-  c.command_text,
-c.command_status,
-  c.issued_at,
-    IssuedByEmail = userEmailFromJson,
-    c.command_json
-   };
-   }).ToList();
+                // ✅ FIX: Get all commands first, then filter in memory (MySQL JSON search issue)
+                var allCommands = await _context.Commands
+                     .OrderByDescending(c => c.issued_at)
+                    .ToListAsync();
 
-      return commands.Any() ? Ok(commandsWithUser) : NotFound("No commands found for this user");
-}
- catch (Exception ex)
-      {
-  _logger.LogError(ex, "Error fetching commands for user {Email}", userEmail);
-        return StatusCode(500, new { message = "Error retrieving commands", error = ex.Message });
-    }
-     }
+                // Filter by user email in command_json (client-side)
+                var userEmailLower = userEmail.ToLower();
+                var commands = allCommands
+                       .Where(c =>
+                       {
+                           if (string.IsNullOrEmpty(c.command_json) || c.command_json == "{}")
+                               return false;
+
+                           var json = c.command_json.ToLower();
+                           return json.Contains($"\"user_email\":\"{userEmailLower}\"") ||
+             json.Contains($"\"issued_by\":\"{userEmailLower}\"");
+                       })
+                 .ToList();
+
+                _logger.LogInformation("✅ Found {Count} commands for user {Email} from {DbType} database",
+           commands.Count, userEmail,
+             await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+                var commandsWithUser = commands.Select(c =>
+                {
+                    var userEmailFromJson = ExtractUserEmailFromJson(c.command_json);
+                    return new
+                    {
+                        c.Command_id,
+                        c.command_text,
+                        c.command_status,
+                        c.issued_at,
+                        IssuedByEmail = userEmailFromJson,
+                        c.command_json
+                    };
+                }).ToList();
+
+                return commands.Any() ? Ok(commandsWithUser) : NotFound("No commands found for this user");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching commands for user {Email}", userEmail);
+                return StatusCode(500, new { message = "Error retrieving commands", error = ex.Message });
+            }
+        }
 
         /// <summary>
         /// Get command by ID with role validation
         /// </summary>
-    [HttpGet("{id}")]
+        [HttpGet("{id}")]
         public async Task<ActionResult<Commands>> GetCommand(int id)
-   {
-        using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-        
-        var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
- var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
-            var command = await _context.Commands.FindAsync(id);
-       
-        if (command == null) return NotFound();
+        {
+            using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
 
-    // Allow basic access to commands for operational purposes
+            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+
+            var command = await _context.Commands.FindAsync(id);
+
+            if (command == null) return NotFound();
+
+            // Allow basic access to commands for operational purposes
             return Ok(command);
- }
+        }
 
         /// <summary>
         /// Create a new command - Users and subusers can create commands
         /// ✅ Updated: Store user_email in command_json
-   /// </summary>
+        /// </summary>
         [HttpPost]
         public async Task<ActionResult<Commands>> CreateCommand([FromBody] CommandCreateRequest request)
         {
-   try
-        {
- using var _context = await _contextFactory.CreateDbContextAsync();
-    
-     var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-    var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+            try
+            {
+                using var _context = await _contextFactory.CreateDbContextAsync();
 
-      if (string.IsNullOrEmpty(request.CommandText))
-    return BadRequest("Command text is required");
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
 
-      // ✅ Parse or create JSON with user_email
-  string commandJson = request.CommandJson ?? "{}";
-       try
-{
-   var jsonObj = System.Text.Json.JsonDocument.Parse(commandJson);
-        var jsonDict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(commandJson) 
- ?? new Dictionary<string, object>();
- 
-  // Add user_email to JSON
-    jsonDict["user_email"] = userEmail!;
-     jsonDict["issued_by"] = userEmail!;
-   jsonDict["created_at"] = DateTime.UtcNow.ToString("o");
-    
-    commandJson = System.Text.Json.JsonSerializer.Serialize(jsonDict);
-   }
-   catch
-  {
-       // If JSON is invalid, create new JSON with user_email
- commandJson = $"{{\"user_email\":\"{userEmail}\",\"issued_by\":\"{userEmail}\",\"created_at\":\"{DateTime.UtcNow:o}\"}}";
-      }
+                if (string.IsNullOrEmpty(request.CommandText))
+                    return BadRequest("Command text is required");
 
-    var command = new Commands
- {
-    command_text = request.CommandText,
-  command_json = commandJson,
-      command_status = request.CommandStatus ?? "Pending",
-  issued_at = DateTime.UtcNow
-     };
+                // ✅ Parse or create JSON with user_email
+                string commandJson = request.CommandJson ?? "{}";
+                try
+                {
+                    var jsonObj = System.Text.Json.JsonDocument.Parse(commandJson);
+                    var jsonDict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(commandJson)
+             ?? new Dictionary<string, object>();
 
-     _context.Commands.Add(command);
-   await _context.SaveChangesAsync();
+                    // Add user_email to JSON
+                    jsonDict["user_email"] = userEmail!;
+                    jsonDict["issued_by"] = userEmail!;
+                    jsonDict["created_at"] = DateTime.UtcNow.ToString("o");
 
-_logger.LogInformation("✅ Created command {CommandId} for {Email} in {DbType} database", 
-  command.Command_id, userEmail, 
-        await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+                    commandJson = System.Text.Json.JsonSerializer.Serialize(jsonDict);
+                }
+                catch
+                {
+                    // If JSON is invalid, create new JSON with user_email
+                    commandJson = $"{{\"user_email\":\"{userEmail}\",\"issued_by\":\"{userEmail}\",\"created_at\":\"{DateTime.UtcNow:o}\"}}";
+                }
 
- return CreatedAtAction(nameof(GetCommand), new { id = command.Command_id }, command);
-  }
-       catch (Exception ex)
-  {
-   _logger.LogError(ex, "Error creating command");
-  return StatusCode(500, new { message = "Error creating command", error = ex.Message });
-      }
-   }
+                var command = new Commands
+                {
+                    command_text = request.CommandText,
+                    command_json = commandJson,
+                    command_status = request.CommandStatus ?? "Pending",
+                    issued_at = DateTime.UtcNow
+                };
+
+                _context.Commands.Add(command);
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Created command {CommandId} for {Email} in {DbType} database",
+                  command.Command_id, userEmail,
+                        await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+                return CreatedAtAction(nameof(GetCommand), new { id = command.Command_id }, command);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating command");
+                return StatusCode(500, new { message = "Error creating command", error = ex.Message });
+            }
+        }
 
         /// <summary>
-  /// Update command by ID - Users and subusers can update commands
-    /// </summary>
+        /// Update command by ID - Users and subusers can update commands
+        /// </summary>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateCommand(int id, [FromBody] CommandUpdateRequest request)
         {
-    using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-            
-if (id != request.CommandId)
-          return BadRequest("Command ID mismatch");
+            using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
 
-       var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (id != request.CommandId)
+                return BadRequest("Command ID mismatch");
+
+            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
- 
-     var command = await _context.Commands.FindAsync(id);
-   if (command == null) return NotFound();
+
+            var command = await _context.Commands.FindAsync(id);
+            if (command == null) return NotFound();
 
             // Allow updates unless specifically restricted by admin permissions
             bool canUpdate = true;
@@ -328,10 +335,10 @@ if (id != request.CommandId)
         public async Task<IActionResult> UpdateCommandStatus(int id, [FromBody] CommandStatusUpdateRequest request)
         {
             using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-            
+
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
+
             var command = await _context.Commands.FindAsync(id);
             if (command == null) return NotFound();
 
@@ -352,10 +359,10 @@ if (id != request.CommandId)
         public async Task<IActionResult> DeleteCommand(int id)
         {
             using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-            
+
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
+
             var command = await _context.Commands.FindAsync(id);
             if (command == null) return NotFound();
 
@@ -382,11 +389,12 @@ if (id != request.CommandId)
         public async Task<ActionResult<object>> GetCommandStatistics()
         {
             using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-            
+
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
-            var stats = new {
+
+            var stats = new
+            {
                 TotalCommands = await _context.Commands.CountAsync(),
                 PendingCommands = await _context.Commands.CountAsync(c => c.command_status == "Pending"),
                 ProcessingCommands = await _context.Commands.CountAsync(c => c.command_status == "Processing"),
@@ -412,10 +420,10 @@ if (id != request.CommandId)
         public async Task<IActionResult> BulkUpdateCommandStatus([FromBody] BulkCommandStatusUpdateRequest request)
         {
             using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-            
+
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
+
             if (!await _authService.HasPermissionAsync(userEmail!, "BULK_UPDATE_COMMANDS", isCurrentUserSubuser))
                 return StatusCode(403, new { error = "Insufficient permissions to bulk update commands" });
 
@@ -440,7 +448,8 @@ if (id != request.CommandId)
 
             await _context.SaveChangesAsync();
 
-            return Ok(new { 
+            return Ok(new
+            {
                 message = $"Updated {commands.Count} commands to status {request.NewStatus}",
                 updatedCommandIds = commands.Select(c => c.Command_id).ToList()
             });
@@ -453,10 +462,10 @@ if (id != request.CommandId)
         public async Task<IActionResult> ExecuteCommand(int id)
         {
             using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-            
+
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
+
             var command = await _context.Commands.FindAsync(id);
             if (command == null) return NotFound();
 
@@ -475,7 +484,8 @@ if (id != request.CommandId)
             command.command_status = "Completed";
             await _context.SaveChangesAsync();
 
-            return Ok(new { 
+            return Ok(new
+            {
                 message = "Command executed successfully",
                 commandId = id,
                 status = command.command_status
@@ -489,10 +499,10 @@ if (id != request.CommandId)
         public async Task<IActionResult> CancelCommand(int id)
         {
             using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-            
+
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-            
+
             var command = await _context.Commands.FindAsync(id);
             if (command == null) return NotFound();
 
@@ -505,7 +515,8 @@ if (id != request.CommandId)
             command.command_status = "Cancelled";
             await _context.SaveChangesAsync();
 
-            return Ok(new { 
+            return Ok(new
+            {
                 message = "Command cancelled successfully",
                 commandId = id,
                 status = command.command_status
@@ -513,31 +524,31 @@ if (id != request.CommandId)
         }
 
         /// <summary>
-     /// ✅ NEW: Helper method to extract user email from command_json
-     /// </summary>
-    private string? ExtractUserEmailFromJson(string? commandJson)
+        /// ✅ NEW: Helper method to extract user email from command_json
+        /// </summary>
+        private string? ExtractUserEmailFromJson(string? commandJson)
         {
-      if (string.IsNullOrEmpty(commandJson) || commandJson == "{}")
-     return null;
+            if (string.IsNullOrEmpty(commandJson) || commandJson == "{}")
+                return null;
 
             try
             {
-      var jsonDoc = System.Text.Json.JsonDocument.Parse(commandJson);
-                
+                var jsonDoc = System.Text.Json.JsonDocument.Parse(commandJson);
+
                 // Try to get user_email
-   if (jsonDoc.RootElement.TryGetProperty("user_email", out var userEmailProp))
-            return userEmailProp.GetString();
-     
-          // Try to get issued_by
-    if (jsonDoc.RootElement.TryGetProperty("issued_by", out var issuedByProp))
-     return issuedByProp.GetString();
-                
-      return null;
-      }
-     catch
-         {
-        return null;
-     }
+                if (jsonDoc.RootElement.TryGetProperty("user_email", out var userEmailProp))
+                    return userEmailProp.GetString();
+
+                // Try to get issued_by
+                if (jsonDoc.RootElement.TryGetProperty("issued_by", out var issuedByProp))
+                    return issuedByProp.GetString();
+
+                return null;
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 
@@ -549,12 +560,12 @@ if (id != request.CommandId)
     public class CommandFilterRequest
     {
         public string? UserEmail { get; set; }  // ✅ NEW: Filter by user email
-   public string? CommandStatus { get; set; }
+        public string? CommandStatus { get; set; }
         public string? CommandText { get; set; }
         public DateTime? IssuedFrom { get; set; }
         public DateTime? IssuedTo { get; set; }
         public int Page { get; set; } = 0;
- public int PageSize { get; set; } = 100;
+        public int PageSize { get; set; } = 100;
     }
 
     /// <summary>
@@ -562,7 +573,7 @@ if (id != request.CommandId)
     /// </summary>
     public class CommandCreateRequest
     {
-      public string CommandText { get; set; } = string.Empty;
+        public string CommandText { get; set; } = string.Empty;
         public string? CommandJson { get; set; }
         public string? CommandStatus { get; set; }
     }
@@ -576,7 +587,7 @@ if (id != request.CommandId)
         public string? CommandText { get; set; }
         public string? CommandJson { get; set; }
         public string? CommandStatus { get; set; }
-  }
+    }
 
     /// <summary>
     /// Command status update request model
@@ -584,7 +595,7 @@ if (id != request.CommandId)
     public class CommandStatusUpdateRequest
     {
         public string Status { get; set; } = string.Empty;
-}
+    }
 
     /// <summary>
     /// Bulk command status update request model
@@ -592,7 +603,7 @@ if (id != request.CommandId)
     public class BulkCommandStatusUpdateRequest
     {
         public List<int> CommandIds { get; set; } = new();
-     public string NewStatus { get; set; } = string.Empty;
+        public string NewStatus { get; set; } = string.Empty;
     }
 
     #endregion

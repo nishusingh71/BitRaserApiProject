@@ -20,296 +20,301 @@ namespace BitRaserApiProject.Controllers
     public class EnhancedSessionsController : ControllerBase
     {
         private readonly DynamicDbContextFactory _contextFactory; // ✅ CHANGED
-    private readonly IRoleBasedAuthService _authService;
+        private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
         private readonly ITenantConnectionService _tenantService; // ✅ ADDED
-    private readonly ILogger<EnhancedSessionsController> _logger; // ✅ ADDED
-        
-   // Default session expiration time (configurable)
- private readonly TimeSpan DefaultSessionTimeout = TimeSpan.FromHours(24); // 24 hours
+        private readonly ILogger<EnhancedSessionsController> _logger; // ✅ ADDED
+
+        // Default session expiration time (configurable)
+        private readonly TimeSpan DefaultSessionTimeout = TimeSpan.FromHours(24); // 24 hours
         private readonly TimeSpan ExtendedSessionTimeout = TimeSpan.FromDays(7);  // 7 days for remember me
 
- public EnhancedSessionsController(
-         DynamicDbContextFactory contextFactory, // ✅ CHANGED
-       IRoleBasedAuthService authService,
-            IUserDataService userDataService,
-      ITenantConnectionService tenantService, // ✅ ADDED
-ILogger<EnhancedSessionsController> logger) // ✅ ADDED
-      {
+        public EnhancedSessionsController(
+                DynamicDbContextFactory contextFactory, // ✅ CHANGED
+              IRoleBasedAuthService authService,
+                   IUserDataService userDataService,
+             ITenantConnectionService tenantService, // ✅ ADDED
+       ILogger<EnhancedSessionsController> logger) // ✅ ADDED
+        {
             _contextFactory = contextFactory; // ✅ CHANGED
-          _authService = authService;
+            _authService = authService;
             _userDataService = userDataService;
-      _tenantService = tenantService; // ✅ ADDED
+            _tenantService = tenantService; // ✅ ADDED
             _logger = logger; // ✅ ADDED
-   }
+        }
 
-   /// <summary>
+        /// <summary>
         /// Get all sessions with role-based filtering and automatic cleanup
         /// ✅ ENHANCED: Parents can see their own sessions + subuser sessions
         /// </summary>
-    [HttpGet]
+        [HttpGet]
         public async Task<ActionResult<IEnumerable<object>>> GetSessions([FromQuery] SessionFilterRequest? filter)
         {
-      try
-{
-      using var _context = await _contextFactory.CreateDbContextAsync();
-          
-         var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-      var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
- 
-   _logger.LogInformation("🔍 Fetching sessions for user: {Email}", userEmail);
-    
-        // Cleanup expired sessions first
-    await CleanupExpiredSessionsAsync(_context);
-    
- IQueryable<Sessions> query = _context.Sessions;
+            try
+            {
+                using var _context = await _contextFactory.CreateDbContextAsync();
 
-      // Apply role-based filtering
-if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_SESSIONS", isCurrentUserSubuser))
-   {
-    if (isCurrentUserSubuser)
-   {
-   // ❌ Subuser - only own sessions
-            query = query.Where(s => s.user_email == userEmail);
-  }
-      else
-  {
-        // ✅ ENHANCED: User - own sessions + subuser sessions
- var subuserEmails = await _context.subuser
-       .Where(s => s.user_email == userEmail)
-  .Select(s => s.subuser_email)
-  .ToListAsync();
-         
-  query = query.Where(s => 
- s.user_email == userEmail ||  // Own sessions
-      subuserEmails.Contains(s.user_email)  // Subuser sessions
- );
-     }
-   }
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
 
-    // Apply additional filters if provided
- if (filter != null)
-   {
-   if (!string.IsNullOrEmpty(filter.UserEmail))
-        query = query.Where(s => s.user_email.Contains(filter.UserEmail));
+                _logger.LogInformation("🔍 Fetching sessions for user: {Email}", userEmail);
 
-      if (!string.IsNullOrEmpty(filter.SessionStatus))
-   query = query.Where(s => s.session_status.Contains(filter.SessionStatus));
+                // Cleanup expired sessions first
+                await CleanupExpiredSessionsAsync(_context);
 
-    if (!string.IsNullOrEmpty(filter.IpAddress))
-    query = query.Where(s => s.ip_address != null && s.ip_address.Contains(filter.IpAddress));
+                IQueryable<Sessions> query = _context.Sessions;
 
-        if (filter.LoginFrom.HasValue)
-   query = query.Where(s => s.login_time >= filter.LoginFrom.Value);
+                // Apply role-based filtering
+                if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_SESSIONS", isCurrentUserSubuser))
+                {
+                    if (isCurrentUserSubuser)
+                    {
+                        // ❌ Subuser - only own sessions
+                        query = query.Where(s => s.user_email == userEmail);
+                    }
+                    else
+                    {
+                        // ✅ ENHANCED: User - own sessions + subuser sessions
+                        var subuserEmails = await _context.subuser
+                              .Where(s => s.user_email == userEmail)
+                         .Select(s => s.subuser_email)
+                         .ToListAsync();
 
-       if (filter.LoginTo.HasValue)
-     query = query.Where(s => s.login_time <= filter.LoginTo.Value);
+                        query = query.Where(s =>
+                       s.user_email == userEmail ||  // Own sessions
+                            subuserEmails.Contains(s.user_email)  // Subuser sessions
+                       );
+                    }
+                }
 
-          if (filter.ActiveOnly.HasValue && filter.ActiveOnly.Value)
-    query = query.Where(s => s.session_status == "active");
-   }
+                // Apply additional filters if provided
+                if (filter != null)
+                {
+                    if (!string.IsNullOrEmpty(filter.UserEmail))
+                        query = query.Where(s => s.user_email.Contains(filter.UserEmail));
 
-      var sessions = await query
-  .OrderByDescending(s => s.login_time)
-   .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-      .Take(filter?.PageSize ?? 100)
-    .ToListAsync();
+                    if (!string.IsNullOrEmpty(filter.SessionStatus))
+                        query = query.Where(s => s.session_status.Contains(filter.SessionStatus));
 
-   _logger.LogInformation("✅ Found {Count} sessions from {DbType} database", 
-      sessions.Count, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+                    if (!string.IsNullOrEmpty(filter.IpAddress))
+                        query = query.Where(s => s.ip_address != null && s.ip_address.Contains(filter.IpAddress));
 
-    var sessionResults = sessions.Select(s => new {
-  s.session_id,
-   s.user_email,
-    s.login_time,
- s.logout_time,
-       s.ip_address,
-      s.device_info,
-         s.session_status,
-   ExpiresAt = CalculateSessionExpiry(s.login_time, s.session_status),
- IsExpired = IsSessionExpired(s.login_time, s.logout_time, s.session_status),
-  TimeRemaining = CalculateTimeRemaining(s.login_time, s.logout_time, s.session_status)
-    }).ToList();
+                    if (filter.LoginFrom.HasValue)
+                        query = query.Where(s => s.login_time >= filter.LoginFrom.Value);
 
-  return Ok(sessionResults);
-  }
- catch (Exception ex)
-     {
-   _logger.LogError(ex, "Error fetching sessions");
-   return StatusCode(500, new { message = "Error retrieving sessions", error = ex.Message });
-     }
-  }
+                    if (filter.LoginTo.HasValue)
+                        query = query.Where(s => s.login_time <= filter.LoginTo.Value);
+
+                    if (filter.ActiveOnly.HasValue && filter.ActiveOnly.Value)
+                        query = query.Where(s => s.session_status == "active");
+                }
+
+                var sessions = await query
+            .OrderByDescending(s => s.login_time)
+             .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+                .Take(filter?.PageSize ?? 100)
+              .ToListAsync();
+
+                _logger.LogInformation("✅ Found {Count} sessions from {DbType} database",
+                   sessions.Count, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+                var sessionResults = sessions.Select(s => new
+                {
+                    s.session_id,
+                    s.user_email,
+                    s.login_time,
+                    s.logout_time,
+                    s.ip_address,
+                    s.device_info,
+                    s.session_status,
+                    ExpiresAt = CalculateSessionExpiry(s.login_time, s.session_status),
+                    IsExpired = IsSessionExpired(s.login_time, s.logout_time, s.session_status),
+                    TimeRemaining = CalculateTimeRemaining(s.login_time, s.logout_time, s.session_status)
+                }).ToList();
+
+                return Ok(sessionResults);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching sessions");
+                return StatusCode(500, new { message = "Error retrieving sessions", error = ex.Message });
+            }
+        }
 
         /// <summary>
         /// Get session by ID with ownership validation
         /// </summary>
-      [HttpGet("{id}")]
+        [HttpGet("{id}")]
         public async Task<ActionResult<object>> GetSession(int id)
         {
-try
-        {
-      using var _context = await _contextFactory.CreateDbContextAsync();
- 
-        var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-       var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-    var session = await _context.Sessions.FindAsync(id);
-    
-       if (session == null)
-        {
-      _logger.LogWarning("Session not found with ID: {SessionId}", id);
-  return NotFound();
-  }
+            try
+            {
+                using var _context = await _contextFactory.CreateDbContextAsync();
 
-  // Users and subusers can only view their own sessions unless they have admin permission
-     bool canView = session.user_email == userEmail ||
-          await _authService.HasPermissionAsync(userEmail!, "READ_ALL_SESSIONS", isCurrentUserSubuser);
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+                var session = await _context.Sessions.FindAsync(id);
 
-        if (!canView)
-   {
-          _logger.LogWarning("Unauthorized access attempt for session {SessionId} by {Email}", id, userEmail);
-      return StatusCode(403, new { error = "You can only view your own sessions" });
+                if (session == null)
+                {
+                    _logger.LogWarning("Session not found with ID: {SessionId}", id);
+                    return NotFound();
+                }
+
+                // Users and subusers can only view their own sessions unless they have admin permission
+                bool canView = session.user_email == userEmail ||
+                     await _authService.HasPermissionAsync(userEmail!, "READ_ALL_SESSIONS", isCurrentUserSubuser);
+
+                if (!canView)
+                {
+                    _logger.LogWarning("Unauthorized access attempt for session {SessionId} by {Email}", id, userEmail);
+                    return StatusCode(403, new { error = "You can only view your own sessions" });
+                }
+
+                // Check if session is expired
+                var isExpired = IsSessionExpired(session.login_time, session.logout_time, session.session_status);
+                if (isExpired && session.session_status == "active")
+                {
+                    // Auto-expire the session
+                    await ExpireSessionAsync(session, _context);
+                }
+
+                _logger.LogInformation("Retrieved session {SessionId} for {Email} from {DbType} database",
+                  id, userEmail, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+                var sessionDetails = new
+                {
+                    session.session_id,
+                    session.user_email,
+                    session.login_time,
+                    session.logout_time,
+                    session.ip_address,
+                    session.device_info,
+                    session.session_status,
+                    ExpiresAt = CalculateSessionExpiry(session.login_time, session.session_status),
+                    IsExpired = isExpired,
+                    TimeRemaining = CalculateTimeRemaining(session.login_time, session.logout_time, session.session_status)
+                };
+
+                return Ok(sessionDetails);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching session {SessionId}", id);
+                return StatusCode(500, new { message = "Error retrieving session", error = ex.Message });
+            }
         }
-
-      // Check if session is expired
-   var isExpired = IsSessionExpired(session.login_time, session.logout_time, session.session_status);
-         if (isExpired && session.session_status == "active")
-   {
-      // Auto-expire the session
-   await ExpireSessionAsync(session, _context);
-   }
-
-  _logger.LogInformation("Retrieved session {SessionId} for {Email} from {DbType} database", 
-    id, userEmail, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
-
- var sessionDetails = new {
-   session.session_id,
-session.user_email,
-          session.login_time,
-   session.logout_time,
-  session.ip_address,
-    session.device_info,
-   session.session_status,
-      ExpiresAt = CalculateSessionExpiry(session.login_time, session.session_status),
-     IsExpired = isExpired,
- TimeRemaining = CalculateTimeRemaining(session.login_time, session.logout_time, session.session_status)
-   };
-
-     return Ok(sessionDetails);
-  }
-        catch (Exception ex)
-     {
-   _logger.LogError(ex, "Error fetching session {SessionId}", id);
-      return StatusCode(500, new { message = "Error retrieving session", error = ex.Message });
-}
-    }
 
         /// <summary>
         /// Get user sessions by email with management hierarchy
-     /// </summary>
+        /// </summary>
         [HttpGet("by-email/{email}")]
-   public async Task<ActionResult<IEnumerable<object>>> GetSessionsByEmail(string email)
-      {
+        [DecodeEmail]
+        public async Task<ActionResult<IEnumerable<object>>> GetSessionsByEmail(string email)
+        {
             using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-            
-_logger.LogInformation("🔍 Fetching sessions for user: {Email}", email);
 
-         var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
- var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-  
+            _logger.LogInformation("🔍 Fetching sessions for user: {Email}", email);
+
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+
             // Check if user can view sessions for this email
-         bool canView = email == currentUserEmail ||
-       await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SESSIONS", isCurrentUserSubuser) ||
-      await _authService.CanManageUserAsync(currentUserEmail!, email);
+            bool canView = email == currentUserEmail ||
+          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SESSIONS", isCurrentUserSubuser) ||
+         await _authService.CanManageUserAsync(currentUserEmail!, email);
 
             if (!canView)
             {
-          return StatusCode(403, new { error = "You can only view your own sessions or sessions of users you manage" });
-     }
+                return StatusCode(403, new { error = "You can only view your own sessions or sessions of users you manage" });
+            }
 
-        // Cleanup expired sessions first
+            // Cleanup expired sessions first
             await CleanupExpiredSessionsForUserAsync(email, _context);
 
-         var sessions = await _context.Sessions
- .Where(s => s.user_email == email)
-  .OrderByDescending(s => s.login_time)
-         .ToListAsync();
+            var sessions = await _context.Sessions
+    .Where(s => s.user_email == email)
+     .OrderByDescending(s => s.login_time)
+            .ToListAsync();
 
             _logger.LogInformation("✅ Found {Count} sessions for user: {Email}", sessions.Count, email);
 
-   var sessionResults = sessions.Select(s => new {
-    s.session_id,
-         s.user_email,
-      s.login_time,
-   s.logout_time,
-       s.ip_address,
+            var sessionResults = sessions.Select(s => new
+            {
+                s.session_id,
+                s.user_email,
+                s.login_time,
+                s.logout_time,
+                s.ip_address,
                 s.device_info,
                 s.session_status,
-          ExpiresAt = CalculateSessionExpiry(s.login_time, s.session_status),
- IsExpired = IsSessionExpired(s.login_time, s.logout_time, s.session_status),
-      TimeRemaining = CalculateTimeRemaining(s.login_time, s.logout_time, s.session_status)
+                ExpiresAt = CalculateSessionExpiry(s.login_time, s.session_status),
+                IsExpired = IsSessionExpired(s.login_time, s.logout_time, s.session_status),
+                TimeRemaining = CalculateTimeRemaining(s.login_time, s.logout_time, s.session_status)
             }).ToList();
 
-   return sessionResults.Any() ? Ok(sessionResults) : NotFound();
- }
+            return sessionResults.Any() ? Ok(sessionResults) : NotFound();
+        }
 
-    /// <summary>
+        /// <summary>
         /// Create a new session - Used during login (for both users and subusers)
-      /// </summary>
+        /// </summary>
         [AllowAnonymous]
         [HttpPost]
         public async Task<ActionResult<Sessions>> CreateSession([FromBody] SessionCreateRequest request)
         {
-   try
-        {
-    using var _context = await _contextFactory.CreateDbContextAsync();
-       
-      if (string.IsNullOrEmpty(request.UserEmail))
-  return BadRequest("User email is required");
+            try
+            {
+                using var _context = await _contextFactory.CreateDbContextAsync();
 
-    // Validate that user or subuser exists
-   bool userExists = await _userDataService.UserExistsAsync(request.UserEmail) ||
-      await _userDataService.SubuserExistsAsync(request.UserEmail);
-   
-   if (!userExists)
-       {
-     _logger.LogWarning("Attempted to create session for non-existent user {Email}", request.UserEmail);
-        return BadRequest("User or subuser does not exist");
- }
+                if (string.IsNullOrEmpty(request.UserEmail))
+                    return BadRequest("User email is required");
 
-   var session = new Sessions
- {
-      user_email = request.UserEmail,
-    login_time = DateTime.UtcNow,
-  ip_address = request.IpAddress ?? HttpContext.Connection.RemoteIpAddress?.ToString() ?? "",
-         device_info = request.DeviceInfo ?? Request.Headers["User-Agent"].ToString(),
-   session_status = "active"
-};
+                // Validate that user or subuser exists
+                bool userExists = await _userDataService.UserExistsAsync(request.UserEmail) ||
+                   await _userDataService.SubuserExistsAsync(request.UserEmail);
 
- _context.Sessions.Add(session);
-        await _context.SaveChangesAsync();
+                if (!userExists)
+                {
+                    _logger.LogWarning("Attempted to create session for non-existent user {Email}", request.UserEmail);
+                    return BadRequest("User or subuser does not exist");
+                }
 
- _logger.LogInformation("✅ Created session {SessionId} for {Email} in {DbType} database", 
-  session.session_id, request.UserEmail, 
-   await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+                var session = new Sessions
+                {
+                    user_email = request.UserEmail,
+                    login_time = DateTime.UtcNow,
+                    ip_address = request.IpAddress ?? HttpContext.Connection.RemoteIpAddress?.ToString() ?? "",
+                    device_info = request.DeviceInfo ?? Request.Headers["User-Agent"].ToString(),
+                    session_status = "active"
+                };
 
-     var sessionResponse = new {
-        session.session_id,
- session.user_email,
-   session.login_time,
-          session.ip_address,
-   session.device_info,
-    session.session_status,
-     ExpiresAt = CalculateSessionExpiry(session.login_time, session.session_status),
-TimeRemaining = CalculateTimeRemaining(session.login_time, session.logout_time, session.session_status)
-  };
+                _context.Sessions.Add(session);
+                await _context.SaveChangesAsync();
 
- return CreatedAtAction(nameof(GetSession), new { id = session.session_id }, sessionResponse);
-  }
-   catch (Exception ex)
- {
-    _logger.LogError(ex, "Error creating session for user {Email}", request.UserEmail);
-  return StatusCode(500, new { message = "Error creating session", error = ex.Message });
-  }
+                _logger.LogInformation("✅ Created session {SessionId} for {Email} in {DbType} database",
+                 session.session_id, request.UserEmail,
+                  await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+
+                var sessionResponse = new
+                {
+                    session.session_id,
+                    session.user_email,
+                    session.login_time,
+                    session.ip_address,
+                    session.device_info,
+                    session.session_status,
+                    ExpiresAt = CalculateSessionExpiry(session.login_time, session.session_status),
+                    TimeRemaining = CalculateTimeRemaining(session.login_time, session.logout_time, session.session_status)
+                };
+
+                return CreatedAtAction(nameof(GetSession), new { id = session.session_id }, sessionResponse);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating session for user {Email}", request.UserEmail);
+                return StatusCode(500, new { message = "Error creating session", error = ex.Message });
+            }
         }
 
         /// <summary>
@@ -319,164 +324,168 @@ TimeRemaining = CalculateTimeRemaining(session.login_time, session.logout_time, 
         public async Task<IActionResult> EndSession(int id)
         {
             using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-     
+
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
             var session = await _context.Sessions.FindAsync(id);
- 
+
             if (session == null) return NotFound();
 
-   // Users and subusers can only end their own sessions unless they have admin permission
-     bool canEnd = session.user_email == userEmail ||
-         await _authService.HasPermissionAsync(userEmail!, "END_ALL_SESSIONS", isCurrentUserSubuser);
+            // Users and subusers can only end their own sessions unless they have admin permission
+            bool canEnd = session.user_email == userEmail ||
+                await _authService.HasPermissionAsync(userEmail!, "END_ALL_SESSIONS", isCurrentUserSubuser);
 
-       if (!canEnd)
-  {
-         return StatusCode(403, new { error = "You can only end your own sessions" });
-    }
+            if (!canEnd)
+            {
+                return StatusCode(403, new { error = "You can only end your own sessions" });
+            }
 
-if (session.session_status != "active")
+            if (session.session_status != "active")
                 return BadRequest("Session is already inactive");
 
             session.logout_time = DateTime.UtcNow;
             session.session_status = "closed";
 
-       _context.Entry(session).State = EntityState.Modified;
-   await _context.SaveChangesAsync();
+            _context.Entry(session).State = EntityState.Modified;
+            await _context.SaveChangesAsync();
 
-         return Ok(new { message = "Session ended successfully", sessionId = id });
+            return Ok(new { message = "Session ended successfully", sessionId = id });
         }
 
         /// <summary>
         /// End all active sessions for a user - Admin or user themselves (including subusers)
         /// </summary>
         [HttpPatch("end-all/{email}")]
+        [DecodeEmail]
         public async Task<IActionResult> EndAllUserSessions(string email)
-      {
-     using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-          
-        var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        {
+            using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
+
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
-    // Check if user can end sessions for this email
-bool canEnd = email == currentUserEmail ||
-          await _authService.HasPermissionAsync(currentUserEmail!, "END_ALL_SESSIONS", isCurrentUserSubuser);
 
-          if (!canEnd)
-          {
+            // Check if user can end sessions for this email
+            bool canEnd = email == currentUserEmail ||
+                      await _authService.HasPermissionAsync(currentUserEmail!, "END_ALL_SESSIONS", isCurrentUserSubuser);
+
+            if (!canEnd)
+            {
                 return StatusCode(403, new { error = "You can only end your own sessions or have admin permissions" });
-         }
+            }
 
-        var activeSessions = await _context.Sessions
-    .Where(s => s.user_email == email && s.session_status == "active")
-           .ToListAsync();
+            var activeSessions = await _context.Sessions
+        .Where(s => s.user_email == email && s.session_status == "active")
+               .ToListAsync();
 
             if (!activeSessions.Any())
-      return NotFound("No active sessions found for the user");
+                return NotFound("No active sessions found for the user");
 
-       foreach (var session in activeSessions)
-      {
-            session.logout_time = DateTime.UtcNow;
-    session.session_status = "closed";
-    }
+            foreach (var session in activeSessions)
+            {
+                session.logout_time = DateTime.UtcNow;
+                session.session_status = "closed";
+            }
 
-      await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync();
 
-    return Ok(new { 
-    message = $"Ended {activeSessions.Count} active sessions for user {email}",
-    sessionIds = activeSessions.Select(s => s.session_id).ToList()
+            return Ok(new
+            {
+                message = $"Ended {activeSessions.Count} active sessions for user {email}",
+                sessionIds = activeSessions.Select(s => s.session_id).ToList()
             });
         }
 
         /// <summary>
         /// Extend session expiration time - Users and subusers can extend their own sessions
         /// </summary>
-      [HttpPatch("{id}/extend")]
+        [HttpPatch("{id}/extend")]
         public async Task<IActionResult> ExtendSession(int id, [FromBody] SessionExtendRequest request)
         {
             using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-            
-   var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var session = await _context.Sessions.FindAsync(id);
-   
-   if (session == null) return NotFound();
 
-   // Users and subusers can only extend their own sessions
+            if (session == null) return NotFound();
+
+            // Users and subusers can only extend their own sessions
             if (session.user_email != userEmail)
-            return StatusCode(403, new { error = "You can only extend your own sessions" });
+                return StatusCode(403, new { error = "You can only extend your own sessions" });
 
- if (session.session_status != "active")
-        return BadRequest("Cannot extend inactive session");
+            if (session.session_status != "active")
+                return BadRequest("Cannot extend inactive session");
 
             // Check if session is already expired
-      if (IsSessionExpired(session.login_time, session.logout_time, session.session_status))
-         return BadRequest("Cannot extend expired session");
+            if (IsSessionExpired(session.login_time, session.logout_time, session.session_status))
+                return BadRequest("Cannot extend expired session");
 
             // Update login time to effectively extend the session
-session.login_time = DateTime.UtcNow;
+            session.login_time = DateTime.UtcNow;
 
-// If extended session is requested, mark it
-       if (request.ExtendedSession)
+            // If extended session is requested, mark it
+            if (request.ExtendedSession)
             {
-  if (!session.device_info.Contains("[EXTENDED]"))
-    session.device_info += " [EXTENDED]";
-    }
+                if (!session.device_info.Contains("[EXTENDED]"))
+                    session.device_info += " [EXTENDED]";
+            }
 
-     await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync();
 
-      var newExpiryTime = CalculateSessionExpiry(session.login_time, session.session_status);
+            var newExpiryTime = CalculateSessionExpiry(session.login_time, session.session_status);
 
-         return Ok(new { 
-    message = "Session extended successfully",
-  sessionId = id,
-    newExpiryTime = newExpiryTime,
-      timeRemaining = CalculateTimeRemaining(session.login_time, session.logout_time, session.session_status)
-      });
-   }
+            return Ok(new
+            {
+                message = "Session extended successfully",
+                sessionId = id,
+                newExpiryTime = newExpiryTime,
+                timeRemaining = CalculateTimeRemaining(session.login_time, session.logout_time, session.session_status)
+            });
+        }
 
         /// <summary>
         /// Get session statistics - Users and subusers can see their own stats
         /// </summary>
-     [HttpGet("statistics")]
-   public async Task<ActionResult<object>> GetSessionStatistics([FromQuery] string? userEmail)
-   {
-using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-         
+        [HttpGet("statistics")]
+        public async Task<ActionResult<object>> GetSessionStatistics([FromQuery] string? userEmail)
+        {
+            using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
+
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-         var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            
-// Cleanup expired sessions first
-await CleanupExpiredSessionsAsync(_context);
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
-  IQueryable<Sessions> query = _context.Sessions;
+            // Cleanup expired sessions first
+            await CleanupExpiredSessionsAsync(_context);
 
-  // Apply role-based filtering
-    if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SESSION_STATISTICS", isCurrentUserSubuser))
-       {
- // Users and subusers can only see their own statistics
-  userEmail = currentUserEmail;
+            IQueryable<Sessions> query = _context.Sessions;
+
+            // Apply role-based filtering
+            if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SESSION_STATISTICS", isCurrentUserSubuser))
+            {
+                // Users and subusers can only see their own statistics
+                userEmail = currentUserEmail;
             }
 
- if (!string.IsNullOrEmpty(userEmail))
-     query = query.Where(s => s.user_email == userEmail);
+            if (!string.IsNullOrEmpty(userEmail))
+                query = query.Where(s => s.user_email == userEmail);
 
-            var stats = new {
-         TotalSessions = await query.CountAsync(),
-  ActiveSessions = await query.CountAsync(s => s.session_status == "active"),
+            var stats = new
+            {
+                TotalSessions = await query.CountAsync(),
+                ActiveSessions = await query.CountAsync(s => s.session_status == "active"),
                 ClosedSessions = await query.CountAsync(s => s.session_status == "closed"),
-        ExpiredSessions = await query.CountAsync(s => s.session_status == "expired"),
-    SessionsToday = await query.CountAsync(s => s.login_time.Date == DateTime.UtcNow.Date),
-            SessionsThisWeek = await query.CountAsync(s => s.login_time >= DateTime.UtcNow.AddDays(-7)),
-    SessionsThisMonth = await query.CountAsync(s => s.login_time.Month == DateTime.UtcNow.Month),
-      AverageSessionDuration = await CalculateAverageSessionDurationAsync(query),
-     TopDevices = await query
+                ExpiredSessions = await query.CountAsync(s => s.session_status == "expired"),
+                SessionsToday = await query.CountAsync(s => s.login_time.Date == DateTime.UtcNow.Date),
+                SessionsThisWeek = await query.CountAsync(s => s.login_time >= DateTime.UtcNow.AddDays(-7)),
+                SessionsThisMonth = await query.CountAsync(s => s.login_time.Month == DateTime.UtcNow.Month),
+                AverageSessionDuration = await CalculateAverageSessionDurationAsync(query),
+                TopDevices = await query
        .Where(s => !string.IsNullOrEmpty(s.device_info))
          .GroupBy(s => s.device_info)
              .Select(g => new { Device = g.Key, Count = g.Count() })
             .OrderByDescending(x => x.Count)
         .Take(5)
             .ToListAsync(),
-    TopIpAddresses = await query
+                TopIpAddresses = await query
    .Where(s => !string.IsNullOrEmpty(s.ip_address))
          .GroupBy(s => s.ip_address)
       .Select(g => new { IpAddress = g.Key, Count = g.Count() })
@@ -485,139 +494,140 @@ await CleanupExpiredSessionsAsync(_context);
       .ToListAsync()
             };
 
-      return Ok(stats);
+            return Ok(stats);
         }
 
         /// <summary>
         /// Cleanup all expired sessions - Admin only
-     /// </summary>
+        /// </summary>
         [HttpPost("cleanup-expired")]
         public async Task<IActionResult> CleanupExpiredSessions()
-{
+        {
             using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
-      
-     var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-      var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
-        
- if (!await _authService.HasPermissionAsync(userEmail!, "CLEANUP_SESSIONS", isCurrentUserSubuser))
-      return StatusCode(403, new { error = "Insufficient permissions to cleanup sessions" });
 
-   var cleanedCount = await CleanupExpiredSessionsAsync(_context);
+            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
 
-   return Ok(new { 
-        message = $"Cleaned up {cleanedCount} expired sessions",
-              cleanedCount = cleanedCount
-       });
+            if (!await _authService.HasPermissionAsync(userEmail!, "CLEANUP_SESSIONS", isCurrentUserSubuser))
+                return StatusCode(403, new { error = "Insufficient permissions to cleanup sessions" });
+
+            var cleanedCount = await CleanupExpiredSessionsAsync(_context);
+
+            return Ok(new
+            {
+                message = $"Cleaned up {cleanedCount} expired sessions",
+                cleanedCount = cleanedCount
+            });
         }
 
         #region Private Helper Methods
 
-   private DateTime CalculateSessionExpiry(DateTime loginTime, string sessionStatus)
+        private DateTime CalculateSessionExpiry(DateTime loginTime, string sessionStatus)
         {
-     if (sessionStatus != "active")
-     return loginTime;
+            if (sessionStatus != "active")
+                return loginTime;
 
-          var timeout = sessionStatus.Contains("[EXTENDED]")
-  ? ExtendedSessionTimeout 
-           : DefaultSessionTimeout;
+            var timeout = sessionStatus.Contains("[EXTENDED]")
+    ? ExtendedSessionTimeout
+             : DefaultSessionTimeout;
 
             return loginTime.Add(timeout);
         }
 
         private bool IsSessionExpired(DateTime loginTime, DateTime? logoutTime, string sessionStatus)
         {
-     if (sessionStatus != "active" || logoutTime.HasValue)
-       return false;
+            if (sessionStatus != "active" || logoutTime.HasValue)
+                return false;
 
             var expiryTime = CalculateSessionExpiry(loginTime, sessionStatus);
-     return DateTime.UtcNow > expiryTime;
-     }
+            return DateTime.UtcNow > expiryTime;
+        }
 
         private string? CalculateTimeRemaining(DateTime loginTime, DateTime? logoutTime, string sessionStatus)
         {
             if (sessionStatus != "active" || logoutTime.HasValue)
-        return null;
+                return null;
 
-     var expiryTime = CalculateSessionExpiry(loginTime, sessionStatus);
-         var timeRemaining = expiryTime - DateTime.UtcNow;
+            var expiryTime = CalculateSessionExpiry(loginTime, sessionStatus);
+            var timeRemaining = expiryTime - DateTime.UtcNow;
 
             if (timeRemaining.TotalMilliseconds <= 0)
-     return "Expired";
+                return "Expired";
 
             if (timeRemaining.TotalDays >= 1)
-    return $"{(int)timeRemaining.TotalDays}d {timeRemaining.Hours}h {timeRemaining.Minutes}m";
-   else if (timeRemaining.TotalHours >= 1)
-      return $"{timeRemaining.Hours}h {timeRemaining.Minutes}m";
-         else
+                return $"{(int)timeRemaining.TotalDays}d {timeRemaining.Hours}h {timeRemaining.Minutes}m";
+            else if (timeRemaining.TotalHours >= 1)
+                return $"{timeRemaining.Hours}h {timeRemaining.Minutes}m";
+            else
                 return $"{timeRemaining.Minutes}m {timeRemaining.Seconds}s";
         }
 
-    private async Task ExpireSessionAsync(Sessions session, ApplicationDbContext context)
+        private async Task ExpireSessionAsync(Sessions session, ApplicationDbContext context)
         {
-     session.session_status = "expired";
-      session.logout_time = DateTime.UtcNow;
-      await context.SaveChangesAsync();
+            session.session_status = "expired";
+            session.logout_time = DateTime.UtcNow;
+            await context.SaveChangesAsync();
         }
 
         private async Task<int> CleanupExpiredSessionsAsync(ApplicationDbContext context)
-   {
+        {
             var expiredSessions = await context.Sessions
       .Where(s => s.session_status == "active")
      .ToListAsync();
 
- var cleanedCount = 0;
-     foreach (var session in expiredSessions)
-     {
-                if (IsSessionExpired(session.login_time, session.logout_time, session.session_status))
-         {
- await ExpireSessionAsync(session, context);
-          cleanedCount++;
-    }
-      }
-
-            return cleanedCount;
-  }
-
- private async Task<int> CleanupExpiredSessionsForUserAsync(string userEmail, ApplicationDbContext context)
-{
-        var expiredSessions = await context.Sessions
-  .Where(s => s.user_email == userEmail && s.session_status == "active")
-   .ToListAsync();
-
-         var cleanedCount = 0;
-     foreach (var session in expiredSessions)
+            var cleanedCount = 0;
+            foreach (var session in expiredSessions)
             {
-      if (IsSessionExpired(session.login_time, session.logout_time, session.session_status))
-    {
-         await ExpireSessionAsync(session, context);
-   cleanedCount++;
-     }
+                if (IsSessionExpired(session.login_time, session.logout_time, session.session_status))
+                {
+                    await ExpireSessionAsync(session, context);
+                    cleanedCount++;
+                }
             }
 
-  return cleanedCount;
+            return cleanedCount;
         }
 
-    private async Task<string> CalculateAverageSessionDurationAsync(IQueryable<Sessions> query)
+        private async Task<int> CleanupExpiredSessionsForUserAsync(string userEmail, ApplicationDbContext context)
         {
-       var closedSessions = await query
-           .Where(s => s.logout_time.HasValue)
-          .Select(s => new { s.login_time, s.logout_time })
-     .ToListAsync();
+            var expiredSessions = await context.Sessions
+      .Where(s => s.user_email == userEmail && s.session_status == "active")
+       .ToListAsync();
+
+            var cleanedCount = 0;
+            foreach (var session in expiredSessions)
+            {
+                if (IsSessionExpired(session.login_time, session.logout_time, session.session_status))
+                {
+                    await ExpireSessionAsync(session, context);
+                    cleanedCount++;
+                }
+            }
+
+            return cleanedCount;
+        }
+
+        private async Task<string> CalculateAverageSessionDurationAsync(IQueryable<Sessions> query)
+        {
+            var closedSessions = await query
+                .Where(s => s.logout_time.HasValue)
+               .Select(s => new { s.login_time, s.logout_time })
+          .ToListAsync();
 
             if (!closedSessions.Any())
-return "N/A";
+                return "N/A";
 
-  var totalMinutes = closedSessions
-      .Where(s => s.logout_time.HasValue)
-    .Average(s => (s.logout_time!.Value - s.login_time).TotalMinutes);
+            var totalMinutes = closedSessions
+                .Where(s => s.logout_time.HasValue)
+              .Average(s => (s.logout_time!.Value - s.login_time).TotalMinutes);
 
             if (totalMinutes >= 60)
-          return $"{totalMinutes / 60:F1} hours";
+                return $"{totalMinutes / 60:F1} hours";
             else
-  return $"{totalMinutes:F1} minutes";
+                return $"{totalMinutes:F1} minutes";
         }
 
-      #endregion
+        #endregion
     }
 
     /// <summary>
