@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Attributes;
+using BitRaserApiProject.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
 using System.Text.Json;
 using BitRaserApiProject.Factories;
 
@@ -174,15 +175,18 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
+                // ✅ CRITICAL: Decode email before any usage
+                var decodedEmail = Base64EmailEncoder.DecodeEmailParam(email);
+                
                 using var context = await _contextFactory.CreateDbContextAsync();
 
                 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
-                // Check if user can view reports for this email
-                bool canView = email == currentUserEmail ||
+                // Check if user can view reports for this email - use decoded email
+                bool canView = decodedEmail == currentUserEmail?.ToLower() ||
                                  await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser) ||
-                               await _authService.CanManageUserAsync(currentUserEmail!, email);
+                               await _authService.CanManageUserAsync(currentUserEmail!, decodedEmail);
 
                 if (!canView)
                 {
@@ -190,12 +194,12 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 var reports = await context.AuditReports
-                       .Where(r => r.client_email == email)
+                       .Where(r => r.client_email.ToLower() == decodedEmail) // ✅ Use decoded email
               .OrderByDescending(r => r.report_datetime)
                           .ToListAsync();
 
-                _logger.LogInformation("Retrieved {Count} reports for {Email} from {DbType} database",
-                       reports.Count, email, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
+                _logger.LogInformation("Retrieved {Count} reports for {Email} (decoded) from {DbType} database",
+                       reports.Count, decodedEmail, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
 
                 return reports.Any() ? Ok(reports) : NotFound();
             }

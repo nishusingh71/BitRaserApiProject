@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Attributes;
+using BitRaserApiProject.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
 using BCrypt.Net;
 using System.ComponentModel.DataAnnotations;
 using BitRaserApiProject.Factories;
@@ -137,6 +138,9 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
+                // ✅ CRITICAL: Decode email before any usage
+                var decodedEmail = Base64EmailEncoder.DecodeEmailParam(email);
+                
                 // ✅ Create context - routes to private cloud if enabled
                 using var context = await _contextFactory.CreateDbContextAsync();
 
@@ -148,9 +152,9 @@ namespace BitRaserApiProject.Controllers
               .ThenInclude(sr => sr.Role)
           .ThenInclude(r => r.RolePermissions)
         .ThenInclude(rp => rp.Permission)
-                  .FirstOrDefaultAsync(s => s.subuser_email == email);
+                  .FirstOrDefaultAsync(s => s.subuser_email.ToLower() == decodedEmail); // ✅ Use decoded email
 
-                if (subuser == null) return NotFound($"Subuser with email {email} not found");
+                if (subuser == null) return NotFound($"Subuser with email {decodedEmail} not found");
 
                 // Check if user can view this subuser
                 bool canView = subuser.user_email == currentUserEmail ||
@@ -205,21 +209,26 @@ namespace BitRaserApiProject.Controllers
         /// Get subusers by parent user email with management hierarchy
         /// </summary>
         [HttpGet("by-parent/{parentEmail}")]
-        [DecodeEmail]
+        [DecodeParentEmail]
         public async Task<ActionResult<IEnumerable<object>>> GetSubusersByParent(string parentEmail)
         {
             try
             {
+                // ✅ CRITICAL: Decode parentEmail before any usage
+                var decodedParentEmail = Base64EmailEncoder.DecodeEmailParam(parentEmail);
+                
                 // ✅ Create context - routes to private cloud if enabled
                 using var context = await _contextFactory.CreateDbContextAsync();
 
                 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
-                // Check if user can view subusers for this parent email
-                bool canView = parentEmail == currentUserEmail ||
+                _logger.LogInformation("🔍 Fetching subusers for parent: {ParentEmail} (decoded)", decodedParentEmail);
+
+                // Check if user can view subusers for this parent email - use decoded email
+                bool canView = decodedParentEmail == currentUserEmail?.ToLower() ||
          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser) ||
-                 await _authService.CanManageUserAsync(currentUserEmail!, parentEmail);
+                 await _authService.CanManageUserAsync(currentUserEmail!, decodedParentEmail);
 
                 if (!canView)
                 {
@@ -229,7 +238,7 @@ namespace BitRaserApiProject.Controllers
                 var subusers = await context.subuser
               .Include(s => s.SubuserRoles)
                .ThenInclude(sr => sr.Role)
-                  .Where(s => s.user_email == parentEmail)
+                  .Where(s => s.user_email.ToLower() == decodedParentEmail) // ✅ Use decoded email
          .OrderByDescending(s => s.subuser_id)
            .Select(s => new
            {

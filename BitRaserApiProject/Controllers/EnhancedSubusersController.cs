@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Attributes;
+using BitRaserApiProject.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
 using BitRaserApiProject.Factories; // ✅ ADD THIS
 using Microsoft.Extensions.Logging;
 
@@ -156,6 +157,9 @@ namespace BitRaserApiProject.Controllers
         [DecodeEmail]  // ✅ Base64 decode email parameter
         public async Task<ActionResult<object>> GetSubuserByEmail(string email)
         {
+            // ✅ ALWAYS decode email parameter before any usage
+            var decodedEmail = Base64EmailEncoder.DecodeEmailParam(email);
+            
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
@@ -167,10 +171,10 @@ namespace BitRaserApiProject.Controllers
           .ThenInclude(sr => sr.Role)
           .ThenInclude(r => r.RolePermissions)
           .ThenInclude(rp => rp.Permission)
-         .FirstOrDefaultAsync(s => s.subuser_email == email);
+         .FirstOrDefaultAsync(s => s.subuser_email.ToLower() == decodedEmail); // ✅ Use decoded email
 
             if (subuser == null)
-                return NotFound($"Subuser with email {email} not found");
+                return NotFound($"Subuser with email {decodedEmail} not found");
 
             // Check if user can view this subuser
             bool canView = subuser.user_email == currentUserEmail ||
@@ -241,37 +245,92 @@ namespace BitRaserApiProject.Controllers
 
         /// <summary>
         /// Get subusers by parent user email
+        /// Accepts Base64-encoded email from URL (auto-decoded by [DecodeEmail] attribute)
+        /// Then queries database with plain text email
         /// </summary>
         [HttpGet("by-parent/{parentEmail}")]
-        [DecodeEmail]  // ✅ Base64 decode parentEmail parameter
+        [DecodeParentEmail]  // ✅ Automatically decodes Base64 → plain email before method execution
         public async Task<ActionResult<IEnumerable<object>>> GetSubusersByParent(string parentEmail)
         {
+            // ✅ CRITICAL FIX: Always decode parentEmail before any usage
+            var decodedParentEmail = Base64EmailEncoder.DecodeEmailParam(parentEmail);
+            
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
             // ✅ USE DYNAMIC CONTEXT (ROUTES TO PRIVATE DB IF CONFIGURED)
             using var _context = await _contextFactory.CreateDbContextAsync();
 
-            _logger.LogInformation("🔍 Fetching subusers for parent: {ParentEmail}", parentEmail);
+            // ✅ DETAILED LOGGING FOR DEBUGGING
+            _logger.LogInformation("🔍 === SUBUSER DEBUG START ===");
+            _logger.LogInformation("🔍 Raw Parent Email: {RawEmail}, Decoded: {DecodedEmail}", parentEmail, decodedParentEmail);
+            _logger.LogInformation("🔍 Current User Email (JWT): {CurrentEmail}", currentUserEmail);
+            _logger.LogInformation("🔍 Is Current User Subuser: {IsSubuser}", isCurrentUserSubuser);
 
-            // Check if user can view subusers for this parent
-            bool canView = parentEmail == currentUserEmail ||
+            // ✅ STEP 1: CHECK PERMISSIONS - use decoded email for comparison
+            bool canView = decodedParentEmail == currentUserEmail?.ToLower() ||
              await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser);
+
+            _logger.LogInformation("🔍 Can View Permission: {CanView}", canView);
 
             if (!canView)
             {
-                return StatusCode(403, new { error = "You can only view your own subusers" });
+                _logger.LogWarning("❌ Permission denied for {CurrentEmail} to view subusers of {ParentEmail}",
+                    currentUserEmail, decodedParentEmail);
+                return StatusCode(403, new 
+                { 
+                    success = false,
+                    error = "You can only view your own subusers",
+                    requestedParentEmail = decodedParentEmail,
+                    currentUserEmail = currentUserEmail
+                });
             }
+
+            // ✅ STEP 2: QUERY DATABASE WITH DECODED (PLAIN TEXT) EMAIL
+            _logger.LogInformation("🔍 Executing SQL: SELECT * FROM subuser WHERE LOWER(user_email) = '{DecodedEmail}'", 
+                decodedParentEmail);
 
             var subusers = await _context.subuser
              .Include(s => s.SubuserRoles)
            .ThenInclude(sr => sr.Role)
-            .Where(s => s.user_email == parentEmail)
+            .Where(s => s.user_email.ToLower() == decodedParentEmail)  // ✅ Using decoded email with case-insensitive match!
         .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
 
-            _logger.LogInformation("✅ Found {Count} subusers for parent: {ParentEmail}",
-               subusers.Count, parentEmail);
+            _logger.LogInformation("✅ Database query complete. Found {Count} subusers", subusers.Count);
+
+            // ✅ STEP 3: DEBUG LOGGING - Helps diagnose why data might not be found
+            var allParentEmails = await _context.subuser
+                .Select(s => s.user_email)
+                .Distinct()
+                .ToListAsync();
+            _logger.LogInformation("🔍 All parent emails in database ({Count}): {ParentEmails}",
+                allParentEmails.Count, string.Join(", ", allParentEmails));
+
+            // Check for exact match
+            var exactMatch = allParentEmails.Any(e => e == parentEmail);
+            _logger.LogInformation("🔍 Exact match for '{ParentEmail}': {Match}", parentEmail, exactMatch);
+
+            // Check for case-insensitive match (common issue)
+            if (!exactMatch && allParentEmails.Any())
+            {
+                var caseInsensitiveMatch = allParentEmails
+                    .FirstOrDefault(e => e.Equals(parentEmail, StringComparison.OrdinalIgnoreCase));
+                
+                if (caseInsensitiveMatch != null)
+                {
+                    _logger.LogWarning("⚠️ CASE MISMATCH DETECTED! Database: '{DbEmail}', Searched: '{SearchEmail}'",
+                        caseInsensitiveMatch, parentEmail);
+                    _logger.LogWarning("⚠️ Fix: UPDATE subuser SET user_email = LOWER(user_email);");
+                }
+                else if (subusers.Count == 0)
+                {
+                    _logger.LogWarning("⚠️ NO SUBUSERS FOUND for '{Email}'. Available parents: {Parents}",
+                        parentEmail, string.Join(", ", allParentEmails));
+                }
+            }
+
+            _logger.LogInformation("🔍 === SUBUSER DEBUG END ===");
 
             var subuserDetails = subusers.Select(s => new
             {

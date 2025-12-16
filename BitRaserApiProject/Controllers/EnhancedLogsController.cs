@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Attributes;
+using BitRaserApiProject.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
 using System.Text.Json;
 using BitRaserApiProject.Factories; // ✅ ADDED
 
@@ -177,17 +178,20 @@ namespace BitRaserApiProject.Controllers
         [DecodeEmail]
         public async Task<ActionResult<IEnumerable<logs>>> GetLogsByEmail(string email)
         {
+            // ✅ CRITICAL: Decode email before any usage
+            var decodedEmail = Base64EmailEncoder.DecodeEmailParam(email);
+            
             using var _context = await _contextFactory.CreateDbContextAsync(); // ✅ ADDED
 
-            _logger.LogInformation("🔍 Fetching logs for user: {Email}", email); // ✅ ADDED
+            _logger.LogInformation("🔍 Fetching logs for user: {Email} (decoded)", decodedEmail); // ✅ ADDED
 
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
-            // Check if user can view logs for this email
-            bool canView = email == currentUserEmail ||
+            // Check if user can view logs for this email - use decoded email
+            bool canView = decodedEmail == currentUserEmail?.ToLower() ||
           await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_LOGS", isCurrentUserSubuser) ||
-                     await _authService.CanManageUserAsync(currentUserEmail!, email);
+                     await _authService.CanManageUserAsync(currentUserEmail!, decodedEmail);
 
             if (!canView)
             {
@@ -195,11 +199,11 @@ namespace BitRaserApiProject.Controllers
             }
 
             var logEntries = await _context.logs
-              .Where(l => l.user_email == email)
+              .Where(l => l.user_email.ToLower() == decodedEmail) // ✅ Use decoded email
         .OrderByDescending(l => l.created_at)
                    .ToListAsync();
 
-            _logger.LogInformation("✅ Found {Count} logs for user: {Email}", logEntries.Count, email); // ✅ ADDED
+            _logger.LogInformation("✅ Found {Count} logs for user: {Email}", logEntries.Count, decodedEmail); // ✅ ADDED
 
             return logEntries.Any() ? Ok(logEntries) : NotFound();
         }

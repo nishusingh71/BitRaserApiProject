@@ -94,6 +94,45 @@ namespace BitRaserApiProject.Utilities
         }
 
         /// <summary>
+        /// Decode Base64 email param or pass through if already plain email
+        /// ✅ USE THIS: Always call at start of controller actions with email parameters
+        /// </summary>
+        /// <param name="emailParam">Raw email parameter (may be Base64 or plain)</param>
+        /// <returns>Decoded plain email, lowercase and trimmed</returns>
+        public static string DecodeEmailParam(string emailParam)
+        {
+            if (string.IsNullOrWhiteSpace(emailParam))
+                return emailParam;
+
+            // Already a plain email? Pass through
+            if (IsValidEmail(emailParam))
+                return emailParam.Trim().ToLower();
+
+            // Try to decode as Base64
+            try
+            {
+                // Fix missing Base64 padding
+                var base64 = emailParam
+                    .Replace("-", "+")
+                    .Replace("_", "/");
+                    
+                switch (base64.Length % 4)
+                {
+                    case 2: base64 += "=="; break;
+                    case 3: base64 += "="; break;
+                }
+
+                var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(base64));
+                return decoded.Trim().ToLower();
+            }
+            catch
+            {
+                // If decode fails, return as-is
+                return emailParam.Trim().ToLower();
+            }
+        }
+
+        /// <summary>
         /// Mask email for logging (e.g., j***@g***.com)
         /// </summary>
         public static string MaskEmail(string email)
