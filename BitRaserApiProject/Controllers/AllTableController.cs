@@ -7,6 +7,7 @@ using BitRaserApiProject.Attributes;
 using BitRaserApiProject.Factories;
 using BitRaserApiProject.Models;
 using BitRaserApiProject.Services;
+using BitRaserApiProject.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -836,13 +837,16 @@ namespace BitRaserApiProject.Controllers
         [DecodeEmail]
         public async Task<ActionResult<IEnumerable<machines>>> GetMachinesByEmail(string email)
         {
+            // ✅ CRITICAL: Decode email before any usage
+            var decodedEmail = Base64EmailEncoder.DecodeEmailParam(email);
+            
             using var context = await _contextFactory.CreateDbContextAsync();
 
-            _logger.LogInformation("🔍 Fetching machines for user: {Email}", email);
+            _logger.LogInformation("🔍 Fetching machines for user: {Email} (decoded)", decodedEmail);
 
-            var machines = await context.Machines.Where(m => m.user_email == email).ToListAsync();
+            var machines = await context.Machines.Where(m => m.user_email.ToLower() == decodedEmail).ToListAsync();
 
-            _logger.LogInformation("✅ Found {Count} machines for user: {Email}", machines.Count, email);
+            _logger.LogInformation("✅ Found {Count} machines for user: {Email}", machines.Count, decodedEmail);
 
             return machines.Any() ? Ok(machines) : NotFound();
         }
