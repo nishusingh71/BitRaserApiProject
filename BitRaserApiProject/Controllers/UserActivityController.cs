@@ -1,6 +1,7 @@
 using BitRaserApiProject.Models;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Helpers;  // ✅ ADD: For DateTimeHelper
+using BitRaserApiProject.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -458,6 +459,180 @@ var serverTime = await GetServerTimeAsync();
           _logger.LogError(ex, "Error getting parent subusers status");
     return StatusCode(500, new { success = false, message = "Error getting parent subusers status", error = ex.Message });
       }
+        }
+
+        /// <summary>
+        /// Get all users and subusers activity data - combines data from both tables
+        /// Returns email, last_login, last_logout, and activity_status for all users and subusers
+        /// GET /api/UserActivity/all-activity
+        /// </summary>
+        [HttpGet("all-activity")]
+        public async Task<IActionResult> GetAllUserAndSubuserActivity()
+        {
+            try
+            {
+                var serverTime = await GetServerTimeAsync();
+
+                // Fetch all users
+                var users = await _context.Users
+                    .Select(u => new
+                    {
+                        email = u.user_email,
+                        last_login = u.last_login,
+                        last_logout = u.last_logout,
+                        activity_status = u.activity_status ?? "offline", // Use activity_status if available, fallback to "offline"
+                        user_type = "user",
+                        name = u.user_name
+                    })
+                    .ToListAsync();
+
+                // Fetch all subusers
+                var subusers = await _context.subuser
+                    .Select(s => new
+                    {
+                        email = s.subuser_email,
+                        last_login = s.last_login,
+                        last_logout = s.last_logout,
+                        activity_status = s.activity_status ?? "offline", // Use activity_status if available, fallback to "offline"
+                        user_type = "subuser",
+                        name = s.Name,
+                        parent_email = s.user_email
+                    })
+                    .ToListAsync();
+
+                // Convert users to a common format
+                var userActivities = users.Select(u => new
+                {
+                    email = u.email,
+                    name = u.name,
+                    user_type = u.user_type,
+                    last_login = u.last_login,
+                    last_logout = u.last_logout,
+                    activity_status = u.activity_status,
+                    calculated_status = CalculateUserStatus(u.last_login, u.last_logout, serverTime),
+                    parent_email = (string?)null
+                }).ToList();
+
+                // Convert subusers to a common format
+                var subuserActivities = subusers.Select(s => new
+                {
+                    email = s.email,
+                    name = s.name,
+                    user_type = s.user_type,
+                    last_login = s.last_login,
+                    last_logout = s.last_logout,
+                    activity_status = s.activity_status,
+                    calculated_status = CalculateUserStatus(s.last_login, s.last_logout, serverTime),
+                    parent_email = s.parent_email
+                }).ToList();
+
+                // Combine both lists
+                var combinedActivities = userActivities.Concat(subuserActivities).ToList();
+
+                // Calculate statistics
+                var onlineCount = combinedActivities.Count(a => a.calculated_status == "online");
+                var offlineCount = combinedActivities.Count(a => a.calculated_status == "offline");
+
+                return Ok(new
+                {
+                    success = true,
+                    server_time = serverTime,
+                    total_count = combinedActivities.Count,
+                    user_count = users.Count,
+                    subuser_count = subusers.Count,
+                    online_count = onlineCount,
+                    offline_count = offlineCount,
+                    activities = combinedActivities
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting all user and subuser activity");
+                return StatusCode(500, new { success = false, message = "Error getting activity data", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get all subusers activity data for a specific user
+        /// Returns email, last_login, last_logout, and activity_status for all subusers of the given user
+        /// GET /api/UserActivity/user-subusers-activity/{userEmail}
+        /// Accepts Base64-encoded or plain email parameter
+        /// </summary>
+        [HttpGet("user-subusers-activity/{userEmail}")]
+        public async Task<IActionResult> GetUserSubusersActivityData(string userEmail)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    return BadRequest(new { success = false, message = "User email is required" });
+                }
+
+                // ✅ DECODE: Handle Base64-encoded or plain email
+                var decodedUserEmail = Base64EmailEncoder.DecodeEmailParam(userEmail);
+                _logger.LogInformation("GetUserSubusersActivityData - Original: {Original}, Decoded: {Decoded}", 
+                    userEmail, Base64EmailEncoder.MaskEmail(decodedUserEmail));
+
+                var serverTime = await GetServerTimeAsync();
+
+                // Check if the user exists
+                var userExists = await _context.Users.AnyAsync(u => u.user_email == decodedUserEmail);
+                if (!userExists)
+                {
+                    return NotFound(new { success = false, message = "User not found" });
+                }
+
+                // Fetch all subusers for this user
+                var subusers = await _context.subuser
+                    .Where(s => s.user_email == decodedUserEmail)
+                    .Select(s => new
+                    {
+                        email = s.subuser_email,
+                        name = s.Name,
+                        last_login = s.last_login,
+                        last_logout = s.last_logout,
+                        activity_status = s.activity_status ?? "offline",
+                        role = s.Role,
+                        department = s.Department,
+                        status = s.status
+                    })
+                    .ToListAsync();
+
+                // Calculate online/offline status for each subuser
+                var subuserActivities = subusers.Select(s => new
+                {
+                    email = s.email,
+                    name = s.name,
+                    last_login = s.last_login,
+                    last_logout = s.last_logout,
+                    activity_status = s.activity_status,
+                    calculated_status = CalculateUserStatus(s.last_login, s.last_logout, serverTime),
+                    role = s.role,
+                    department = s.department,
+                    status = s.status
+                }).ToList();
+
+                // Calculate statistics
+                var onlineCount = subuserActivities.Count(s => s.calculated_status == "online");
+                var offlineCount = subuserActivities.Count(s => s.calculated_status == "offline");
+
+                return Ok(new
+                {
+                    success = true,
+                    parent_email = decodedUserEmail,  // ✅ Return decoded email
+                    parent_email_original = userEmail, // Include original for reference
+                    server_time = serverTime,
+                    total_subusers = subuserActivities.Count,
+                    online_subusers = onlineCount,
+                    offline_subusers = offlineCount,
+                    subusers = subuserActivities
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting subusers activity for user {UserEmail}", userEmail);
+                return StatusCode(500, new { success = false, message = "Error getting subusers activity data", error = ex.Message });
+            }
         }
 
         /// <summary>
