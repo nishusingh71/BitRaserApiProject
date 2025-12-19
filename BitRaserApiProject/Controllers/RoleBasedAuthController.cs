@@ -6,6 +6,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;  // ✅ ADD: For JsonPropertyName
 using BCrypt.Net;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Attributes;
@@ -48,27 +49,25 @@ namespace BitRaserApiProject.Controllers
         public class RoleBasedLoginResponse
         {
             public string Token { get; set; } = string.Empty;
-            public string UserType { get; set; } = string.Empty; // "user" or "subuser"
+            public string UserType { get; set; } = string.Empty;
             public string Email { get; set; } = string.Empty;
             public IEnumerable<string> Roles { get; set; } = new List<string>();
-            public IEnumerable<string> Permissions { get; set; } = new List<string>();  // ✅ FIXED: Added closing >
+            public IEnumerable<string> Permissions { get; set; } = new List<string>();
             public DateTime ExpiresAt { get; set; }
 
-            // Enhanced fields - User/Subuser details
-            public string? UserName { get; set; }
-            public string? user_name { get; set; }  // ✅ snake_case for compatibility
-            public string? name { get; set; }       // ✅ ADD: lowercase for maximum compatibility
-            public string? UserRole { get; set; }  // Primary role
+            // ✅ User info - single normalized fields (no duplicates)
+            // PropertyNameCaseInsensitive=true in Program.cs means "Name" and "name" collide!
+            public string? Name { get; set; }
+            public string? UserRole { get; set; }
             public string? UserGroup { get; set; }
             public string? Department { get; set; }
-            public string? Timezone { get; set; }  // User's timezone preference
-            public DateTime? LoginTime { get; set; }  // ✅ Current login time (ISO 8601 via converter)
-            public DateTime? LastLogoutTime { get; set; }  // ✅ Previous logout time (ISO 8601 via converter)
-            public string? Phone { get; set; }
-            public string? phone_number { get; set; }  // ✅ snake_case for compatibility
-            public string? phone { get; set; }          // ✅ ADD: lowercase for maximum compatibility
-            public string? ParentUserEmail { get; set; } // For subusers only
-            public int? UserId { get; set; }  // user_id or subuser_id
+            public string? Timezone { get; set; }
+            public DateTime? LoginTime { get; set; }
+            public DateTime? LastLogoutTime { get; set; }
+            public string? PhoneNumber { get; set; }
+            
+            public string? ParentUserEmail { get; set; }
+            public int? UserId { get; set; }
         }
 
         public class CreateSubuserRequest
@@ -355,8 +354,8 @@ var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email ==
        var token = await GenerateJwtTokenAsync(userEmail, isSubuser);
 
                 // ✅ Get roles and permissions from MAIN DATABASE (always from main DB)
-           var rolesFromRBAC = (await _roleService.GetUserRolesAsync(userEmail, isSubuser)).ToList();
-    var permissions = await _roleService.GetUserPermissionsAsync(userEmail, isSubuser);
+           var rolesFromRBAC = (await _roleService.GetUserRolesAsync(userEmail, isSubuser, isPrivateCloudSubuser ? parentUserEmail : null)).ToList();
+    var permissions = await _roleService.GetUserPermissionsAsync(userEmail, isSubuser, isPrivateCloudSubuser ? parentUserEmail : null);
 
         // Build complete roles array
      var allRoles = new List<string>(rolesFromRBAC);
@@ -402,17 +401,13 @@ var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email ==
         // Add user-specific details
          if (isSubuser && subuserData != null)
  {
-          response.UserName = subuserData.Name;
-          response.user_name = subuserData.Name;  // ✅ snake_case
-          response.name = subuserData.Name;        // ✅ lowercase
-                    response.UserRole = allRoles.FirstOrDefault() ?? "User";
-               response.Department = subuserData.Department;
-        response.Phone = subuserData.Phone;
-        response.phone_number = subuserData.Phone;  // ✅ snake_case
-        response.phone = subuserData.Phone;          // ✅ lowercase
-  response.Timezone = subuserData.timezone;
-             response.ParentUserEmail = subuserData.user_email;
-           response.UserId = subuserData.subuser_id;
+          response.Name = subuserData.Name;
+          response.UserRole = allRoles.FirstOrDefault() ?? "User";
+          response.Department = subuserData.Department;
+          response.PhoneNumber = subuserData.Phone;
+          response.Timezone = subuserData.timezone;
+          response.ParentUserEmail = subuserData.user_email;
+          response.UserId = subuserData.subuser_id;
 
         if (subuserData.GroupId.HasValue)
        {
@@ -422,16 +417,12 @@ var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email ==
             }
   else if (mainUser != null)
           {
-      response.UserName = mainUser.user_name;
-      response.user_name = mainUser.user_name;    // ✅ snake_case
-      response.name = mainUser.user_name;          // ✅ lowercase
-        response.UserRole = allRoles.FirstOrDefault() ?? "User";
-     response.Department = mainUser.department;
-       response.Phone = mainUser.phone_number;
-       response.phone_number = mainUser.phone_number;  // ✅ snake_case
-       response.phone = mainUser.phone_number;          // ✅ lowercase
- response.Timezone = mainUser.timezone;
-  response.UserId = mainUser.user_id;
+      response.Name = mainUser.user_name;
+      response.UserRole = allRoles.FirstOrDefault() ?? "User";
+      response.Department = mainUser.department;
+      response.PhoneNumber = mainUser.phone_number;
+      response.Timezone = mainUser.timezone;
+      response.UserId = mainUser.user_id;
 
                if (!string.IsNullOrEmpty(mainUser.user_group))
             {

@@ -139,14 +139,42 @@ if (user == null) return false;
             }
         }
 
-        public async Task<IEnumerable<string>> GetUserPermissionsAsync(string email, bool isSubuser = false)
+        public async Task<IEnumerable<string>> GetUserPermissionsAsync(string email, bool isSubuser = false, string? parentUserEmail = null)
         {
      try
     {
-   // ✅ ALWAYS use Main DB for roles/permissions (not Private Cloud DB)
-     var context = _context; // Always use main context for roles
-     
-      if (isSubuser)
+        ApplicationDbContext context;
+        
+        // ✅ If parentUserEmail is provided, this is a private cloud subuser
+        if (!string.IsNullOrEmpty(parentUserEmail) && isSubuser)
+        {
+            _logger.LogInformation("🔍 Fetching permissions for private cloud subuser {Email} under parent {Parent}", email, parentUserEmail);
+            
+            try
+            {
+                // Get private cloud connection string
+                var connectionString = await _tenantService.GetConnectionStringForUserAsync(parentUserEmail);
+                
+                // Create temporary context for private cloud DB
+                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+                
+                context = new ApplicationDbContext(optionsBuilder.Options);
+                _logger.LogDebug("✅ Using private cloud DB for permissions lookup");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "⚠️ Failed to connect to private cloud DB, falling back to main DB");
+                context = _context;
+            }
+        }
+        else
+        {
+            // Use Main DB for normal users and main DB subusers
+            context = _context;
+        }
+      
+       if (isSubuser)
   {
          var subuser = await context.subuser
  .Include(s => s.SubuserRoles)
@@ -155,7 +183,12 @@ if (user == null) return false;
      .ThenInclude(rp => rp.Permission)
       .FirstOrDefaultAsync(s => s.subuser_email == email);
 
-   if (subuser == null) return new List<string>();
+   if (subuser == null) 
+   {
+       _logger.LogWarning("⚠️ Subuser {Email} not found in {DbType} database", email, 
+           !string.IsNullOrEmpty(parentUserEmail) ? "private cloud" : "main");
+       return new List<string>();
+   }
 
           return subuser.SubuserRoles
       .SelectMany(sr => sr.Role.RolePermissions)
@@ -182,7 +215,7 @@ else
     .Include(u => u.UserRoles)
      .ThenInclude(ur => ur.Role)
       .ThenInclude(r => r.RolePermissions)
-          .ThenInclude(rp => rp.Permission)
+ .ThenInclude(rp => rp.Permission)
  .FirstOrDefaultAsync(u => u.user_email == email);
       }
 
@@ -195,19 +228,47 @@ else
  }
   catch (Exception ex)
    {
-          _logger.LogError(ex, "Error getting permissions for user {Email}", email);
+         _logger.LogError(ex, "Error getting permissions for user {Email}", email);
      return new List<string>();
  }
         }
 
-        public async Task<IEnumerable<string>> GetUserRolesAsync(string email, bool isSubuser = false)
+
+        public async Task<IEnumerable<string>> GetUserRolesAsync(string email, bool isSubuser = false, string? parentUserEmail = null)
         {
  try
         {
-   // ✅ ALWAYS use Main DB for roles (not Private Cloud DB)
-   // Roles, UserRoles, SubuserRoles tables are ONLY in Main DB
-       var context = _context; // Always use main context for roles
-     
+            ApplicationDbContext context;
+            
+            // ✅ If parentUserEmail is provided, this is a private cloud subuser
+            if (!string.IsNullOrEmpty(parentUserEmail) && isSubuser)
+            {
+                _logger.LogInformation("🔍 Fetching roles for private cloud subuser {Email} under parent {Parent}", email, parentUserEmail);
+                
+                try
+                {
+                    // Get private cloud connection string
+                    var connectionString = await _tenantService.GetConnectionStringForUserAsync(parentUserEmail);
+                    
+                    // Create temporary context for private cloud DB
+                    var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                    optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+                    
+                    context = new ApplicationDbContext(optionsBuilder.Options);
+                    _logger.LogDebug("✅ Using private cloud DB for roles lookup");
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "⚠️ Failed to connect to private cloud DB, falling back to main DB");
+                    context = _context;
+                }
+            }
+            else
+            {
+                // Use Main DB for normal users and main DB subusers
+                context = _context;
+            }
+      
        // ✅ NEW: Auto-assign Manager role if no roles exist (for Private Cloud users)
   await EnsureUserHasRoleAsync(email, isSubuser, context);
 
@@ -220,7 +281,8 @@ if (isSubuser)
 
     if (subuser == null) 
    {
-     _logger.LogWarning("⚠️ Subuser {Email} not found in database", email);
+     _logger.LogWarning("⚠️ Subuser {Email} not found in {DbType} database", email,
+         !string.IsNullOrEmpty(parentUserEmail) ? "private cloud" : "main");
       return new List<string>();
          }
 
@@ -252,6 +314,7 @@ if (isSubuser)
    return new List<string>();
 }
         }
+
 
   /// <summary>
         /// ✅ UPDATED: Auto-assign roles from Main DB if user has none in current context
