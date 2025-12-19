@@ -56,6 +56,8 @@ namespace BitRaserApiProject.Controllers
 
             // Enhanced fields - User/Subuser details
             public string? UserName { get; set; }
+            public string? user_name { get; set; }  // ✅ snake_case for compatibility
+            public string? name { get; set; }       // ✅ ADD: lowercase for maximum compatibility
             public string? UserRole { get; set; }  // Primary role
             public string? UserGroup { get; set; }
             public string? Department { get; set; }
@@ -63,6 +65,8 @@ namespace BitRaserApiProject.Controllers
             public DateTime? LoginTime { get; set; }  // ✅ Current login time (ISO 8601 via converter)
             public DateTime? LastLogoutTime { get; set; }  // ✅ Previous logout time (ISO 8601 via converter)
             public string? Phone { get; set; }
+            public string? phone_number { get; set; }  // ✅ snake_case for compatibility
+            public string? phone { get; set; }          // ✅ ADD: lowercase for maximum compatibility
             public string? ParentUserEmail { get; set; } // For subusers only
             public int? UserId { get; set; }  // user_id or subuser_id
         }
@@ -399,9 +403,13 @@ var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email ==
          if (isSubuser && subuserData != null)
  {
           response.UserName = subuserData.Name;
+          response.user_name = subuserData.Name;  // ✅ snake_case
+          response.name = subuserData.Name;        // ✅ lowercase
                     response.UserRole = allRoles.FirstOrDefault() ?? "User";
                response.Department = subuserData.Department;
         response.Phone = subuserData.Phone;
+        response.phone_number = subuserData.Phone;  // ✅ snake_case
+        response.phone = subuserData.Phone;          // ✅ lowercase
   response.Timezone = subuserData.timezone;
              response.ParentUserEmail = subuserData.user_email;
            response.UserId = subuserData.subuser_id;
@@ -415,9 +423,13 @@ var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email ==
   else if (mainUser != null)
           {
       response.UserName = mainUser.user_name;
+      response.user_name = mainUser.user_name;    // ✅ snake_case
+      response.name = mainUser.user_name;          // ✅ lowercase
         response.UserRole = allRoles.FirstOrDefault() ?? "User";
      response.Department = mainUser.department;
        response.Phone = mainUser.phone_number;
+       response.phone_number = mainUser.phone_number;  // ✅ snake_case
+       response.phone = mainUser.phone_number;          // ✅ lowercase
  response.Timezone = mainUser.timezone;
   response.UserId = mainUser.user_id;
 
@@ -1051,6 +1063,167 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
             }
         }
 
+        /// <summary>
+        /// Edit Profile - Update name, phone, timezone for both Users and Subusers
+        /// Self-service: User can update their own profile
+        /// Supports both Main DB and Private Cloud databases
+        /// PATCH method for partial updates
+        /// </summary>
+        [HttpPatch("edit-profile")]
+        [Authorize]
+        public async Task<IActionResult> EditProfile([FromBody] EditProfileRequest request)
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+                    return Unauthorized(new { message = "Authentication required" });
+
+                // ✅ Get server time for update timestamp
+                var updateTime = await GetServerTimeAsync();
+
+                // Track which fields were updated
+                var updatedFields = new List<string>();
+
+                // ✅ STEP 1: Try to find as SUBUSER first
+                var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+                
+                if (subuser != null)
+                {
+                    // ✅ SUBUSER FOUND - Update in current database
+                    _logger.LogInformation("📝 Updating profile for SUBUSER: {Email}", currentUserEmail);
+
+                    // Update name if provided
+                    if (!string.IsNullOrWhiteSpace(request.Name))
+                    {
+                        subuser.Name = request.Name.Trim();
+                        updatedFields.Add("Name");
+                    }
+
+                    // Update phone if provided
+                    if (request.Phone != null)
+                    {
+                        subuser.Phone = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
+                        updatedFields.Add("Phone");
+                    }
+
+                    // Update timezone if provided
+                    if (!string.IsNullOrWhiteSpace(request.Timezone))
+                    {
+                        subuser.timezone = request.Timezone.Trim();
+                        updatedFields.Add("Timezone");
+                    }
+
+                    // Check if any fields were updated
+                    if (updatedFields.Count == 0)
+                    {
+                        return BadRequest(new 
+                        { 
+                            message = "No fields to update. Provide at least one field: Name, Phone, or Timezone" 
+                        });
+                    }
+
+                    subuser.UpdatedAt = updateTime;
+                    _context.Entry(subuser).State = EntityState.Modified;
+                    await _context.SaveChangesAsync();
+
+                    _logger.LogInformation("✅ Profile updated for SUBUSER {Email}. Fields: {Fields}", 
+                        currentUserEmail, string.Join(", ", updatedFields));
+
+                    return Ok(new
+                    {
+                        success = true,
+                        message = "Profile updated successfully",
+                        userType = "subuser",
+                        email = currentUserEmail,
+                        name = subuser.Name,
+                        phone = subuser.Phone,
+                        timezone = subuser.timezone,
+                        updatedFields = updatedFields,
+                        updatedAt = updateTime
+                    });
+                }
+
+                // ✅ STEP 2: NOT FOUND AS SUBUSER - Try to find as USER
+                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+                
+                if (user != null)
+                {
+                    // ✅ USER FOUND - Update in Main database
+                    _logger.LogInformation("📝 Updating profile for USER: {Email}", currentUserEmail);
+
+                    // Update name if provided
+                    if (!string.IsNullOrWhiteSpace(request.Name))
+                    {
+                        user.user_name = request.Name.Trim();
+                        updatedFields.Add("Name");
+                    }
+
+                    // Update phone if provided
+                    if (request.Phone != null)
+                    {
+                        user.phone_number = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
+                        updatedFields.Add("Phone");
+                    }
+
+                    // Update timezone if provided
+                    if (!string.IsNullOrWhiteSpace(request.Timezone))
+                    {
+                        user.timezone = request.Timezone.Trim();
+                        updatedFields.Add("Timezone");
+                    }
+
+                    // Check if any fields were updated
+                    if (updatedFields.Count == 0)
+                    {
+                        return BadRequest(new 
+                        { 
+                            message = "No fields to update. Provide at least one field: Name, Phone, or Timezone" 
+                        });
+                    }
+
+                    user.updated_at = updateTime;
+                    _context.Entry(user).State = EntityState.Modified;
+                    await _context.SaveChangesAsync();
+
+                    _logger.LogInformation("✅ Profile updated for USER {Email}. Fields: {Fields}", 
+                        currentUserEmail, string.Join(", ", updatedFields));
+
+                    return Ok(new
+                    {
+                        success = true,
+                        message = "Profile updated successfully",
+                        userType = "user",
+                        email = currentUserEmail,
+                        name = user.user_name,
+                        phone = user.phone_number,
+                        timezone = user.timezone,
+                        updatedFields = updatedFields,
+                        updatedAt = updateTime
+                    });
+                }
+
+                // ✅ NOT FOUND IN MAIN DB - This shouldn't happen if user is authenticated
+                _logger.LogWarning("⚠️ User/Subuser not found for authenticated email: {Email}", currentUserEmail);
+                return NotFound(new 
+                { 
+                    message = "User or subuser profile not found",
+                    email = currentUserEmail
+                });
+            }
+            catch (Exception ex)
+            {
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown";
+                _logger.LogError(ex, "❌ Error updating profile for {Email}", userEmail);
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = "Error updating profile",
+                    error = ex.Message
+                });
+            }
+        }
+
         [HttpPatch("update-timezone")]
         [Authorize]
         public async Task<IActionResult> UpdateTimezone([FromBody] UpdateTimezoneRequest request)
@@ -1568,6 +1741,31 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                     error = ex.Message
                 });
             }
+        }
+
+        /// <summary>
+        /// Request model for editing profile (name, phone, timezone)
+        /// All fields are optional - only provided fields will be updated
+        /// </summary>
+        public class EditProfileRequest
+        {
+            /// <summary>
+            /// User/Subuser name (optional)
+            /// </summary>
+            [MaxLength(100)]
+            public string? Name { get; set; }
+
+            /// <summary>
+            /// Phone number (optional, can be set to null to clear)
+            /// </summary>
+            [MaxLength(20)]
+            public string? Phone { get; set; }
+
+            /// <summary>
+            /// Timezone (optional, e.g., "Asia/Kolkata", "America/New_York")
+            /// </summary>
+            [MaxLength(100)]
+            public string? Timezone { get; set; }
         }
 
         public class UpdateTimezoneRequest

@@ -177,7 +177,7 @@ namespace BitRaserApiProject.Controllers
             {
                 // ✅ CRITICAL: Decode email before any usage
                 var decodedEmail = Base64EmailEncoder.DecodeEmailParam(email);
-                
+
                 using var context = await _contextFactory.CreateDbContextAsync();
 
                 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
@@ -935,7 +935,7 @@ namespace BitRaserApiProject.Controllers
             {
                 ReportData = reportData,
                 ReportTitle = report.report_name ?? $"Report #{report.report_id}",
-                HeaderText = options?.HeaderText ?? $"D-SecureErase Audit Report - ID: {report.report_id}",
+                HeaderText = options?.HeaderText ?? $"D-SecureErase Audit Report",
                 // ✅ Use options if provided, otherwise use logged-in user details
                 TechnicianName = !string.IsNullOrWhiteSpace(options?.TechnicianName) ? options.TechnicianName : userDetails.UserName,
                 TechnicianDept = !string.IsNullOrWhiteSpace(options?.TechnicianDept) ? options.TechnicianDept : userDetails.Department,
@@ -960,7 +960,7 @@ namespace BitRaserApiProject.Controllers
             {
                 ReportData = reportData,
                 ReportTitle = request.ReportTitle ?? report.report_name ?? $"Report #{report.report_id}",
-                HeaderText = request.HeaderText ?? $"D-SecureErase Audit Report - ID: {report.report_id}",
+                HeaderText = request.HeaderText ?? $"D-SecureErase Audit Report",
                 // ✅ Use request values if provided, otherwise use logged-in user details
                 TechnicianName = !string.IsNullOrWhiteSpace(request.TechnicianName) ? request.TechnicianName : userDetails.UserName,
                 TechnicianDept = !string.IsNullOrWhiteSpace(request.TechnicianDept) ? request.TechnicianDept : userDetails.Department,
@@ -1100,7 +1100,7 @@ namespace BitRaserApiProject.Controllers
                 var osVersion = GetJsonString(root, "os_version");
 
                 // ✅ Clean up "N/A" and empty values - convert "N/A" to empty string
-                if (string.IsNullOrWhiteSpace(os) || os.Trim().Equals("N/A", StringComparison.OrdinalIgnoreCase))
+                if (string.IsNullOrWhiteSpace(os) || os.Trim().Equals("", StringComparison.OrdinalIgnoreCase))
                 {
                     os = string.Empty;  // ✅ Blank string instead of null
                 }
@@ -1109,7 +1109,7 @@ namespace BitRaserApiProject.Controllers
                     os = os.Trim();
                 }
 
-                if (string.IsNullOrWhiteSpace(osVersion) || osVersion.Trim().Equals("N/A", StringComparison.OrdinalIgnoreCase))
+                if (string.IsNullOrWhiteSpace(osVersion) || osVersion.Trim().Equals("", StringComparison.OrdinalIgnoreCase))
                 {
                     osVersion = string.Empty;  // ✅ Blank string instead of null
                 }
