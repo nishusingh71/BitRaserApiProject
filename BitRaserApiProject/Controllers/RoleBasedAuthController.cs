@@ -152,117 +152,132 @@ namespace BitRaserApiProject.Controllers
                     // ✅ Try to authenticate as subuser - Check if parent has private cloud FIRST
                     _logger.LogInformation("🔍 User not found, trying subuser authentication for {Email}", request.Email);
    
-         // ✅ STRATEGY: Check Private Cloud databases FIRST, then Main DB
-         // This ensures migrated subusers login to correct database
+                    // ✅ STRATEGY: Check Private Cloud databases FIRST, then Main DB
+                    // This ensures migrated subusers login to correct database
 
-         bool foundInPrivateCloud = false;
+                    bool foundInPrivateCloud = false;
   
- // Get all users with private cloud enabled
-    var privateCloudUsers = await _context.Users
-    .Where(u => u.is_private_cloud == true)
-         .Select(u => new { u.user_email, u.user_id })
-         .ToListAsync();
+                    // Get all users with private cloud enabled
+                    var privateCloudUsers = await _context.Users
+                        .Where(u => u.is_private_cloud == true)
+                        .Select(u => new { u.user_email, u.user_id })
+                        .ToListAsync();
           
-     if (privateCloudUsers.Any())
-         {
- _logger.LogInformation("🔍 Found {Count} private cloud users, checking their databases...", privateCloudUsers.Count);
+                    if (privateCloudUsers.Any())
+                    {
+                        _logger.LogInformation("🔍 Found {Count} private cloud users, checking their databases...", privateCloudUsers.Count);
    
-  // ✅ ADD: Timeout protection - max 30 seconds for all Private Cloud checks
-     var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                        // ✅ IMPROVED: Reduced timeout to 20 seconds for faster failure
+                        var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
    
-  // Check each private cloud database FIRST
-  foreach (var pcUser in privateCloudUsers)
-   {
-  try
-     {
-      // ✅ CHECK: If cancellation requested, break loop
-    if (cts.Token.IsCancellationRequested)
-      {
-_logger.LogWarning("⚠️ Private Cloud DB check timeout - breaking loop");
-   break;
-}
+                        // Check each private cloud database FIRST
+                        foreach (var pcUser in privateCloudUsers)
+                        {
+                            try
+                            {
+                                // ✅ CHECK: If cancellation requested, break loop
+                                if (cts.Token.IsCancellationRequested)
+                                {
+                                    _logger.LogWarning("⚠️ Private Cloud DB check timeout - breaking loop");
+                                    break;
+                                }
     
-      _logger.LogDebug("🔍 Checking private cloud DB for user {ParentEmail}...", pcUser.user_email);
+                                _logger.LogDebug("🔍 Checking private cloud DB for user {ParentEmail}...", pcUser.user_email);
   
-      // Get private cloud connection string for this user
-       var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
-     var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUser.user_email);
+                                // Get private cloud connection string for this user
+                                var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
+                                var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUser.user_email);
     
- // Check if this is a private cloud connection (not main DB)
- var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
-   if (connectionString == mainConnectionString)
-    {
-       _logger.LogDebug("User {Email} does not have an active private cloud DB", pcUser.user_email);
-           continue;
-       }
+                                // Check if this is a private cloud connection (not main DB)
+                                var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
+                                if (connectionString == mainConnectionString)
+                                {
+                                    _logger.LogDebug("User {Email} does not have an active private cloud DB", pcUser.user_email);
+                                    continue;
+                                }
          
-// Create temporary context for this private database
-   var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
-          optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+                                // ✅ IMPROVED: Validate connection string before attempting connection
+                                if (string.IsNullOrWhiteSpace(connectionString) || !connectionString.Contains("Server="))
+                                {
+                                    _logger.LogWarning("⚠️ Invalid connection string for user {Email}, skipping", pcUser.user_email);
+                                    continue;
+                                }
+
+                                // Create temporary context for this private database
+                                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                                
+                                // ✅ IMPROVED: Use fixed MySQL version to avoid slow AutoDetect
+                                var serverVersion = new MySqlServerVersion(new Version(8, 0, 21));
+                                optionsBuilder.UseMySql(connectionString, serverVersion, mysqlOptions =>
+                                {
+                                    mysqlOptions.CommandTimeout(5); // 5 seconds max per query - faster timeout
+                                    mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(2), null);
+                                });
   
-      using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+                                using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
    
-        // ✅ ADD: Set command timeout to prevent hanging
-      privateContext.Database.SetCommandTimeout(10); // 10 seconds max per query
+                                // ✅ IMPROVED: Reduced command timeout to 5 seconds
+                                privateContext.Database.SetCommandTimeout(5);
       
-   // Try to find subuser in this private database
-          var privateSubuser = await privateContext.subuser
-   .FirstOrDefaultAsync(s => s.subuser_email == request.Email, cts.Token);
+                                // Try to find subuser in this private database
+                                var privateSubuser = await privateContext.subuser
+                                    .FirstOrDefaultAsync(s => s.subuser_email == request.Email, cts.Token);
       
-  if (privateSubuser != null && BCrypt.Net.BCrypt.Verify(request.Password, privateSubuser.subuser_password))
-     {
-  // ✅ FOUND in private cloud database!
-   userEmail = request.Email;
-  isSubuser = true;
-           subuserData = privateSubuser;
-          isPrivateCloudSubuser = true;
-            parentUserEmail = pcUser.user_email;
-       foundInPrivateCloud = true;
+                                if (privateSubuser != null && BCrypt.Net.BCrypt.Verify(request.Password, privateSubuser.subuser_password))
+                                {
+                                    // ✅ FOUND in private cloud database!
+                                    userEmail = request.Email;
+                                    isSubuser = true;
+                                    subuserData = privateSubuser;
+                                    isPrivateCloudSubuser = true;
+                                    parentUserEmail = pcUser.user_email;
+                                    foundInPrivateCloud = true;
         
-     _logger.LogInformation("✅ Subuser {Email} authenticated from Private Cloud DB of parent {ParentEmail}", 
- request.Email, pcUser.user_email);
- break;
-    }
-       }
-  catch (OperationCanceledException)
-   {
-  _logger.LogWarning("⚠️ Private Cloud DB check cancelled due to timeout");
-      break;
-    }
-   catch (MySql.Data.MySqlClient.MySqlException mysqlEx)
-  {
-       _logger.LogWarning(mysqlEx, "⚠️ MySQL error checking private cloud DB for user {Email} - Code: {Code}", 
-     pcUser.user_email, mysqlEx.Number);
- // Continue to next private cloud user
-        }
-    catch (Exception ex)
-     {
-        _logger.LogWarning(ex, "⚠️ Failed to check private cloud DB for user {Email}", pcUser.user_email);
-   // Continue to next private cloud user
-     }
-   }
-        }
+                                    _logger.LogInformation("✅ Subuser {Email} authenticated from Private Cloud DB of parent {ParentEmail}", 
+                                        request.Email, pcUser.user_email);
+                                    break;
+                                }
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                _logger.LogWarning("⚠️ Private Cloud DB check cancelled due to timeout for user {Email}", pcUser.user_email);
+                                // Continue to next private cloud user instead of breaking
+                                continue;
+                            }
+                            catch (MySql.Data.MySqlClient.MySqlException mysqlEx)
+                            {
+                                _logger.LogWarning("⚠️ MySQL error checking private cloud DB for user {Email} - Code: {Code}, Message: {Message}", 
+                                    pcUser.user_email, mysqlEx.Number, mysqlEx.Message);
+                                // Continue to next private cloud user
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning("⚠️ Failed to check private cloud DB for user {Email}: {Message}", pcUser.user_email, ex.Message);
+                                // Continue to next private cloud user
+                            }
+                        }
+                    }
              
-   // ✅ If NOT found in private cloud, check MAIN DB
- if (!foundInPrivateCloud)
-       {
-     _logger.LogInformation("🔍 Not found in Private Cloud, checking Main DB for {Email}", request.Email);
+                    // ✅ If NOT found in private cloud, check MAIN DB
+                    if (!foundInPrivateCloud)
+                    {
+                        _logger.LogInformation("🔍 Not found in Private Cloud, checking Main DB for {Email}", request.Email);
  
-var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+                        var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
      
-  if (subuser != null && BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
-   {
-        // Found in main database
-   userEmail = request.Email;
-     isSubuser = true;
-         subuserData = subuser;
-      isPrivateCloudSubuser = false;
-          parentUserEmail = subuser.user_email;
+                        if (subuser != null && BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
+                        {
+                            // Found in main database
+                            userEmail = request.Email;
+                            isSubuser = true;
+                            subuserData = subuser;
+                            isPrivateCloudSubuser = false;
+                            parentUserEmail = subuser.user_email;
   
-    _logger.LogInformation("✅ Subuser {Email} authenticated from Main DB", request.Email);
-   }
-   }
-     }
+                            _logger.LogInformation("✅ Subuser {Email} authenticated from Main DB", request.Email);
+                        }
+                    }
+                }
 
       if (userEmail == null)
     {
@@ -816,6 +831,8 @@ return StatusCode(500, new { message = "An error occurred during login" });
           .Select(u => new { u.user_email, u.user_id })
       .ToListAsync();
       
+          bool logoutUpdatedInPrivateCloud = false;
+      
  foreach (var pcUser in privateCloudUsers)
         {
   try
@@ -827,10 +844,27 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
         if (connectionString == mainConnectionString)
                  continue;
    
+                // ✅ IMPROVED: Validate connection string
+                if (string.IsNullOrWhiteSpace(connectionString) || !connectionString.Contains("Server="))
+                {
+                    _logger.LogWarning("⚠️ Invalid connection string for user {Email}, skipping logout update", pcUser.user_email);
+                    continue;
+                }
+                
   var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
-         optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+                
+                // ✅ IMPROVED: Use fixed MySQL version to avoid slow AutoDetect
+                var serverVersion = new MySqlServerVersion(new Version(8, 0, 21));
+                optionsBuilder.UseMySql(connectionString, serverVersion, mysqlOptions =>
+                {
+                    mysqlOptions.CommandTimeout(5); // 5 seconds max per query
+                    mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(2), null);
+                });
    
   using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+                
+                // ✅ IMPROVED: Reduced command timeout
+                privateContext.Database.SetCommandTimeout(5);
           
    var privateSubuser = await privateContext.subuser
             .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
@@ -841,17 +875,46 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
  privateSubuser.last_logout = logoutTime;
     privateSubuser.activity_status = "offline";
              privateContext.Entry(privateSubuser).State = EntityState.Modified;
-        await privateContext.SaveChangesAsync();
-                     
-          _logger.LogInformation("✅ Updated logout in Private Cloud DB for subuser {Email}", userEmail);
-            break;
+                
+                // ✅ CRITICAL FIX: Ensure SaveChangesAsync completes successfully
+                var saveResult = await privateContext.SaveChangesAsync();
+                
+                if (saveResult > 0)
+                {
+                    logoutUpdatedInPrivateCloud = true;
+                    _logger.LogInformation("✅ Updated logout in Private Cloud DB for subuser {Email} (parent: {Parent}). Rows affected: {Rows}", 
+                        userEmail, pcUser.user_email, saveResult);
+                    break; // Success - exit loop
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ SaveChanges returned 0 rows for subuser {Email} in Private Cloud DB (parent: {Parent})", 
+                        userEmail, pcUser.user_email);
+                }
         }
+        else
+        {
+            _logger.LogDebug("Subuser {Email} not found in Private Cloud DB of parent {Parent}", 
+                userEmail, pcUser.user_email);
+        }
+     }
+     catch (MySql.Data.MySqlClient.MySqlException mysqlEx)
+     {
+         _logger.LogWarning("⚠️ MySQL error updating logout in Private Cloud DB for user {Email} - Code: {Code}, Message: {Message}", 
+             pcUser.user_email, mysqlEx.Number, mysqlEx.Message);
+         // Continue to next private cloud user
      }
                  catch (Exception ex)
       {
       _logger.LogWarning(ex, "⚠️ Failed to update logout in Private Cloud DB for user {Email}", pcUser.user_email);
        }
 }
+
+            // ✅ Check if logout was updated in any private cloud database
+            if (!logoutUpdatedInPrivateCloud)
+            {
+                _logger.LogWarning("⚠️ Failed to update logout for subuser {Email} in any Private Cloud database", userEmail);
+            }
          }
      }
  else
