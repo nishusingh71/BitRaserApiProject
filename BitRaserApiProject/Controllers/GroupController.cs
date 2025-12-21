@@ -73,9 +73,9 @@ namespace BitRaserApiProject.Controllers
     })
 .ToListAsync();
 
-      Response.Headers.Add("X-Total-Count", total.ToString());
-     Response.Headers.Add("X-Page", page.ToString());
-  Response.Headers.Add("X-Page-Size", pageSize.ToString());
+      Response.Headers.Append("X-Total-Count", total.ToString());
+     Response.Headers.Append("X-Page", page.ToString());
+  Response.Headers.Append("X-Page-Size", pageSize.ToString());
 
                 return Ok(groups);
   }

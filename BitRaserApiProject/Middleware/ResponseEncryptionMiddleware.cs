@@ -95,15 +95,18 @@ _logger.LogWarning(
    {
     // ✅ Calculate original size for logging
     var originalSize = Encoding.UTF8.GetByteCount(responseBody);
+    
+    // ✅ Check if compression will be applied (only for payloads >= 1KB)
+    var willCompress = EncryptionHelper.ShouldCompress(originalSize);
 
-        // Encrypt the response body (now includes Gzip compression)
+        // Encrypt the response body (compression is smart - only for large payloads)
       var encryptedResponse = EncryptionHelper.Encrypt(responseBody, _encryptionKey);
 
-      // ✅ Full response format with all fields
+      // ✅ Full response format with dynamic compressed flag
   var encryptedWrapper = new
       {
        encrypted = true,
-       compressed = true,
+       compressed = willCompress,
        data = encryptedResponse,
     
    };
@@ -120,16 +123,18 @@ _logger.LogWarning(
     responseBodyStream.Seek(0, SeekOrigin.Begin);
   await originalBodyStream.WriteAsync(encryptedBytes, 0, encryptedBytes.Length);
 
-// ✅ Calculate compression ratio
-var compressionRatio = originalSize > 0 ? (1 - ((double)encryptedBytes.Length / originalSize)) * 100 : 0;
+// ✅ Calculate size difference
+var sizeDiff = originalSize > 0 ? (1 - ((double)encryptedBytes.Length / originalSize)) * 100 : 0;
+var compressionStatus = willCompress ? "compressed+encrypted" : "encrypted (no compression - small payload)";
 
 _logger.LogDebug(
- "✅ Response compressed+encrypted for {Method} {Path} - Original: {OriginalSize} bytes, Final: {EncryptedSize} bytes, Compression: {Ratio:F1}%",
+ "✅ Response {Status} for {Method} {Path} - Original: {OriginalSize} bytes, Final: {EncryptedSize} bytes, Diff: {Ratio:F1}%",
+      compressionStatus,
       context.Request.Method,
     context.Request.Path,
         originalSize,
    encryptedBytes.Length,
-   compressionRatio);
+   sizeDiff);
         }
    catch (Exception ex)
    {

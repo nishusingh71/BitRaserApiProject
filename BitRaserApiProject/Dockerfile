@@ -5,8 +5,9 @@ EXPOSE 4000
 FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
 WORKDIR /src
 COPY . .
-RUN dotnet publish -c Release -o /app/publish
-
+# Build the project directly (not solution) to avoid NETSDK1194 warning
+# Suppress all warnings with -p:NoWarn for cleaner Docker build output
+RUN dotnet publish BitRaserApiProject/BitRaserApiProject.csproj -c Release -o /app/publish -p:TreatWarningsAsErrors=false --nologo
 FROM base AS final
 WORKDIR /app
 COPY --from=build /app/publish .

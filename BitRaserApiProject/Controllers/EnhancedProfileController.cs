@@ -745,11 +745,13 @@ namespace BitRaserApiProject.Controllers
             var managerRole = await GetCurrentUserHighestRole(managerEmail);
             if (managerRole == null) return 0;
 
+            var managerHierarchyLevel = managerRole.HierarchyLevel;
+
             return await _context.Users
-                .Include(u => u.UserRoles)
+                .Include(u => u.UserRoles!)
                 .ThenInclude(ur => ur.Role)
                 .CountAsync(u => u.user_email != managerEmail &&
-                               u.UserRoles.Any(ur => ur.Role.HierarchyLevel > managerRole.HierarchyLevel));
+                               u.UserRoles != null && u.UserRoles.Any(ur => ur.Role.HierarchyLevel > managerHierarchyLevel));
         }
 
         private async Task<string?> GetReportsTo(string userEmail)
@@ -757,11 +759,13 @@ namespace BitRaserApiProject.Controllers
             var userRole = await GetCurrentUserHighestRole(userEmail);
             if (userRole == null || userRole.HierarchyLevel <= 1) return null;
 
+            var targetHierarchyLevel = userRole.HierarchyLevel - 1;
+
             // Find users with immediately higher authority (lower hierarchy level)
             var supervisor = await _context.Users
-                .Include(u => u.UserRoles)
+                .Include(u => u.UserRoles!)
                 .ThenInclude(ur => ur.Role)
-                .Where(u => u.UserRoles.Any(ur => ur.Role.HierarchyLevel == userRole.HierarchyLevel - 1))
+                .Where(u => u.UserRoles != null && u.UserRoles.Any(ur => ur.Role.HierarchyLevel == targetHierarchyLevel))
                 .Select(u => u.user_email)
                 .FirstOrDefaultAsync();
 

@@ -127,8 +127,12 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
+                // ✅ LOG: Request received
+                _logger.LogInformation("🔐 LOGIN REQUEST RECEIVED - Email: {Email}", request.Email);
+                
                 if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.Password))
                 {
+                    _logger.LogWarning("❌ LOGIN FAILED - Missing email or password");
                     return BadRequest(new { message = "Email and password are required" });
                 }
 
@@ -139,6 +143,9 @@ namespace BitRaserApiProject.Controllers
                 bool isPrivateCloudSubuser = false;
                 string? parentUserEmail = null;
 
+                // ✅ LOG: Checking main user
+                _logger.LogInformation("🔍 STEP 1: Checking Main DB for user {Email}", request.Email);
+                
                 // Try to authenticate as main user first
                 var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.Email);
                 if (user != null && !string.IsNullOrEmpty(user.hash_password) && BCrypt.Net.BCrypt.Verify(request.Password, user.hash_password))
@@ -146,15 +153,16 @@ namespace BitRaserApiProject.Controllers
                     userEmail = request.Email;
                     isSubuser = false;
                     mainUser = user;
+                    
+                    _logger.LogInformation("✅ MAIN USER AUTHENTICATED - Email: {Email}, IsPrivateCloud: {IsPrivateCloud}", 
+                        request.Email, user.is_private_cloud);
                 }
                 else
                 {
-                    // ✅ Try to authenticate as subuser - Check if parent has private cloud FIRST
-                    _logger.LogInformation("🔍 User not found, trying subuser authentication for {Email}", request.Email);
+                    // ✅ LOG: Main user not found, trying subuser
+                    _logger.LogInformation("🔍 STEP 2: Main user not found, checking as SUBUSER for {Email}", request.Email);
    
                     // ✅ STRATEGY: Check Private Cloud databases FIRST, then Main DB
-                    // This ensures migrated subusers login to correct database
-
                     bool foundInPrivateCloud = false;
   
                     // Get all users with private cloud enabled
@@ -165,9 +173,9 @@ namespace BitRaserApiProject.Controllers
           
                     if (privateCloudUsers.Any())
                     {
-                        _logger.LogInformation("🔍 Found {Count} private cloud users, checking their databases...", privateCloudUsers.Count);
+                        _logger.LogInformation("🔍 STEP 3: Found {Count} private cloud users, checking their databases...", privateCloudUsers.Count);
    
-                        // ✅ IMPROVED: Reduced timeout to 20 seconds for faster failure
+                        // ✅ Timeout protection
                         var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
    
                         // Check each private cloud database FIRST
@@ -175,290 +183,358 @@ namespace BitRaserApiProject.Controllers
                         {
                             try
                             {
-                                // ✅ CHECK: If cancellation requested, break loop
+                                // Check cancellation
                                 if (cts.Token.IsCancellationRequested)
                                 {
-                                    _logger.LogWarning("⚠️ Private Cloud DB check timeout - breaking loop");
+                                    _logger.LogWarning("⚠️ TIMEOUT - Private Cloud DB check exceeded 20 seconds");
                                     break;
                                 }
     
-                                _logger.LogDebug("🔍 Checking private cloud DB for user {ParentEmail}...", pcUser.user_email);
+                                _logger.LogDebug("🔍 Checking private cloud DB for parent user: {ParentEmail}", pcUser.user_email);
   
-                                // Get private cloud connection string for this user
+                                // Get private cloud connection string
                                 var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
                                 var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUser.user_email);
     
-                                // Check if this is a private cloud connection (not main DB)
+                                // Check if this is a private cloud connection
                                 var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
                                 if (connectionString == mainConnectionString)
                                 {
-                                    _logger.LogDebug("User {Email} does not have an active private cloud DB", pcUser.user_email);
+                                    _logger.LogDebug("⏭️ User {Email} does not have an active private cloud DB, skipping", pcUser.user_email);
                                     continue;
                                 }
          
-                                // ✅ IMPROVED: Validate connection string before attempting connection
+                                // Validate connection string
                                 if (string.IsNullOrWhiteSpace(connectionString) || !connectionString.Contains("Server="))
                                 {
-                                    _logger.LogWarning("⚠️ Invalid connection string for user {Email}, skipping", pcUser.user_email);
+                                    _logger.LogWarning("⚠️ INVALID CONNECTION STRING for user {Email}, skipping", pcUser.user_email);
                                     continue;
                                 }
+                                
+                                _logger.LogInformation("📡 CONNECTING to Private Cloud DB for parent: {ParentEmail}", pcUser.user_email);
 
-                                // Create temporary context for this private database
+                                // Create temporary context for private database
                                 var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
                                 
-                                // ✅ IMPROVED: Use fixed MySQL version to avoid slow AutoDetect
+                                // Use fixed MySQL version
                                 var serverVersion = new MySqlServerVersion(new Version(8, 0, 21));
                                 optionsBuilder.UseMySql(connectionString, serverVersion, mysqlOptions =>
                                 {
-                                    mysqlOptions.CommandTimeout(5); // 5 seconds max per query - faster timeout
+                                    mysqlOptions.CommandTimeout(5);
                                     mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(2), null);
                                 });
   
                                 using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
    
-                                // ✅ IMPROVED: Reduced command timeout to 5 seconds
+                                // Set command timeout
                                 privateContext.Database.SetCommandTimeout(5);
       
-                                // Try to find subuser in this private database
+                                _logger.LogDebug("🔍 Searching for subuser {Email} in Private Cloud DB...", request.Email);
+                                
+                                // Try to find subuser
                                 var privateSubuser = await privateContext.subuser
                                     .FirstOrDefaultAsync(s => s.subuser_email == request.Email, cts.Token);
       
-                                if (privateSubuser != null && BCrypt.Net.BCrypt.Verify(request.Password, privateSubuser.subuser_password))
+                                if (privateSubuser != null)
                                 {
-                                    // ✅ FOUND in private cloud database!
-                                    userEmail = request.Email;
-                                    isSubuser = true;
-                                    subuserData = privateSubuser;
-                                    isPrivateCloudSubuser = true;
-                                    parentUserEmail = pcUser.user_email;
-                                    foundInPrivateCloud = true;
-        
-                                    _logger.LogInformation("✅ Subuser {Email} authenticated from Private Cloud DB of parent {ParentEmail}", 
+                                    _logger.LogInformation("✅ FOUND subuser {Email} in Private Cloud DB of parent {Parent}", 
                                         request.Email, pcUser.user_email);
-                                    break;
+                                    
+                                    // Verify password
+                                    if (BCrypt.Net.BCrypt.Verify(request.Password, privateSubuser.subuser_password))
+                                    {
+                                        // ✅ AUTHENTICATED!
+                                        userEmail = request.Email;
+                                        isSubuser = true;
+                                        subuserData = privateSubuser;
+                                        isPrivateCloudSubuser = true;
+                                        parentUserEmail = pcUser.user_email;
+                                        foundInPrivateCloud = true;
+        
+                                        _logger.LogInformation("✅ PRIVATE CLOUD SUBUSER AUTHENTICATED - Email: {Email}, Parent: {Parent}", 
+                                            request.Email, pcUser.user_email);
+                                        break;
+                                    }
+                                    else
+                                    {
+                                        _logger.LogWarning("❌ PASSWORD MISMATCH for subuser {Email} in Private Cloud DB", request.Email);
+                                    }
+                                }
+                                else
+                                {
+                                    _logger.LogDebug("⏭️ Subuser {Email} NOT FOUND in Private Cloud DB of parent {Parent}", 
+                                        request.Email, pcUser.user_email);
                                 }
                             }
                             catch (OperationCanceledException)
                             {
-                                _logger.LogWarning("⚠️ Private Cloud DB check cancelled due to timeout for user {Email}", pcUser.user_email);
-                                // Continue to next private cloud user instead of breaking
+                                _logger.LogWarning("⚠️ OPERATION CANCELLED - Timeout checking Private Cloud DB for user {Email}", pcUser.user_email);
                                 continue;
                             }
                             catch (MySql.Data.MySqlClient.MySqlException mysqlEx)
                             {
-                                _logger.LogWarning("⚠️ MySQL error checking private cloud DB for user {Email} - Code: {Code}, Message: {Message}", 
+                                _logger.LogError("❌ MYSQL ERROR checking Private Cloud DB for user {Email} - Code: {Code}, Message: {Message}", 
                                     pcUser.user_email, mysqlEx.Number, mysqlEx.Message);
-                                // Continue to next private cloud user
+                                continue;
                             }
                             catch (Exception ex)
                             {
-                                _logger.LogWarning("⚠️ Failed to check private cloud DB for user {Email}: {Message}", pcUser.user_email, ex.Message);
-                                // Continue to next private cloud user
+                                _logger.LogError(ex, "❌ ERROR checking Private Cloud DB for user {Email}", pcUser.user_email);
+                                continue;
                             }
                         }
                     }
+                    else
+                    {
+                        _logger.LogInformation("ℹ️ No private cloud users found in system");
+                    }
              
-                    // ✅ If NOT found in private cloud, check MAIN DB
+                    // If NOT found in private cloud, check MAIN DB
                     if (!foundInPrivateCloud)
                     {
-                        _logger.LogInformation("🔍 Not found in Private Cloud, checking Main DB for {Email}", request.Email);
+                        _logger.LogInformation("🔍 STEP 4: Checking MAIN DB for subuser {Email}", request.Email);
  
                         var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
      
-                        if (subuser != null && BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
+                        if (subuser != null)
                         {
-                            // Found in main database
-                            userEmail = request.Email;
-                            isSubuser = true;
-                            subuserData = subuser;
-                            isPrivateCloudSubuser = false;
-                            parentUserEmail = subuser.user_email;
+                            _logger.LogInformation("✅ FOUND subuser {Email} in MAIN DB", request.Email);
+                            
+                            if (BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
+                            {
+                                // Found in main database
+                                userEmail = request.Email;
+                                isSubuser = true;
+                                subuserData = subuser;
+                                isPrivateCloudSubuser = false;
+                                parentUserEmail = subuser.user_email;
   
-                            _logger.LogInformation("✅ Subuser {Email} authenticated from Main DB", request.Email);
+                                _logger.LogInformation("✅ MAIN DB SUBUSER AUTHENTICATED - Email: {Email}, Parent: {Parent}", 
+                                    request.Email, subuser.user_email);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("❌ PASSWORD MISMATCH for subuser {Email} in MAIN DB", request.Email);
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning("❌ Subuser {Email} NOT FOUND in MAIN DB", request.Email);
                         }
                     }
                 }
 
-      if (userEmail == null)
-    {
-         _logger.LogWarning("❌ Authentication failed for {Email} - not found in any database", request.Email);
-     return Unauthorized(new { message = "Invalid credentials" });
-           }
-
-       // ✅ Get server time for login
-           var loginTime = await GetServerTimeAsync();
-
-    // ✅ Get PREVIOUS last_logout time BEFORE updating (for response)
-     DateTime? previousLastLogout = null;
-  if (isSubuser && subuserData != null)
-            {
-      previousLastLogout = subuserData.last_logout;
-    }
-     else if (mainUser != null)
-    {
-   previousLastLogout = mainUser.last_logout;
-          }
-
-             // ✅ Create session entry in MAIN database (sessions always in main DB)
-     var session = new Sessions
-  {
-       user_email = userEmail,
-                    login_time = loginTime,
-      ip_address = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-  device_info = Request.Headers["User-Agent"].ToString(),
-                session_status = "active"
-             };
-
-          _context.Sessions.Add(session);
-
-   // ✅ Update last_login in appropriate database
-     if (isSubuser && subuserData != null)
-    {
-        if (isPrivateCloudSubuser && !string.IsNullOrEmpty(parentUserEmail))
-   {
-        // Update in private cloud database
-     try
-      {
- var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
-          var connectionString = await tenantService.GetConnectionStringForUserAsync(parentUserEmail);
-      
-  var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
-   optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
-   
-     using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
-      var privateSubuser = await privateContext.subuser
-   .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
-   
-         if (privateSubuser != null)
-{
-      privateSubuser.last_login = loginTime;
-  privateSubuser.last_logout = null;
-           privateSubuser.LastLoginIp = session.ip_address;
-            privateSubuser.activity_status = "online";
-    privateContext.Entry(privateSubuser).State = EntityState.Modified;
-    await privateContext.SaveChangesAsync();
-          
-      _logger.LogInformation("✅ Updated last_login in Private Cloud DB for subuser {Email}", userEmail);
-        }
-        }
-  catch (Exception ex)
-          {
-             _logger.LogWarning(ex, "⚠️ Failed to update last_login in Private Cloud DB for subuser {Email}", userEmail);
-            }
-                }
-                else
+                if (userEmail == null)
                 {
-      // Update in main database
-     subuserData.last_login = loginTime;
-  subuserData.last_logout = null;
-                   subuserData.LastLoginIp = session.ip_address;
-          subuserData.activity_status = "online";
-     _context.Entry(subuserData).State = EntityState.Modified;
-           }
-     }
-    else if (mainUser != null)
-       {
-        mainUser.last_login = loginTime;
-  mainUser.last_logout = null;
-      mainUser.activity_status = "online";
- _context.Entry(mainUser).State = EntityState.Modified;
-       }
+                    _logger.LogWarning("❌ AUTHENTICATION FAILED - {Email} not found or invalid password in any database", request.Email);
+                    return Unauthorized(new { message = "Invalid credentials" });
+                }
 
-      await _context.SaveChangesAsync();
+                // ✅ LOG: Authentication successful
+                _logger.LogInformation("✅ AUTHENTICATION SUCCESS - Email: {Email}, Type: {Type}, IsPrivateCloud: {IsPrivateCloud}", 
+                    userEmail, isSubuser ? "subuser" : "user", isPrivateCloudSubuser);
 
-       var token = await GenerateJwtTokenAsync(userEmail, isSubuser);
+                // Get server time for login
+                var loginTime = await GetServerTimeAsync();
+                
+                _logger.LogInformation("🕐 Server time fetched: {Time}", loginTime);
 
-                // ✅ Get roles and permissions from MAIN DATABASE (always from main DB)
-           var rolesFromRBAC = (await _roleService.GetUserRolesAsync(userEmail, isSubuser, isPrivateCloudSubuser ? parentUserEmail : null)).ToList();
-    var permissions = await _roleService.GetUserPermissionsAsync(userEmail, isSubuser, isPrivateCloudSubuser ? parentUserEmail : null);
+                // Get PREVIOUS last_logout time
+                DateTime? previousLastLogout = null;
+                if (isSubuser && subuserData != null)
+                {
+                    previousLastLogout = subuserData.last_logout;
+                }
+                else if (mainUser != null)
+                {
+                    previousLastLogout = mainUser.last_logout;
+                }
 
-        // Build complete roles array
-     var allRoles = new List<string>(rolesFromRBAC);
+                // Create session entry in MAIN database
+                var session = new Sessions
+                {
+                    user_email = userEmail,
+                    login_time = loginTime,
+                    ip_address = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    device_info = Request.Headers["User-Agent"].ToString(),
+                    session_status = "active"
+                };
 
-        if (isSubuser && subuserData != null)
-       {
-  if (!string.IsNullOrEmpty(subuserData.Role) && !allRoles.Contains(subuserData.Role))
-          {
-      allRoles.Add(subuserData.Role);
-    }
-          }
-       else if (mainUser != null)
-         {
- if (!string.IsNullOrEmpty(mainUser.user_role) && !allRoles.Contains(mainUser.user_role))
-        {
- allRoles.Add(mainUser.user_role);
-         }
-   }
+                _context.Sessions.Add(session);
+                _logger.LogInformation("📝 Session created for {Email}", userEmail);
 
-            if (!allRoles.Any())
-    {
-               allRoles.Add("SuperAdmin");
-     }
+                // Update last_login in appropriate database
+                if (isSubuser && subuserData != null)
+                {
+                    if (isPrivateCloudSubuser && !string.IsNullOrEmpty(parentUserEmail))
+                    {
+                        // Update in private cloud database
+                        _logger.LogInformation("🔄 Updating last_login in Private Cloud DB for subuser {Email}", userEmail);
+                        
+                        try
+                        {
+                            var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
+                            var connectionString = await tenantService.GetConnectionStringForUserAsync(parentUserEmail);
+      
+                            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                            optionsBuilder.UseMySql(connectionString, ServerVersion.AutoDetect(connectionString));
+   
+                            using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+                            var privateSubuser = await privateContext.subuser
+                                .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+   
+                            if (privateSubuser != null)
+                            {
+                                privateSubuser.last_login = loginTime;
+                                privateSubuser.last_logout = null;
+                                privateSubuser.LastLoginIp = session.ip_address;
+                                privateSubuser.activity_status = "online";
+                                privateContext.Entry(privateSubuser).State = EntityState.Modified;
+                                await privateContext.SaveChangesAsync();
+          
+                                _logger.LogInformation("✅ Updated last_login in Private Cloud DB for subuser {Email}", userEmail);
+                            }
+                            else
+                            {
+                                _logger.LogWarning("⚠️ Subuser {Email} not found in Private Cloud DB during last_login update", userEmail);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "❌ Failed to update last_login in Private Cloud DB for subuser {Email}", userEmail);
+                        }
+                    }
+                    else
+                    {
+                        // Update in main database
+                        _logger.LogInformation("🔄 Updating last_login in MAIN DB for subuser {Email}", userEmail);
+                        
+                        subuserData.last_login = loginTime;
+                        subuserData.last_logout = null;
+                        subuserData.LastLoginIp = session.ip_address;
+                        subuserData.activity_status = "online";
+                        _context.Entry(subuserData).State = EntityState.Modified;
+                    }
+                }
+                else if (mainUser != null)
+                {
+                    _logger.LogInformation("🔄 Updating last_login in MAIN DB for user {Email}", userEmail);
+                    
+                    mainUser.last_login = loginTime;
+                    mainUser.last_logout = null;
+                    mainUser.activity_status = "online";
+                    _context.Entry(mainUser).State = EntityState.Modified;
+                }
 
-   _logger.LogInformation("User login successful: {Email} ({UserType}) from {Database}", 
-        userEmail, 
-      isSubuser ? "subuser" : "user",
-     isPrivateCloudSubuser ? "Private Cloud DB" : "Main DB");
+                _logger.LogInformation("💾 Saving changes to MAIN database...");
+                await _context.SaveChangesAsync();
+                _logger.LogInformation("✅ Changes saved successfully");
 
-         // ✅ Build response with ISO 8601 formatted times
+                _logger.LogInformation("🔑 Generating JWT token for {Email}...", userEmail);
+                var token = await GenerateJwtTokenAsync(userEmail, isSubuser);
+                _logger.LogInformation("✅ JWT token generated");
+
+                // Get roles and permissions
+                _logger.LogInformation("👤 Fetching roles and permissions for {Email}...", userEmail);
+                var rolesFromRBAC = (await _roleService.GetUserRolesAsync(userEmail, isSubuser, isPrivateCloudSubuser ? parentUserEmail : null)).ToList();
+                var permissions = await _roleService.GetUserPermissionsAsync(userEmail, isSubuser, isPrivateCloudSubuser ? parentUserEmail : null);
+                
+                _logger.LogInformation("✅ Roles fetched: {Roles}", string.Join(", ", rolesFromRBAC));
+
+                // Build complete roles array
+                var allRoles = new List<string>(rolesFromRBAC);
+
+                if (isSubuser && subuserData != null)
+                {
+                    if (!string.IsNullOrEmpty(subuserData.Role) && !allRoles.Contains(subuserData.Role))
+                    {
+                        allRoles.Add(subuserData.Role);
+                    }
+                }
+                else if (mainUser != null)
+                {
+                    if (!string.IsNullOrEmpty(mainUser.user_role) && !allRoles.Contains(mainUser.user_role))
+                    {
+                        allRoles.Add(mainUser.user_role);
+                    }
+                }
+
+                if (!allRoles.Any())
+                {
+                    allRoles.Add("SuperAdmin");
+                }
+
+                _logger.LogInformation("✅ LOGIN SUCCESSFUL - Email: {Email}, Type: {Type}, Database: {DB}, Roles: {Roles}", 
+                    userEmail, 
+                    isSubuser ? "subuser" : "user",
+                    isPrivateCloudSubuser ? "Private Cloud" : "Main",
+                    string.Join(", ", allRoles));
+
+                // Build response
                 var response = new RoleBasedLoginResponse
-           {
-  Token = token,
-   UserType = isSubuser ? "subuser" : "user",
-          Email = userEmail,
-      Roles = allRoles,
-    Permissions = permissions,
+                {
+                    Token = token,
+                    UserType = isSubuser ? "subuser" : "user",
+                    Email = userEmail,
+                    Roles = allRoles,
+                    Permissions = permissions,
                     ExpiresAt = DateTimeHelper.AddHoursFromNow(8),
-   LoginTime = loginTime,
-         LastLogoutTime = previousLastLogout
-           };
+                    LoginTime = loginTime,
+                    LastLogoutTime = previousLastLogout
+                };
 
-        // Add user-specific details
-         if (isSubuser && subuserData != null)
- {
-          response.Name = subuserData.Name;
-          response.UserRole = allRoles.FirstOrDefault() ?? "User";
-          response.Department = subuserData.Department;
-          response.PhoneNumber = subuserData.Phone;
-          response.Timezone = subuserData.timezone;
-          response.ParentUserEmail = subuserData.user_email;
-          response.UserId = subuserData.subuser_id;
+                // Add user-specific details
+                if (isSubuser && subuserData != null)
+                {
+                    response.Name = subuserData.Name;
+                    response.UserRole = allRoles.FirstOrDefault() ?? "User";
+                    response.Department = subuserData.Department;
+                    response.PhoneNumber = subuserData.Phone;
+                    response.Timezone = subuserData.timezone;
+                    response.ParentUserEmail = subuserData.user_email;
+                    response.UserId = subuserData.subuser_id;
 
-        if (subuserData.GroupId.HasValue)
-       {
-    var group = await _context.Set<Group>().FindAsync(subuserData.GroupId.Value);
-   response.UserGroup = group?.name;
-  }
+                    if (subuserData.GroupId.HasValue)
+                    {
+                        var group = await _context.Set<Group>().FindAsync(subuserData.GroupId.Value);
+                        response.UserGroup = group?.name;
+                    }
+                }
+                else if (mainUser != null)
+                {
+                    response.Name = mainUser.user_name;
+                    response.UserRole = allRoles.FirstOrDefault() ?? "User";
+                    response.Department = mainUser.department;
+                    response.PhoneNumber = mainUser.phone_number;
+                    response.Timezone = mainUser.timezone;
+                    response.UserId = mainUser.user_id;
+
+                    if (!string.IsNullOrEmpty(mainUser.user_group))
+                    {
+                        if (int.TryParse(mainUser.user_group, out int groupId))
+                        {
+                            var group = await _context.Set<Group>().FindAsync(groupId);
+                            response.UserGroup = group?.name ?? mainUser.user_group;
+                        }
+                        else
+                        {
+                            response.UserGroup = mainUser.user_group;
+                        }
+                    }
+                }
+
+                _logger.LogInformation("📤 Sending login response for {Email}", userEmail);
+                return Ok(response);
             }
-  else if (mainUser != null)
-          {
-      response.Name = mainUser.user_name;
-      response.UserRole = allRoles.FirstOrDefault() ?? "User";
-      response.Department = mainUser.department;
-      response.PhoneNumber = mainUser.phone_number;
-      response.Timezone = mainUser.timezone;
-      response.UserId = mainUser.user_id;
-
-               if (!string.IsNullOrEmpty(mainUser.user_group))
+            catch (Exception ex)
             {
-          if (int.TryParse(mainUser.user_group, out int groupId))
-         {
-         var group = await _context.Set<Group>().FindAsync(groupId);
-         response.UserGroup = group?.name ?? mainUser.user_group;
-   }
-   else
-        {
-            response.UserGroup = mainUser.user_group;
- }
-             }
-      }
-
-       return Ok(response);
-          }
- catch (Exception ex)
-            {
-  _logger.LogError(ex, "Error during login for {Email}", request.Email);
-return StatusCode(500, new { message = "An error occurred during login" });
+                _logger.LogError(ex, "❌ CRITICAL ERROR during login for {Email} - Message: {Message}, StackTrace: {StackTrace}", 
+                    request.Email, ex.Message, ex.StackTrace);
+                return StatusCode(500, new { 
+                    message = "An error occurred during login", 
+                    error = ex.Message,
+                    detail = ex.InnerException?.Message 
+                });
             }
         }
         [HttpPost("create-subuser")]

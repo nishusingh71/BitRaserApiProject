@@ -7,12 +7,16 @@ namespace BitRaserApiProject.Services
     /// <summary>
     /// AES Encryption Helper for encrypting API responses
     /// Uses Gzip compression + AES-256-CBC encryption with PKCS7 padding
-    /// Flow: PlainText → Gzip Compress → AES Encrypt → Base64
+    /// Flow: PlainText → Gzip Compress (if >1KB) → AES Encrypt → Base64
     /// </summary>
     public static class EncryptionHelper
     {
+        // Minimum bytes for compression to be effective (1KB)
+        private const int MinCompressionThreshold = 1024;
+
         /// <summary>
-        /// Encrypt plain text using Gzip compression + AES-256-CBC
+        /// Encrypt plain text using optional Gzip compression + AES-256-CBC
+        /// Compression is only applied for data larger than 1KB to avoid size inflation
         /// </summary>
         /// <param name="plainText">The plain text to encrypt</param>
         /// <param name="key">32-byte encryption key (AES-256)</param>
@@ -44,10 +48,22 @@ namespace BitRaserApiProject.Services
                 ivBytes = PadOrTruncate(Encoding.UTF8.GetBytes(iv), 16);
             }
 
-            // ✅ Step 1: Gzip compress the plain text
-            byte[] compressedBytes = CompressGzip(Encoding.UTF8.GetBytes(plainText));
+            byte[] plainBytes = Encoding.UTF8.GetBytes(plainText);
+            byte[] dataToEncrypt;
 
-            // ✅ Step 2: AES encrypt the compressed data
+            // ✅ Smart Compression: Only compress if payload > 1KB
+            // Small payloads actually get LARGER after compression due to overhead
+            if (plainBytes.Length >= MinCompressionThreshold)
+            {
+                dataToEncrypt = CompressGzip(plainBytes);
+            }
+            else
+            {
+                // Skip compression for small payloads
+                dataToEncrypt = plainBytes;
+            }
+
+            // ✅ AES encrypt the data
             using var aes = Aes.Create();
             aes.Key = keyBytes;
             aes.IV = ivBytes;
@@ -62,12 +78,17 @@ namespace BitRaserApiProject.Services
 
             using (var cs = new CryptoStream(ms, encryptor, CryptoStreamMode.Write))
             {
-                cs.Write(compressedBytes, 0, compressedBytes.Length);
+                cs.Write(dataToEncrypt, 0, dataToEncrypt.Length);
             }
 
-            // Return Base64 encoded: [IV + Encrypted(Compressed Data)]
+            // Return Base64 encoded: [IV + Encrypted(Data)]
             return Convert.ToBase64String(ms.ToArray());
         }
+
+        /// <summary>
+        /// Check if data was compressed (for use in response wrapper)
+        /// </summary>
+        public static bool ShouldCompress(int byteCount) => byteCount >= MinCompressionThreshold;
 
         /// <summary>
         /// Decrypt encrypted text using AES-256-CBC + Gzip decompression
