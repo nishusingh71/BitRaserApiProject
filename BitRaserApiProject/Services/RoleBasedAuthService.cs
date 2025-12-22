@@ -48,62 +48,26 @@ namespace BitRaserApiProject.Services
             return _context;
         }
 
-        public async Task<bool> HasPermissionAsync(string email, string permissionName, bool isSubuser = false)
+        public async Task<bool> HasPermissionAsync(string email, string permissionName, bool isSubuser = false, string? parentUserEmail = null)
         {
-        try
- {
-        // ✅ ALWAYS use Main DB for roles/permissions (not Private Cloud DB)
-      var context = _context; // Always use main context for roles
-        
-     if (isSubuser)
-{
-       var subuser = await context.subuser
-     .Include(s => s.SubuserRoles)
-        .ThenInclude(sr => sr.Role)
-       .ThenInclude(r => r.RolePermissions)
-         .ThenInclude(rp => rp.Permission)
-    .FirstOrDefaultAsync(s => s.subuser_email == email);
-
-       if (subuser == null) return false;
-
-         return subuser.SubuserRoles
-     .SelectMany(sr => sr.Role.RolePermissions)
-     .Any(rp => rp.Permission.PermissionName == permissionName || rp.Permission.PermissionName == "FullAccess");
- }
-     else
-      {
-       var user = await context.Users
-   .Include(u => u.UserRoles)
-    .ThenInclude(ur => ur.Role)
-   .ThenInclude(r => r.RolePermissions)
-       .ThenInclude(rp => rp.Permission)
-          .FirstOrDefaultAsync(u => u.user_email == email);
-
-if (user == null) return false;
-
-        // If no roles assigned, treat as SuperAdmin (first user created gets SuperAdmin by default)
-     if (!user.UserRoles.Any())
-    {
-    await AssignDefaultSuperAdminRoleAsync(user);
-   user = await context.Users
-   .Include(u => u.UserRoles)
-   .ThenInclude(ur => ur.Role)
-   .ThenInclude(r => r.RolePermissions)
-  .ThenInclude(rp => rp.Permission)
-        .FirstOrDefaultAsync(u => u.user_email == email);
-}
-
-  return user.UserRoles
-       .SelectMany(ur => ur.Role.RolePermissions)
-              .Any(rp => rp.Permission.PermissionName == permissionName || rp.Permission.PermissionName == "FullAccess");
-   }
-}
-     catch (Exception ex)
-      {
-   _logger.LogError(ex, "Error checking permission {Permission} for user {Email}", permissionName, email);
-       return false;
-   }
-      }
+            try
+            {
+                // ✅ Use GetUserPermissionsAsync which handles private cloud context correctly
+                var permissions = await GetUserPermissionsAsync(email, isSubuser, parentUserEmail);
+                
+                var hasPermission = permissions.Contains(permissionName) || permissions.Contains("FullAccess");
+                
+                _logger.LogDebug("🔐 HasPermissionAsync for {Email} (subuser:{IsSub}, parent:{Parent}): {Perm}={HasIt}",
+                    email, isSubuser, parentUserEmail ?? "none", permissionName, hasPermission);
+                
+                return hasPermission;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error checking permission {Permission} for user {Email}", permissionName, email);
+                return false;
+            }
+        }
 
         public async Task<bool> CanAccessRouteAsync(string email, string routePath, string httpMethod, bool isSubuser = false)
         {

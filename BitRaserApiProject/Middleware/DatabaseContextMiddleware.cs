@@ -109,6 +109,7 @@ _logger.LogDebug("👤 Subuser detected, finding parent user...");
    context.Items["EffectiveUserEmail"] = effectiveUserEmail; // Parent email for subusers
      context.Items["IsSubuser"] = isSubuser;
   context.Items["IsPrivateCloudUser"] = isPrivateCloud;
+  context.Items["IsPrivateCloud"] = isPrivateCloud; // ✅ For PrivateCloudAwareController compatibility
 
  _logger.LogDebug("✅ DB Context injected for {Email} → {EffectiveEmail} (Private: {IsPrivate}, Subuser: {IsSubuser})", 
     userEmail, effectiveUserEmail, isPrivateCloud, isSubuser);
@@ -119,6 +120,7 @@ _logger.LogDebug("👤 Subuser detected, finding parent user...");
          userEmail, dbEx.Message);
        context.Items["UserDbContext"] = dbFactory.GetMainDbContext();
 context.Items["IsPrivateCloudUser"] = false;
+context.Items["IsPrivateCloud"] = false;
  context.Items["DbContextError"] = dbEx.Message;
       }
      }
@@ -127,6 +129,7 @@ context.Items["IsPrivateCloudUser"] = false;
     _logger.LogDebug("⚠️ No user email found in claims, using main DB");
        context.Items["UserDbContext"] = dbFactory.GetMainDbContext();
       context.Items["IsPrivateCloudUser"] = false;
+context.Items["IsPrivateCloud"] = false;
          }
     }
        catch (Exception ex)
@@ -134,6 +137,7 @@ context.Items["IsPrivateCloudUser"] = false;
             _logger.LogError(ex, "❌ Critical error in DatabaseContextMiddleware: {Message}", ex.Message);
 context.Items["UserDbContext"] = dbFactory.GetMainDbContext();
     context.Items["IsPrivateCloudUser"] = false;
+context.Items["IsPrivateCloud"] = false;
   context.Items["DbContextError"] = ex.Message;
    }
 

@@ -4,7 +4,7 @@ namespace BitRaserApiProject.Services
 {
     public interface IRoleBasedAuthService
     {
-        Task<bool> HasPermissionAsync(string email, string permissionName, bool isSubuser = false);
+        Task<bool> HasPermissionAsync(string email, string permissionName, bool isSubuser = false, string? parentUserEmail = null);
         Task<bool> CanAccessRouteAsync(string email, string routePath, string httpMethod, bool isSubuser = false);
         Task<IEnumerable<string>> GetUserPermissionsAsync(string email, bool isSubuser = false, string? parentUserEmail = null);
         Task<IEnumerable<string>> GetUserRolesAsync(string email, bool isSubuser = false, string? parentUserEmail = null);

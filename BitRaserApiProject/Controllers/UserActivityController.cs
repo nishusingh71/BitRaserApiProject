@@ -100,15 +100,22 @@ namespace BitRaserApiProject.Controllers
         /// <summary>
         /// Get appropriate database context - supports private cloud DB routing via DynamicDbContextFactory
         /// Automatically routes to private DB for private cloud users
-        /// ✅ UPDATED: Now uses DynamicDbContextFactory for reliable private cloud routing
+        /// ✅ UPDATED: Now checks middleware-provided context FIRST for reliable private cloud routing
         /// </summary>
         private async Task<ApplicationDbContext> GetDbContextAsync()
         {
-            // ✅ Use factory to create context - automatically routes to private DB if user has is_private_cloud = true
+            // ✅ FIRST: Try to get context from middleware (already resolved for private cloud users/subusers)
+            if (HttpContext.Items.TryGetValue("UserDbContext", out var dbContextObj) && dbContextObj is ApplicationDbContext middlewareContext)
+            {
+                var isPrivateCloud = HttpContext.Items["IsPrivateCloud"] as bool? ?? false;
+                var effectiveEmail = HttpContext.Items["EffectiveUserEmail"] as string ?? "unknown";
+                _logger.LogDebug("✅ UserActivity using middleware-provided DB context (Private: {IsPrivate}, User: {Email})", isPrivateCloud, effectiveEmail);
+                return middlewareContext;
+            }
+            
+            // ✅ FALLBACK: Use factory to create context
             var context = await _contextFactory.CreateDbContextAsync();
-            
-            _logger.LogDebug("✅ Created DB context via DynamicDbContextFactory for UserActivity");
-            
+            _logger.LogDebug("⚠️ UserActivity using factory-created DB context (middleware context not available)");
             return context;
         }
 
@@ -139,7 +146,7 @@ namespace BitRaserApiProject.Controllers
                 var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
 
                 // ✅ Get dynamic context for private cloud support
-                using var context = await GetDbContextAsync();
+                var context = await GetDbContextAsync();
 
                 if (userType?.ToLower() == "subuser")
                 {
@@ -225,7 +232,7 @@ namespace BitRaserApiProject.Controllers
                 var serverTime = await GetServerTimeAsync();
 
                 // ✅ Get dynamic context for private cloud support
-                using var context = await GetDbContextAsync();
+                var context = await GetDbContextAsync();
 
                 if (userType?.ToLower() == "subuser")
                 {
@@ -299,7 +306,7 @@ namespace BitRaserApiProject.Controllers
                 var serverTime = await GetServerTimeAsync();
 
                 // ✅ Get dynamic context for private cloud support
-                using var context = await GetDbContextAsync();
+                var context = await GetDbContextAsync();
 
                 // Auto-detect user type if not provided
                 if (string.IsNullOrEmpty(userType))
@@ -378,7 +385,7 @@ namespace BitRaserApiProject.Controllers
                 var serverTime = await GetServerTimeAsync();
                 
                 // ✅ Get dynamic context for private cloud support
-                using var context = await GetDbContextAsync();
+                var context = await GetDbContextAsync();
                 
                 var users = await context.Users.ToListAsync();
 
@@ -422,7 +429,7 @@ namespace BitRaserApiProject.Controllers
                 var serverTime = await GetServerTimeAsync();
                 
                 // ✅ Get dynamic context for private cloud support
-                using var context = await GetDbContextAsync();
+                var context = await GetDbContextAsync();
                 
                 var subusers = await context.subuser.ToListAsync();
 
@@ -467,7 +474,7 @@ namespace BitRaserApiProject.Controllers
                 var serverTime = await GetServerTimeAsync();
                 
                 // ✅ Get dynamic context for private cloud support
-                using var context = await GetDbContextAsync();
+                var context = await GetDbContextAsync();
                 
                 var subusers = await context.subuser
                      .Where(s => s.user_email == parentEmail)
@@ -516,7 +523,7 @@ namespace BitRaserApiProject.Controllers
                 var serverTime = await GetServerTimeAsync();
 
                 // ✅ Get dynamic context for private cloud support
-                using var context = await GetDbContextAsync();
+                var context = await GetDbContextAsync();
 
                 // Fetch all users
                 var users = await context.Users
@@ -621,7 +628,7 @@ namespace BitRaserApiProject.Controllers
                 var serverTime = await GetServerTimeAsync();
 
                 // ✅ Get dynamic context for private cloud support
-                using var context = await GetDbContextAsync();
+                var context = await GetDbContextAsync();
 
                 // Check if the user exists
                 var userExists = await context.Users.AnyAsync(u => u.user_email == decodedUserEmail);
@@ -697,7 +704,7 @@ namespace BitRaserApiProject.Controllers
                 var updatedSubusers = 0;
 
                 // ✅ Get dynamic context for private cloud support
-                using var context = await GetDbContextAsync();
+                var context = await GetDbContextAsync();
 
                 // Update all users status
                 var users = await context.Users.ToListAsync();

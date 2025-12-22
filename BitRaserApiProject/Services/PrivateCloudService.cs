@@ -266,17 +266,169 @@ INDEX idx_user_email (`user_email`),
         }
 
         public async Task<PrivateCloudDatabase?> GetUserPrivateDatabaseAsync(string userEmail)
-      {
-  return await _mainContext.Set<PrivateCloudDatabase>()
+        {
+            // ✅ STEP 1: Check if this is a regular user with private cloud
+            var privateDbConfig = await _mainContext.Set<PrivateCloudDatabase>()
+                .AsNoTracking()
                 .FirstOrDefaultAsync(db => db.UserEmail == userEmail && db.IsActive);
-     }
+            
+            if (privateDbConfig != null)
+            {
+                _logger.LogDebug("🔍 GetUserPrivateDatabaseAsync: Found config for user {Email}", userEmail);
+                return privateDbConfig;
+            }
+            
+            // ✅ STEP 2: Check if this email is a SUBUSER in Main DB
+            var subuserRecord = await _mainContext.subuser
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+            
+            if (subuserRecord != null)
+            {
+                // Found subuser in Main DB - get parent's private cloud config
+                var parentConfig = await _mainContext.Set<PrivateCloudDatabase>()
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(db => db.UserEmail == subuserRecord.user_email && db.IsActive);
+                
+                _logger.LogDebug("🔍 GetUserPrivateDatabaseAsync: {Email} is subuser in Main DB, parent config found: {Found}", 
+                    userEmail, parentConfig != null);
+                return parentConfig;
+            }
+            
+            // ✅ STEP 3: Subuser NOT in Main DB - search all Private Cloud DBs
+            _logger.LogDebug("🔍 GetUserPrivateDatabaseAsync: {Email} not in Main DB, searching Private Cloud DBs...", userEmail);
+            
+            var privateCloudUsers = await _mainContext.Users
+                .AsNoTracking()
+                .Where(u => u.is_private_cloud == true)
+                .ToListAsync();
+            
+            foreach (var pcUser in privateCloudUsers)
+            {
+                try
+                {
+                    // Get private cloud database config
+                    var pcConfig = await _mainContext.Set<PrivateCloudDatabase>()
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(db => db.UserEmail == pcUser.user_email && db.IsActive && db.SchemaInitialized);
+                    
+                    if (pcConfig == null) continue;
+                    
+                    // Create context for private cloud DB
+                    var connectionString = DecryptConnectionString(pcConfig.ConnectionString);
+                    var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                    optionsBuilder.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 21)), 
+                        mysqlOptions => {
+                            mysqlOptions.CommandTimeout(3);
+                            mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(1), null);
+                        });
+                    
+                    using var pcContext = new ApplicationDbContext(optionsBuilder.Options);
+                    
+                    var subuserInPrivate = await pcContext.subuser
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+                    
+                    if (subuserInPrivate != null)
+                    {
+                        _logger.LogInformation("✅ GetUserPrivateDatabaseAsync: Found {Email} in Private Cloud DB of parent {Parent}", 
+                            userEmail, pcUser.user_email);
+                        return pcConfig; // Return parent's private cloud config
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "⚠️ Error checking Private Cloud DB for user {Email}", pcUser.user_email);
+                    continue;
+                }
+            }
+            
+            _logger.LogDebug("🔍 GetUserPrivateDatabaseAsync: No private cloud config found for {Email}", userEmail);
+            return null;
+        }
 
         public async Task<bool> IsPrivateCloudUserAsync(string userEmail)
         {
-    var user = await _mainContext.Users
-       .FirstOrDefaultAsync(u => u.user_email == userEmail);
- return user?.is_private_cloud == true;
-     }
+            // ✅ STEP 1: Check if this is a regular user first
+            var user = await _mainContext.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.user_email == userEmail);
+            
+            if (user != null)
+            {
+                _logger.LogDebug("🔍 IsPrivateCloudUserAsync: {Email} is a regular user, is_private_cloud = {IsPrivate}", userEmail, user.is_private_cloud);
+                return user.is_private_cloud == true;
+            }
+            
+            // ✅ STEP 2: Check if this email is a SUBUSER in Main DB
+            var subuserRecord = await _mainContext.subuser
+                .AsNoTracking()
+                .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+            
+            if (subuserRecord != null)
+            {
+                // Found subuser in Main DB - check parent's private cloud status
+                var parentUser = await _mainContext.Users
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(u => u.user_email == subuserRecord.user_email);
+                
+                var isPrivate = parentUser?.is_private_cloud == true;
+                _logger.LogDebug("🔍 IsPrivateCloudUserAsync: {Email} is a subuser in Main DB, parent {Parent}, is_private_cloud = {IsPrivate}", 
+                    userEmail, subuserRecord.user_email, isPrivate);
+                return isPrivate;
+            }
+            
+            // ✅ STEP 3: Subuser NOT in Main DB - check all Private Cloud DBs
+            _logger.LogDebug("🔍 IsPrivateCloudUserAsync: {Email} not found in Main DB, searching Private Cloud DBs...", userEmail);
+            
+            var privateCloudUsers = await _mainContext.Users
+                .AsNoTracking()
+                .Where(u => u.is_private_cloud == true)
+                .ToListAsync();
+            
+            foreach (var pcUser in privateCloudUsers)
+            {
+                try
+                {
+                    // Get private cloud database config
+                    var pcConfig = await _mainContext.Set<PrivateCloudDatabase>()
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(db => db.UserEmail == pcUser.user_email && db.IsActive && db.SchemaInitialized);
+                    
+                    if (pcConfig == null) continue;
+                    
+                    // Create context for private cloud DB
+                    var connectionString = DecryptConnectionString(pcConfig.ConnectionString);
+                    var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                    optionsBuilder.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 21)), 
+                        mysqlOptions => {
+                            mysqlOptions.CommandTimeout(3);
+                            mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(1), null);
+                        });
+                    
+                    using var pcContext = new ApplicationDbContext(optionsBuilder.Options);
+                    
+                    var subuserInPrivate = await pcContext.subuser
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+                    
+                    if (subuserInPrivate != null)
+                    {
+                        _logger.LogInformation("✅ IsPrivateCloudUserAsync: Found {Email} in Private Cloud DB of parent {Parent}", 
+                            userEmail, pcUser.user_email);
+                        return true; // Subuser found in private cloud DB = parent has private cloud
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "⚠️ Error checking Private Cloud DB for user {Email}", pcUser.user_email);
+                    continue;
+                }
+            }
+            
+            _logger.LogDebug("🔍 IsPrivateCloudUserAsync: {Email} not found anywhere, returning false", userEmail);
+            return false;
+        }
 
  public async Task<bool> SetupPrivateDatabaseAsync(PrivateCloudDatabaseDto dto)
      {

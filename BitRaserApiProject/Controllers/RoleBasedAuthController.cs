@@ -895,12 +895,60 @@ namespace BitRaserApiProject.Controllers
        var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == userEmail);
        if (subuser != null)
       {
-      // Found in MAIN DB
+      // Found in MAIN DB - update here
      subuser.last_logout = logoutTime;
   subuser.activity_status = "offline";
       _context.Entry(subuser).State = EntityState.Modified;
       
           _logger.LogInformation("✅ Updated logout in Main DB for subuser {Email}", userEmail);
+      
+      // ✅ NEW: Also check if parent has Private Cloud and update there too!
+      var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == subuser.user_email);
+      if (parentUser != null && parentUser.is_private_cloud == true)
+      {
+          try
+          {
+              _logger.LogInformation("🔍 Subuser's parent {Parent} has Private Cloud=true, updating logout in Private Cloud DB too...", subuser.user_email);
+              
+              var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
+              var connectionString = await tenantService.GetConnectionStringForUserAsync(subuser.user_email);
+              
+              var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
+              if (connectionString != mainConnectionString && !string.IsNullOrWhiteSpace(connectionString) && connectionString.Contains("Server="))
+              {
+                  var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                  var serverVersion = new MySqlServerVersion(new Version(8, 0, 21));
+                  optionsBuilder.UseMySql(connectionString, serverVersion, mysqlOptions =>
+                  {
+                      mysqlOptions.CommandTimeout(5);
+                      mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(2), null);
+                  });
+                  
+                  using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+                  privateContext.Database.SetCommandTimeout(5);
+                  
+                  var privateSubuser = await privateContext.subuser.FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+                  if (privateSubuser != null)
+                  {
+                      privateSubuser.last_logout = logoutTime;
+                      privateSubuser.activity_status = "offline";
+                      privateContext.Entry(privateSubuser).State = EntityState.Modified;
+                      
+                      var saveResult = await privateContext.SaveChangesAsync();
+                      _logger.LogInformation("✅ ALSO updated logout in Private Cloud DB for subuser {Email} (parent: {Parent}). Rows affected: {Rows}", 
+                          userEmail, subuser.user_email, saveResult);
+                  }
+                  else
+                  {
+                      _logger.LogDebug("Subuser {Email} not found in Private Cloud DB (parent: {Parent})", userEmail, subuser.user_email);
+                  }
+              }
+          }
+          catch (Exception ex)
+          {
+              _logger.LogWarning(ex, "⚠️ Failed to update logout in Private Cloud DB for subuser {Email}", userEmail);
+          }
+      }
       }
         else
          {
@@ -998,17 +1046,81 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
             }
          }
      }
- else
+ 	else
          {
-     // Regular user logout (always in MAIN DB)
+     // Regular user logout
  var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
       if (user != null)
       {
       user.last_logout = logoutTime;
    user.activity_status = "offline";
       _context.Entry(user).State = EntityState.Modified;
-               
-        _logger.LogInformation("✅ Updated logout in Main DB for user {Email}", userEmail);
+              
+        _logger.LogInformation("✅ Updated logout in Main DB for user {Email}, is_private_cloud={IsPrivate}", userEmail, user.is_private_cloud);
+      
+      // ✅ ALSO update Private Cloud DB if user has private cloud enabled
+      if (user.is_private_cloud == true)
+      {
+          try
+          {
+              _logger.LogInformation("🔍 User {Email} has Private Cloud=true, updating logout there too...", userEmail);
+              
+              var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
+              var connectionString = await tenantService.GetConnectionStringForUserAsync(userEmail);
+              
+              var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
+              
+              _logger.LogDebug("🔍 Connection strings - Main: {MainCS}, Private: {PrivateCS}", 
+                  mainConnectionString?.Substring(0, Math.Min(50, mainConnectionString?.Length ?? 0)) + "...",
+                  connectionString?.Substring(0, Math.Min(50, connectionString?.Length ?? 0)) + "...");
+              
+              if (connectionString != mainConnectionString && !string.IsNullOrWhiteSpace(connectionString) && connectionString.Contains("Server="))
+              {
+                  _logger.LogInformation("🔍 Creating Private Cloud DB connection for logout...");
+                  
+                  var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                  var serverVersion = new MySqlServerVersion(new Version(8, 0, 21));
+                  optionsBuilder.UseMySql(connectionString, serverVersion, mysqlOptions =>
+                  {
+                      mysqlOptions.CommandTimeout(5);
+                      mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(2), null);
+                  });
+                  
+                  using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+                  privateContext.Database.SetCommandTimeout(5);
+                  
+                  var privateUser = await privateContext.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+                  
+                  _logger.LogInformation("🔍 Private Cloud user lookup result: {Found}", privateUser != null);
+                  
+                  if (privateUser != null)
+                  {
+                      privateUser.last_logout = logoutTime;
+                      privateUser.activity_status = "offline";
+                      privateContext.Entry(privateUser).State = EntityState.Modified;
+                      
+                      var saveResult = await privateContext.SaveChangesAsync();
+                      _logger.LogInformation("✅ Updated logout in Private Cloud DB for user {Email}. Rows affected: {Rows}", userEmail, saveResult);
+                  }
+                  else
+                  {
+                      _logger.LogWarning("⚠️ User {Email} NOT found in Private Cloud DB!", userEmail);
+                  }
+              }
+              else
+              {
+                  _logger.LogWarning("⚠️ Private Cloud connection string same as Main or invalid for user {Email}", userEmail);
+              }
+          }
+          catch (Exception ex)
+          {
+              _logger.LogWarning(ex, "⚠️ Failed to update logout in Private Cloud DB for user {Email}", userEmail);
+          }
+      }
+      else
+      {
+          _logger.LogDebug("User {Email} is_private_cloud={IsPrivate}, skipping Private Cloud update", userEmail, user.is_private_cloud);
+      }
       }
     }
 

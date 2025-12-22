@@ -45,6 +45,59 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
+        /// ✅ Gets the correct database context - preferring middleware-provided context
+        /// </summary>
+        private async Task<ApplicationDbContext> GetContextAsync()
+        {
+            // ✅ FIRST: Try to get context from middleware (already resolved for subusers)
+            if (HttpContext.Items.TryGetValue("UserDbContext", out var dbContextObj) && dbContextObj is ApplicationDbContext middlewareContext)
+            {
+                var isPrivateCloud = HttpContext.Items["IsPrivateCloud"] as bool? ?? false;
+                var effectiveEmail = HttpContext.Items["EffectiveUserEmail"] as string ?? "unknown";
+                _logger.LogDebug("✅ Using middleware-provided DB context (Private: {IsPrivate}, EffectiveUser: {Email})", isPrivateCloud, effectiveEmail);
+                return middlewareContext;
+            }
+            
+            // ✅ FALLBACK: Use factory (for cases where middleware didn't run)
+            _logger.LogDebug("⚠️ Middleware context not found, using DynamicDbContextFactory");
+            return await _contextFactory.CreateDbContextAsync();
+        }
+
+        /// <summary>
+        /// ✅ Check if current user is a subuser - uses middleware flag first
+        /// </summary>
+        private async Task<bool> IsCurrentUserSubuserAsync(string? userEmail)
+        {
+            // ✅ FIRST: Check middleware-provided flag (correctly set for private cloud subusers)
+            if (HttpContext.Items.TryGetValue("IsSubuser", out var isSubuserObj) && isSubuserObj is bool isSubuser)
+            {
+                _logger.LogDebug("✅ Using middleware-provided IsSubuser flag: {IsSubuser}", isSubuser);
+                return isSubuser;
+            }
+            
+            // ✅ FALLBACK: Use service (for non-middleware requests)
+            if (string.IsNullOrEmpty(userEmail)) return false;
+            return await _userDataService.SubuserExistsAsync(userEmail);
+        }
+
+        /// <summary>
+        /// ✅ Get the effective parent email for permission lookups (null for regular users)
+        /// </summary>
+        private string? GetEffectiveParentEmail()
+        {
+            // For private cloud subusers, middleware sets EffectiveUserEmail to parent email
+            if (HttpContext.Items.TryGetValue("IsPrivateCloud", out var isPrivateObj) && isPrivateObj is bool isPrivate && isPrivate)
+            {
+                if (HttpContext.Items.TryGetValue("EffectiveUserEmail", out var parentObj) && parentObj is string parentEmail)
+                {
+                    _logger.LogDebug("✅ Using parent email for permissions: {ParentEmail}", parentEmail);
+                    return parentEmail;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
         /// Get all audit reports with role-based filtering
         /// ✅ ENHANCED: Parents can see their own reports + subuser reports
         /// </summary>
@@ -54,15 +107,15 @@ namespace BitRaserApiProject.Controllers
             try
             {
                 // ✅ Use dynamic context for multi-tenant routing
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
 
                 IQueryable<audit_reports> query = context.AuditReports;
 
                 // Apply role-based filtering
-                if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser))
+                if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser, GetEffectiveParentEmail()))
                 {
                     if (isCurrentUserSubuser)
                     {
@@ -140,10 +193,10 @@ namespace BitRaserApiProject.Controllers
             try
             {
                 // ✅ Use dynamic context
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
                 var report = await context.AuditReports.FindAsync(id);
 
                 if (report == null) return NotFound();
@@ -178,10 +231,10 @@ namespace BitRaserApiProject.Controllers
                 // ✅ CRITICAL: Decode email before any usage
                 var decodedEmail = Base64EmailEncoder.DecodeEmailParam(email);
 
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(currentUserEmail!);
 
                 // Check if user can view reports for this email - use decoded email
                 bool canView = decodedEmail == currentUserEmail?.ToLower() ||
@@ -220,7 +273,7 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 // For anonymous requests, client_email must be provided
                 if (string.IsNullOrEmpty(request.ClientEmail))
@@ -242,7 +295,7 @@ namespace BitRaserApiProject.Controllers
                 // If user is authenticated, apply business rules
                 if (!string.IsNullOrEmpty(userEmail))
                 {
-                    var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+                    var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail);
 
                     // Allow users and subusers to create reports for themselves
                     // Allow users with special permissions to create for others
@@ -279,13 +332,13 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 if (id != request.ReportId)
                     return BadRequest(new { message = "Report ID mismatch" });
 
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
                 var report = await context.AuditReports.FindAsync(id);
 
                 if (report == null) return NotFound();
@@ -338,10 +391,10 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
                 var report = await context.AuditReports.FindAsync(id);
 
                 if (report == null) return NotFound();
@@ -379,7 +432,7 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 if (string.IsNullOrEmpty(request.ClientEmail))
                     return BadRequest("Client email is required");
@@ -423,7 +476,7 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 if (id != request.ReportId)
                     return BadRequest(new { message = "Report ID mismatch" });
@@ -467,7 +520,7 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 var report = await context.AuditReports.FindAsync(id);
                 if (report == null) return NotFound();
@@ -502,10 +555,10 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
 
                 IQueryable<audit_reports> query = context.AuditReports;
 
@@ -560,10 +613,10 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
 
                 IQueryable<audit_reports> query = context.AuditReports;
 
@@ -610,10 +663,10 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
 
                 IQueryable<audit_reports> query = context.AuditReports;
 
@@ -664,10 +717,10 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
 
                 IQueryable<audit_reports> query = context.AuditReports;
 
@@ -717,10 +770,10 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
                 var report = await context.AuditReports.FindAsync(id);
 
                 if (report == null) return NotFound();
@@ -759,10 +812,10 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
                 var report = await context.AuditReports.FindAsync(id);
 
                 if (report == null) return NotFound();
@@ -1025,7 +1078,7 @@ namespace BitRaserApiProject.Controllers
 
             try
             {
-                using var context = await _contextFactory.CreateDbContextAsync();
+                var context = await GetContextAsync();
 
                 // ✅ Try to find as subuser first
                 var subuser = await context.subuser
