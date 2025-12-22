@@ -94,6 +94,8 @@ public DatabaseContextFactory(
     // Cache it
     _privateContextCache[userEmail] = privateContext;
 
+                _logger.LogInformation("✅ RETURNING PRIVATE DB CONTEXT for {Email} (Host: {Host}, DB: {Db})", 
+                    userEmail, privateDbConfig.ServerHost, privateDbConfig.DatabaseName);
                 return privateContext;
        }
      catch (Exception ex)

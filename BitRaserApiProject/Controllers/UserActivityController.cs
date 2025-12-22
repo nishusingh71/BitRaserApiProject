@@ -100,23 +100,30 @@ namespace BitRaserApiProject.Controllers
         /// <summary>
         /// Get appropriate database context - supports private cloud DB routing via DynamicDbContextFactory
         /// Automatically routes to private DB for private cloud users
-        /// ✅ UPDATED: Now checks middleware-provided context FIRST for reliable private cloud routing
+        /// ✅ FIX: Uses DynamicDbContextFactory.CreateDbContextForUserAsync with effective email from middleware
         /// </summary>
         private async Task<ApplicationDbContext> GetDbContextAsync()
         {
-            // ✅ FIRST: Try to get context from middleware (already resolved for private cloud users/subusers)
-            if (HttpContext.Items.TryGetValue("UserDbContext", out var dbContextObj) && dbContextObj is ApplicationDbContext middlewareContext)
+            // ✅ Get effective email from middleware (parent email for subusers)
+            var effectiveEmail = HttpContext.Items["EffectiveUserEmail"] as string;
+            var isPrivateCloud = HttpContext.Items["IsPrivateCloud"] as bool? ?? false;
+            var isSubuser = HttpContext.Items["IsSubuser"] as bool? ?? false;
+            
+            _logger.LogInformation("🔍 UserActivity GetDbContextAsync: EffectiveEmail={Email}, IsPrivateCloud={IsPrivate}, IsSubuser={IsSub}",
+                effectiveEmail ?? "none", isPrivateCloud, isSubuser);
+            
+            // ✅ If we have effective email and it's private cloud, create context specifically for that user
+            if (!string.IsNullOrEmpty(effectiveEmail))
             {
-                var isPrivateCloud = HttpContext.Items["IsPrivateCloud"] as bool? ?? false;
-                var effectiveEmail = HttpContext.Items["EffectiveUserEmail"] as string ?? "unknown";
-                _logger.LogDebug("✅ UserActivity using middleware-provided DB context (Private: {IsPrivate}, User: {Email})", isPrivateCloud, effectiveEmail);
-                return middlewareContext;
+                _logger.LogInformation("✅ Creating DB context for effective user: {Email}", effectiveEmail);
+                var context = await _contextFactory.CreateDbContextForUserAsync(effectiveEmail);
+                return context;
             }
             
-            // ✅ FALLBACK: Use factory to create context
-            var context = await _contextFactory.CreateDbContextAsync();
-            _logger.LogDebug("⚠️ UserActivity using factory-created DB context (middleware context not available)");
-            return context;
+            // ✅ FALLBACK: Use default factory method for current user
+            _logger.LogWarning("⚠️ No effective email from middleware, using default factory");
+            var defaultContext = await _contextFactory.CreateDbContextAsync();
+            return defaultContext;
         }
 
         #endregion
@@ -585,6 +592,14 @@ namespace BitRaserApiProject.Controllers
                 var onlineCount = combinedActivities.Count(a => a.calculated_status == "online");
                 var offlineCount = combinedActivities.Count(a => a.calculated_status == "offline");
 
+                // ✅ Debug info: Which DB is being used?
+                var isPrivateCloud = HttpContext.Items["IsPrivateCloud"] as bool? ?? false;
+                var effectiveEmail = HttpContext.Items["EffectiveUserEmail"] as string ?? "unknown";
+                var dbSource = isPrivateCloud ? "PRIVATE_CLOUD_DB" : "MAIN_DB";
+                
+                _logger.LogInformation("📊 GetAllUserAndSubuserActivity: Returning {UserCount} users + {SubCount} subusers from {DbSource}", 
+                    users.Count, subusers.Count, dbSource);
+
                 return Ok(new
                 {
                     success = true,
@@ -594,7 +609,9 @@ namespace BitRaserApiProject.Controllers
                     subuser_count = subusers.Count,
                     online_count = onlineCount,
                     offline_count = offlineCount,
-                    activities = combinedActivities
+                    activities = combinedActivities,
+                    db_source = dbSource,  // ✅ NEW: Which database was queried
+                    effective_user = effectiveEmail  // ✅ NEW: Which user's context was used
                 });
             }
             catch (Exception ex)
@@ -632,10 +649,27 @@ namespace BitRaserApiProject.Controllers
 
                 // Check if the user exists
                 var userExists = await context.Users.AnyAsync(u => u.user_email == decodedUserEmail);
+                _logger.LogInformation("🔍 User lookup: {Email} exists in DB? {Exists}", decodedUserEmail, userExists);
+                
                 if (!userExists)
                 {
+                    // ✅ List all users in this DB for debugging
+                    var allUserEmails = await context.Users.Select(u => u.user_email).Take(5).ToListAsync();
+                    _logger.LogWarning("⚠️ User {Email} not found. First 5 users in DB: [{Users}]", 
+                        decodedUserEmail, string.Join(", ", allUserEmails));
                     return NotFound(new { success = false, message = "User not found" });
                 }
+
+                // ✅ DEBUG: Check total subusers in this DB
+                var totalSubusersInDb = await context.subuser.CountAsync();
+                _logger.LogInformation("📊 Total subusers in this DB: {Count}", totalSubusersInDb);
+                
+                // ✅ DEBUG: List all parent emails in subuser table
+                var allParentEmails = await context.subuser
+                    .Select(s => s.user_email)
+                    .Distinct()
+                    .ToListAsync();
+                _logger.LogInformation("📊 Parent emails in subuser table: [{Parents}]", string.Join(", ", allParentEmails));
 
                 // Fetch all subusers for this user
                 var subusers = await context.subuser
@@ -671,6 +705,14 @@ namespace BitRaserApiProject.Controllers
                 var onlineCount = subuserActivities.Count(s => s.calculated_status == "online");
                 var offlineCount = subuserActivities.Count(s => s.calculated_status == "offline");
 
+                // ✅ Debug info: Which DB is being used?
+                var isPrivateCloud = HttpContext.Items["IsPrivateCloud"] as bool? ?? false;
+                var effectiveEmail = HttpContext.Items["EffectiveUserEmail"] as string ?? "unknown";
+                var dbSource = isPrivateCloud ? "PRIVATE_CLOUD_DB" : "MAIN_DB";
+                
+                _logger.LogInformation("📊 GetUserSubusersActivityData: Returning {Count} subusers for {Parent} from {DbSource}", 
+                    subuserActivities.Count, decodedUserEmail, dbSource);
+
                 return Ok(new
                 {
                     success = true,
@@ -680,7 +722,9 @@ namespace BitRaserApiProject.Controllers
                     total_subusers = subuserActivities.Count,
                     online_subusers = onlineCount,
                     offline_subusers = offlineCount,
-                    subusers = subuserActivities
+                    subusers = subuserActivities,
+                    db_source = dbSource,  // ✅ NEW: Which database was queried
+                    effective_user = effectiveEmail  // ✅ NEW: Which user's context was used
                 });
             }
             catch (Exception ex)
