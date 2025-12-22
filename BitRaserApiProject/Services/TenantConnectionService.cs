@@ -46,77 +46,103 @@ namespace BitRaserApiProject.Services
 
         /// <summary>
         /// Gets connection string for specific user by email
+        /// ✅ ENHANCED: Now handles subusers by checking parent user's private cloud status
         /// </summary>
    public async Task<string> GetConnectionStringForUserAsync(string userEmail)
  {
             try
   {
-    _logger.LogInformation("Resolving connection string for user: {Email}", userEmail);
+    _logger.LogInformation("🔍 TenantConnectionService: Resolving connection string for: {Email}", userEmail);
 
-   // Query Main DB to get user configuration
+    // ✅ STEP 1: Check if this email is a subuser
+    var subuserRecord = await _mainDbContext.subuser
+        .AsNoTracking()
+        .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+
+    string effectiveEmail = userEmail;
+    bool isSubuser = false;
+
+    if (subuserRecord != null)
+    {
+        // This is a subuser - use parent's email for private cloud lookup
+        effectiveEmail = subuserRecord.user_email;
+        isSubuser = true;
+        _logger.LogInformation("👤 SUBUSER DETECTED: {SubuserEmail} → Using parent: {ParentEmail}", userEmail, effectiveEmail);
+    }
+    else
+    {
+        _logger.LogInformation("👤 Regular user (not subuser): {Email}", userEmail);
+    }
+
+   // ✅ STEP 2: Query Main DB to get user configuration (using effective email)
       var user = await _mainDbContext.Users
   .AsNoTracking()
-            .FirstOrDefaultAsync(u => u.user_email == userEmail);
+            .FirstOrDefaultAsync(u => u.user_email == effectiveEmail);
 
   if (user == null)
       {
-            _logger.LogWarning("User {Email} not found, using default Main DB", userEmail);
+            _logger.LogWarning("❌ User {Email} not found in users table, using Main DB", effectiveEmail);
            return GetDefaultConnectionString();
            }
 
-   // Check if user has private cloud enabled
+    _logger.LogInformation("✅ User found: {Email}, is_private_cloud = {IsPrivate}", effectiveEmail, user.is_private_cloud);
+
+   // ✅ STEP 3: Check if user has private cloud enabled
                 if (user.is_private_cloud == true)
         {
-  _logger.LogInformation("User {Email} has private cloud enabled, checking for connection string", userEmail);
+  _logger.LogInformation("User {Email} has private cloud enabled{SubuserInfo}, checking for connection string", 
+      effectiveEmail, isSubuser ? $" (subuser: {userEmail})" : "");
 
-         // Try to get connection string from PrivateCloudDatabases table
+         // ✅ Try to get connection string from PrivateCloudDatabases table (using effectiveEmail for parent)
           var privateCloudConfig = await _mainDbContext.PrivateCloudDatabases
        .AsNoTracking()
-       .FirstOrDefaultAsync(p => p.UserEmail == userEmail && p.IsActive);
+       .FirstOrDefaultAsync(p => p.UserEmail == effectiveEmail && p.IsActive);
 
           if (privateCloudConfig != null && !string.IsNullOrEmpty(privateCloudConfig.ConnectionString))
            {
      try
      {
        // ✅ FIX: Decrypt the connection string before using it
-    _logger.LogInformation("Decrypting private cloud connection for user {Email}", userEmail);
+    _logger.LogInformation("Decrypting private cloud connection for user {Email}{SubuserInfo}", 
+        effectiveEmail, isSubuser ? $" (subuser: {userEmail})" : "");
         var decryptedConnectionString = DecryptConnectionString(privateCloudConfig.ConnectionString);
            
            // Validate decrypted connection string
         if (string.IsNullOrWhiteSpace(decryptedConnectionString))
               {
-          _logger.LogError("Decrypted connection string is empty for user {Email}", userEmail);
+          _logger.LogError("Decrypted connection string is empty for user {Email}", effectiveEmail);
      return GetDefaultConnectionString();
     }
 
-        _logger.LogInformation("✅ Using decrypted private cloud connection for user {Email}", userEmail);
+        _logger.LogInformation("✅ Using decrypted private cloud connection for user {Email}{SubuserInfo}", 
+            effectiveEmail, isSubuser ? $" (subuser: {userEmail})" : "");
         return decryptedConnectionString;
        }
      catch (FormatException formatEx)
        {
-     _logger.LogError(formatEx, "❌ Invalid connection string format for user {Email}: {Message}", userEmail, formatEx.Message);
+     _logger.LogError(formatEx, "❌ Invalid connection string format for user {Email}: {Message}", effectiveEmail, formatEx.Message);
      return GetDefaultConnectionString();
             }
   catch (CryptographicException cryptoEx)
 {
-    _logger.LogError(cryptoEx, "❌ Failed to decrypt connection string for user {Email}: {Message}", userEmail, cryptoEx.Message);
+    _logger.LogError(cryptoEx, "❌ Failed to decrypt connection string for user {Email}: {Message}", effectiveEmail, cryptoEx.Message);
   return GetDefaultConnectionString();
        }
        catch (Exception ex)
         {
-         _logger.LogError(ex, "❌ Error using private cloud connection for user {Email}, falling back to Main DB", userEmail);
+         _logger.LogError(ex, "❌ Error using private cloud connection for user {Email}, falling back to Main DB", effectiveEmail);
          return GetDefaultConnectionString();
        }
              }
   else
      {
-       _logger.LogWarning("User {Email} has private cloud enabled but no configuration found, using Main DB", userEmail);
+       _logger.LogWarning("User {Email} has private cloud enabled but no configuration found, using Main DB", effectiveEmail);
                return GetDefaultConnectionString();
          }
     }
       else
   {
-        _logger.LogInformation("User {Email} using default Main DB", userEmail);
+        _logger.LogInformation("User {Email} using default Main DB", effectiveEmail);
  return GetDefaultConnectionString();
          }
             }
@@ -157,6 +183,7 @@ namespace BitRaserApiProject.Services
 
   /// <summary>
  /// Checks if current user has private cloud enabled
+ /// ✅ ENHANCED: Now handles subusers by checking parent user's is_private_cloud flag
         /// </summary>
         public async Task<bool> IsPrivateCloudUserAsync()
         {
@@ -167,9 +194,16 @@ namespace BitRaserApiProject.Services
               return false;
     }
 
+    // ✅ Check if this is a subuser and get parent email
+    var subuserRecord = await _mainDbContext.subuser
+        .AsNoTracking()
+        .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+
+    string effectiveEmail = subuserRecord != null ? subuserRecord.user_email : userEmail;
+
             var user = await _mainDbContext.Users
                 .AsNoTracking()
-              .FirstOrDefaultAsync(u => u.user_email == userEmail);
+              .FirstOrDefaultAsync(u => u.user_email == effectiveEmail);
 
             return user?.is_private_cloud == true;
     }
