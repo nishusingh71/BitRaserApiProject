@@ -84,9 +84,11 @@ namespace BitRaserApiProject.Controllers
                 {
                     if (isCurrentUserSubuser && parentEmail != null)
                     {
-                        // ✅ FIX: Subusers can see other subusers under their PARENT
-                        query = query.Where(s => s.user_email == parentEmail);
-                        _logger.LogInformation("👤 Subuser {Email} viewing subusers under parent {Parent}", currentUserEmail, parentEmail);
+                        // ✅ FIX: Subusers can see:
+                        // 1. Their OWN subusers (where user_email = currentUserEmail)
+                        // 2. Other subusers under their PARENT (where user_email = parentEmail)
+                        query = query.Where(s => s.user_email == currentUserEmail || s.user_email == parentEmail);
+                        _logger.LogInformation("👤 Subuser {Email} viewing own subusers + subusers under parent {Parent}", currentUserEmail, parentEmail);
                     }
                     else
                     {
@@ -256,10 +258,13 @@ namespace BitRaserApiProject.Controllers
                     currentUserEmail, decodedParentEmail, dbSource);
 
                 // Check if user can view subusers for this parent email - use decoded email
-                bool canView = decodedParentEmail == currentUserEmail?.ToLower() ||
+                // ✅ FIX: Allow subusers to view:
+                // 1. Their own subusers (parentEmail = currentUserEmail)
+                // 2. Subusers under their parent (parentEmail = currentSubuser.user_email)
+                bool canView = decodedParentEmail == currentUserEmail?.ToLower() || // Their own subusers
          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser) ||
                  await _authService.CanManageUserAsync(currentUserEmail!, decodedParentEmail) ||
-                 (isCurrentUserSubuser && currentSubuser?.user_email == decodedParentEmail); // ✅ NEW: Subusers can view under their parent
+                 (isCurrentUserSubuser && currentSubuser?.user_email?.ToLower() == decodedParentEmail); // Subusers can view under their parent
 
                 if (!canView)
                 {

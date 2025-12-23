@@ -10,6 +10,7 @@ using BitRaserApiProject.Swagger;
 using BitRaserApiProject.Converters;  // ✅ ADD: Custom DateTime Converters
 using BitRaserApiProject.Factories;   // ✅ ADD: Factories for multi-tenant support
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.DataProtection;  // ✅ ADD: For DataProtection in Docker
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -87,6 +88,20 @@ var jwtIssuer = Environment.GetEnvironmentVariable("Jwt__Issuer")
 var jwtAudience = Environment.GetEnvironmentVariable("Jwt__Audience")
     ?? builder.Configuration["Jwt:Audience"]
     ?? "DSecureAPIUsers";
+
+// ✅ Configure DataProtection for Docker/Production environments
+// This prevents FileSystemXmlRepository and XmlKeyManager warnings
+var keysPath = Environment.GetEnvironmentVariable("DATAPROTECTION_KEYS_PATH") ?? "/app/keys";
+var keysDirectory = new DirectoryInfo(keysPath);
+if (!keysDirectory.Exists)
+{
+    try { keysDirectory.Create(); } catch { /* Ignore in read-only containers */ }
+}
+
+builder.Services.AddDataProtection()
+    .SetApplicationName("BitRaserApiProject")
+    .PersistKeysToFileSystem(keysDirectory)
+    .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
 
 // Configure CORS with comprehensive settings - FIXED FOR VERCEL
 builder.Services.AddCors(options =>
@@ -205,153 +220,18 @@ builder.Services.AddCors(options =>
     });
 });
 
-// ✅ Configure MAIN database context (for services that need Main DB always)
-// This is used by TenantConnectionService and for initial user lookup
-builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
+// ✅ Configure MAIN database context - SIMPLE STATIC CONNECTION
+// Controllers that need Private Cloud routing should use DynamicDbContextFactory
+// This avoids synchronous database lookups during DI resolution which causes login failures
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
 {
-    // ✅ NEW: Factory-based resolution - automatically routes to correct database
-    var httpContextAccessor = serviceProvider.GetService<IHttpContextAccessor>();
-    var logger = serviceProvider.GetService<ILoggerFactory>()?.CreateLogger("DbContextFactory");
-    var config = serviceProvider.GetRequiredService<IConfiguration>();
-    
-    string effectiveConnectionString = connectionString; // Default to Main DB
-    
-    try
-    {
-        // Check if user is authenticated
-        var user = httpContextAccessor?.HttpContext?.User;
-        var userEmail = user?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        
-        if (!string.IsNullOrEmpty(userEmail))
-        {
-            // ✅ Use synchronous check since this is in DI configuration
-            // We'll resolve connection using a simpler synchronous approach
-            var mainDbConnectionString = connectionString;
-            
-            var mainDbOptions = new DbContextOptionsBuilder<ApplicationDbContext>();
-            mainDbOptions.UseMySql(mainDbConnectionString, new MySqlServerVersion(new Version(8, 0, 21)));
-            
-            using var mainContext = new ApplicationDbContext(mainDbOptions.Options);
-            
-            // ✅ Check if user is a subuser in Main DB
-            string? parentEmail = null;
-            var subuserRecord = mainContext.subuser
-                .AsNoTracking()
-                .FirstOrDefault(s => s.subuser_email == userEmail);
-            
-            if (subuserRecord != null)
-            {
-                parentEmail = subuserRecord.user_email;
-                logger?.LogInformation("🔍 DI DbContext: Subuser {Email} → Parent: {Parent}", userEmail, parentEmail);
-            }
-            else
-            {
-                // ✅ NEW: Search Private Cloud databases for subuser
-                logger?.LogDebug("🔍 DI DbContext: User {Email} not in Main DB subuser table, searching Private Cloud DBs...", userEmail);
-                
-                var privateCloudUsers = mainContext.Users
-                    .AsNoTracking()
-                    .Where(u => u.is_private_cloud == true)
-                    .Select(u => new { u.user_email })
-                    .ToList();
-                
-                foreach (var pcUser in privateCloudUsers)
-                {
-                    try
-                    {
-                        var pcConfig = mainContext.PrivateCloudDatabases
-                            .AsNoTracking()
-                            .FirstOrDefault(p => p.UserEmail == pcUser.user_email && p.IsActive);
-                        
-                        if (pcConfig == null || string.IsNullOrEmpty(pcConfig.ConnectionString))
-                            continue;
-                        
-                        var encKey = config?["EncryptionSettings:Key"] ?? "YourSecretEncryptionKey32Bytes!";
-                        var decConn = DecryptConnectionStringStatic(pcConfig.ConnectionString, encKey);
-                        if (string.IsNullOrWhiteSpace(decConn) || !decConn.Contains("Server="))
-                            continue;
-                        
-                        var pcDbOptions = new DbContextOptionsBuilder<ApplicationDbContext>();
-                        pcDbOptions.UseMySql(decConn, new MySqlServerVersion(new Version(8, 0, 21)));
-                        
-                        using var privateContext = new ApplicationDbContext(pcDbOptions.Options);
-                        privateContext.Database.SetCommandTimeout(5);
-                        
-                        var pcSubuser = privateContext.subuser
-                            .AsNoTracking()
-                            .FirstOrDefault(s => s.subuser_email == userEmail);
-                        
-                        if (pcSubuser != null)
-                        {
-                            parentEmail = pcUser.user_email;
-                            effectiveConnectionString = decConn;
-                            logger?.LogInformation("✅ DI DbContext: Found subuser {Email} in Private Cloud DB, Parent: {Parent}", userEmail, parentEmail);
-                            break;
-                        }
-                    }
-                    catch
-                    {
-                        // Continue to next Private Cloud user
-                    }
-                }
-                
-                // If still not found, assume it's a regular user
-                if (parentEmail == null)
-                {
-                    parentEmail = userEmail;
-                }
-            }
-            
-            // ✅ Check if parent has Private Cloud enabled (only if not already resolved from Private Cloud search)
-            if (effectiveConnectionString == connectionString)
-            {
-                var parentUser = mainContext.Users
-                    .AsNoTracking()
-                    .FirstOrDefault(u => u.user_email == parentEmail);
-                
-                if (parentUser != null && parentUser.is_private_cloud == true)
-                {
-                    // ✅ Get Private Cloud connection string
-                    var pcConfig = mainContext.PrivateCloudDatabases
-                        .AsNoTracking()
-                        .FirstOrDefault(p => p.UserEmail == parentEmail && p.IsActive);
-                    
-                    if (pcConfig != null && !string.IsNullOrEmpty(pcConfig.ConnectionString))
-                    {
-                        try
-                        {
-                            // Decrypt connection string
-                            var encryptionKey = config?["EncryptionSettings:Key"] ?? "YourSecretEncryptionKey32Bytes!";
-                            var decrypted = DecryptConnectionStringStatic(pcConfig.ConnectionString, encryptionKey);
-                            
-                            if (!string.IsNullOrWhiteSpace(decrypted) && decrypted.Contains("Server="))
-                            {
-                                effectiveConnectionString = decrypted;
-                                logger?.LogInformation("🔌 DI DbContext: Using Private Cloud DB for {Email}", userEmail);
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            logger?.LogWarning(ex, "⚠️ Failed to decrypt Private Cloud connection for {Email}, using Main DB", userEmail);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    catch (Exception ex)
-    {
-        logger?.LogWarning(ex, "⚠️ Error resolving dynamic DB context, using Main DB");
-    }
-    
-    options.UseMySql(effectiveConnectionString, new MySqlServerVersion(new Version(8, 0, 21)),
-            mysqlOptions =>
+    options.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 21)),
+        mysqlOptions =>
         {
             mysqlOptions.EnableRetryOnFailure(
-      maxRetryCount: 3,
-    maxRetryDelay: TimeSpan.FromSeconds(10),
-    errorNumbersToAdd: null);
-
+                maxRetryCount: 3,
+                maxRetryDelay: TimeSpan.FromSeconds(10),
+                errorNumbersToAdd: null);
             mysqlOptions.CommandTimeout(30);
         });
 
@@ -710,7 +590,13 @@ app.Use(async (context, next) =>
 
 app.UseEmailSecurity();
 
-app.UseHttpsRedirection();
+// ✅ HTTPS Redirection - Skip in Docker/environments without HTTPS
+// Set DISABLE_HTTPS_REDIRECT=true in Docker to skip
+var disableHttpsRedirect = Environment.GetEnvironmentVariable("DISABLE_HTTPS_REDIRECT");
+if (string.IsNullOrEmpty(disableHttpsRedirect) || disableHttpsRedirect.ToLower() != "true")
+{
+    app.UseHttpsRedirection();
+}
 app.UseAuthentication();
 app.UseAuthorization();
 

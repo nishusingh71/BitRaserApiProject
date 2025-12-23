@@ -195,12 +195,12 @@ namespace BitRaserApiProject.Controllers
                                     var serverVersion = new MySqlServerVersion(new Version(8, 0, 21));
                                     optionsBuilder.UseMySql(connectionString, serverVersion, mysqlOptions =>
                                     {
-                                        mysqlOptions.CommandTimeout(5);
-                                        mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(2), null);
+                                        mysqlOptions.CommandTimeout(15); // ✅ Increased timeout for cold connections
+                                        mysqlOptions.EnableRetryOnFailure(3, TimeSpan.FromSeconds(3), null); // ✅ More retries
                                     });
                                     
                                     using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
-                                    privateContext.Database.SetCommandTimeout(5);
+                                    privateContext.Database.SetCommandTimeout(15); // ✅ Increased timeout
                                     
                                     var privateSubuser = await privateContext.subuser
                                         .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
@@ -270,7 +270,7 @@ namespace BitRaserApiProject.Controllers
                             _logger.LogInformation("🔍 Found {Count} private cloud users, checking their databases...", privateCloudUsers.Count);
    
                             // ✅ Reduced timeout for faster failure
-                            var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+                            var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20)); // ✅ Increased timeout for searching Private Cloud DBs
    
                             foreach (var pcUser in privateCloudUsers)
                             {
@@ -290,12 +290,12 @@ namespace BitRaserApiProject.Controllers
                                     var serverVersion = new MySqlServerVersion(new Version(8, 0, 21));
                                     optionsBuilder.UseMySql(connectionString, serverVersion, mysqlOptions =>
                                     {
-                                        mysqlOptions.CommandTimeout(3);
-                                        mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(1), null);
+                                        mysqlOptions.CommandTimeout(10); // ✅ Increased timeout
+                                        mysqlOptions.EnableRetryOnFailure(2, TimeSpan.FromSeconds(2), null); // ✅ More retries
                                     });
   
                                     using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
-                                    privateContext.Database.SetCommandTimeout(3);
+                                    privateContext.Database.SetCommandTimeout(10); // ✅ Increased timeout
    
                                     var privateSubuser = await privateContext.subuser
                                         .FirstOrDefaultAsync(s => s.subuser_email == request.Email, cts.Token);
