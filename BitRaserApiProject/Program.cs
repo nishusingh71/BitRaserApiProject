@@ -205,10 +205,146 @@ builder.Services.AddCors(options =>
     });
 });
 
-// Configure database with enhanced options
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
+// ✅ Configure MAIN database context (for services that need Main DB always)
+// This is used by TenantConnectionService and for initial user lookup
+builder.Services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
 {
-    options.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 21)),
+    // ✅ NEW: Factory-based resolution - automatically routes to correct database
+    var httpContextAccessor = serviceProvider.GetService<IHttpContextAccessor>();
+    var logger = serviceProvider.GetService<ILoggerFactory>()?.CreateLogger("DbContextFactory");
+    var config = serviceProvider.GetRequiredService<IConfiguration>();
+    
+    string effectiveConnectionString = connectionString; // Default to Main DB
+    
+    try
+    {
+        // Check if user is authenticated
+        var user = httpContextAccessor?.HttpContext?.User;
+        var userEmail = user?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        
+        if (!string.IsNullOrEmpty(userEmail))
+        {
+            // ✅ Use synchronous check since this is in DI configuration
+            // We'll resolve connection using a simpler synchronous approach
+            var mainDbConnectionString = connectionString;
+            
+            var mainDbOptions = new DbContextOptionsBuilder<ApplicationDbContext>();
+            mainDbOptions.UseMySql(mainDbConnectionString, new MySqlServerVersion(new Version(8, 0, 21)));
+            
+            using var mainContext = new ApplicationDbContext(mainDbOptions.Options);
+            
+            // ✅ Check if user is a subuser in Main DB
+            string? parentEmail = null;
+            var subuserRecord = mainContext.subuser
+                .AsNoTracking()
+                .FirstOrDefault(s => s.subuser_email == userEmail);
+            
+            if (subuserRecord != null)
+            {
+                parentEmail = subuserRecord.user_email;
+                logger?.LogInformation("🔍 DI DbContext: Subuser {Email} → Parent: {Parent}", userEmail, parentEmail);
+            }
+            else
+            {
+                // ✅ NEW: Search Private Cloud databases for subuser
+                logger?.LogDebug("🔍 DI DbContext: User {Email} not in Main DB subuser table, searching Private Cloud DBs...", userEmail);
+                
+                var privateCloudUsers = mainContext.Users
+                    .AsNoTracking()
+                    .Where(u => u.is_private_cloud == true)
+                    .Select(u => new { u.user_email })
+                    .ToList();
+                
+                foreach (var pcUser in privateCloudUsers)
+                {
+                    try
+                    {
+                        var pcConfig = mainContext.PrivateCloudDatabases
+                            .AsNoTracking()
+                            .FirstOrDefault(p => p.UserEmail == pcUser.user_email && p.IsActive);
+                        
+                        if (pcConfig == null || string.IsNullOrEmpty(pcConfig.ConnectionString))
+                            continue;
+                        
+                        var encKey = config?["EncryptionSettings:Key"] ?? "YourSecretEncryptionKey32Bytes!";
+                        var decConn = DecryptConnectionStringStatic(pcConfig.ConnectionString, encKey);
+                        if (string.IsNullOrWhiteSpace(decConn) || !decConn.Contains("Server="))
+                            continue;
+                        
+                        var pcDbOptions = new DbContextOptionsBuilder<ApplicationDbContext>();
+                        pcDbOptions.UseMySql(decConn, new MySqlServerVersion(new Version(8, 0, 21)));
+                        
+                        using var privateContext = new ApplicationDbContext(pcDbOptions.Options);
+                        privateContext.Database.SetCommandTimeout(5);
+                        
+                        var pcSubuser = privateContext.subuser
+                            .AsNoTracking()
+                            .FirstOrDefault(s => s.subuser_email == userEmail);
+                        
+                        if (pcSubuser != null)
+                        {
+                            parentEmail = pcUser.user_email;
+                            effectiveConnectionString = decConn;
+                            logger?.LogInformation("✅ DI DbContext: Found subuser {Email} in Private Cloud DB, Parent: {Parent}", userEmail, parentEmail);
+                            break;
+                        }
+                    }
+                    catch
+                    {
+                        // Continue to next Private Cloud user
+                    }
+                }
+                
+                // If still not found, assume it's a regular user
+                if (parentEmail == null)
+                {
+                    parentEmail = userEmail;
+                }
+            }
+            
+            // ✅ Check if parent has Private Cloud enabled (only if not already resolved from Private Cloud search)
+            if (effectiveConnectionString == connectionString)
+            {
+                var parentUser = mainContext.Users
+                    .AsNoTracking()
+                    .FirstOrDefault(u => u.user_email == parentEmail);
+                
+                if (parentUser != null && parentUser.is_private_cloud == true)
+                {
+                    // ✅ Get Private Cloud connection string
+                    var pcConfig = mainContext.PrivateCloudDatabases
+                        .AsNoTracking()
+                        .FirstOrDefault(p => p.UserEmail == parentEmail && p.IsActive);
+                    
+                    if (pcConfig != null && !string.IsNullOrEmpty(pcConfig.ConnectionString))
+                    {
+                        try
+                        {
+                            // Decrypt connection string
+                            var encryptionKey = config?["EncryptionSettings:Key"] ?? "YourSecretEncryptionKey32Bytes!";
+                            var decrypted = DecryptConnectionStringStatic(pcConfig.ConnectionString, encryptionKey);
+                            
+                            if (!string.IsNullOrWhiteSpace(decrypted) && decrypted.Contains("Server="))
+                            {
+                                effectiveConnectionString = decrypted;
+                                logger?.LogInformation("🔌 DI DbContext: Using Private Cloud DB for {Email}", userEmail);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            logger?.LogWarning(ex, "⚠️ Failed to decrypt Private Cloud connection for {Email}, using Main DB", userEmail);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        logger?.LogWarning(ex, "⚠️ Error resolving dynamic DB context, using Main DB");
+    }
+    
+    options.UseMySql(effectiveConnectionString, new MySqlServerVersion(new Version(8, 0, 21)),
             mysqlOptions =>
         {
             mysqlOptions.EnableRetryOnFailure(
@@ -224,7 +360,6 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
     {
         options.EnableSensitiveDataLogging();
         options.EnableDetailedErrors();
-        options.LogTo(Console.WriteLine, LogLevel.Information);
     }
 
     // Performance optimizations
@@ -636,5 +771,40 @@ catch (Exception ex)
     throw;
 }
 
-// Program.cs (add BEFORE app.UseRouting())
+// ✅ STATIC HELPER: Decrypt Private Cloud connection string for DI factory
+// This is a copy of TenantConnectionService.DecryptConnectionString for use in Program.cs
+static string? DecryptConnectionStringStatic(string encryptedConnectionString, string encryptionKey)
+{
+    try
+    {
+        if (string.IsNullOrEmpty(encryptedConnectionString))
+            return null;
 
+        // Handle already decrypted connection strings
+        if (encryptedConnectionString.Contains("Server=") || encryptedConnectionString.Contains("server="))
+            return encryptedConnectionString;
+
+        var fullCipher = Convert.FromBase64String(encryptedConnectionString);
+
+        using var aes = System.Security.Cryptography.Aes.Create();
+        aes.Key = System.Text.Encoding.UTF8.GetBytes(encryptionKey.PadRight(32).Substring(0, 32));
+        aes.Mode = System.Security.Cryptography.CipherMode.CBC;
+        aes.Padding = System.Security.Cryptography.PaddingMode.PKCS7;
+
+        var iv = new byte[16];
+        var cipher = new byte[fullCipher.Length - 16];
+
+        Array.Copy(fullCipher, 0, iv, 0, 16);
+        Array.Copy(fullCipher, 16, cipher, 0, cipher.Length);
+
+        aes.IV = iv;
+
+        using var decryptor = aes.CreateDecryptor();
+        var decryptedBytes = decryptor.TransformFinalBlock(cipher, 0, cipher.Length);
+        return System.Text.Encoding.UTF8.GetString(decryptedBytes);
+    }
+    catch
+    {
+        return null;
+    }
+}

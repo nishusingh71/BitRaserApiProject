@@ -58,7 +58,21 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { message = "User not authenticated" });
                 }
 
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+                // ✅ Log which database is being used
+                var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
+                var connectionString = await tenantService.GetConnectionStringForUserAsync(currentUserEmail);
+                var mainConnectionString = HttpContext.RequestServices.GetRequiredService<IConfiguration>()
+                    .GetConnectionString("ApplicationDbContextConnection");
+                var dbSource = (connectionString != mainConnectionString && !string.IsNullOrWhiteSpace(connectionString) && connectionString.Contains("Server="))
+                    ? "Private Cloud DB"
+                    : "Main DB";
+
+                _logger.LogInformation("🔍 GetSubusers called by {Email}, Database: {DbSource}", currentUserEmail, dbSource);
+
+                // ✅ Check if user is subuser in the CORRECT database context (not Main DB only)
+                var currentSubuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+                bool isCurrentUserSubuser = currentSubuser != null;
+                string? parentEmail = currentSubuser?.user_email;
 
                 IQueryable<subuser> query = context.subuser;
 
@@ -68,15 +82,18 @@ namespace BitRaserApiProject.Controllers
 
                 if (!hasAdminPermission)
                 {
-                    // Regular users can see their own subusers
-                    if (isCurrentUserSubuser)
+                    if (isCurrentUserSubuser && parentEmail != null)
                     {
-                        // Subusers cannot see any subusers by default
-                        return Ok(new List<object>());
+                        // ✅ FIX: Subusers can see other subusers under their PARENT
+                        query = query.Where(s => s.user_email == parentEmail);
+                        _logger.LogInformation("👤 Subuser {Email} viewing subusers under parent {Parent}", currentUserEmail, parentEmail);
                     }
-
-                    // Filter to only show current user's subusers
-                    query = query.Where(s => s.user_email == currentUserEmail);
+                    else
+                    {
+                        // Regular users can see their own subusers
+                        query = query.Where(s => s.user_email == currentUserEmail);
+                        _logger.LogInformation("👤 User {Email} viewing their own subusers", currentUserEmail);
+                    }
                 }
 
                 // Apply additional filters if provided
@@ -221,14 +238,28 @@ namespace BitRaserApiProject.Controllers
                 using var context = await _contextFactory.CreateDbContextAsync();
 
                 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
+                
+                // ✅ Log which database is being used
+                var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
+                var connectionString = await tenantService.GetConnectionStringForUserAsync(currentUserEmail!);
+                var mainConnectionString = HttpContext.RequestServices.GetRequiredService<IConfiguration>()
+                    .GetConnectionString("ApplicationDbContextConnection");
+                var dbSource = (connectionString != mainConnectionString && !string.IsNullOrWhiteSpace(connectionString) && connectionString.Contains("Server="))
+                    ? "Private Cloud DB"
+                    : "Main DB";
 
-                _logger.LogInformation("🔍 Fetching subusers for parent: {ParentEmail} (decoded)", decodedParentEmail);
+                // ✅ Check if user is subuser in the CORRECT database context
+                var currentSubuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+                bool isCurrentUserSubuser = currentSubuser != null;
+
+                _logger.LogInformation("🔍 GetSubusersByParent called by {Email} for parent {ParentEmail}, Database: {DbSource}", 
+                    currentUserEmail, decodedParentEmail, dbSource);
 
                 // Check if user can view subusers for this parent email - use decoded email
                 bool canView = decodedParentEmail == currentUserEmail?.ToLower() ||
          await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SUBUSERS", isCurrentUserSubuser) ||
-                 await _authService.CanManageUserAsync(currentUserEmail!, decodedParentEmail);
+                 await _authService.CanManageUserAsync(currentUserEmail!, decodedParentEmail) ||
+                 (isCurrentUserSubuser && currentSubuser?.user_email == decodedParentEmail); // ✅ NEW: Subusers can view under their parent
 
                 if (!canView)
                 {
@@ -280,13 +311,23 @@ namespace BitRaserApiProject.Controllers
             try
             {
                 // ✅ Use dynamic context - automatically routes to correct database
+                // TenantConnectionService now searches Private Cloud DBs for subusers
                 using var context = await _contextFactory.CreateDbContextAsync();
 
                 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
-                _logger.LogInformation("🔍 Creating subuser - Current user: {Email}, IsSubuser: {IsSubuser}",
-          currentUserEmail, isCurrentUserSubuser);
+                // ✅ Log which database is being used
+                var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
+                var connectionString = await tenantService.GetConnectionStringForUserAsync(currentUserEmail!);
+                var mainConnectionString = HttpContext.RequestServices.GetRequiredService<IConfiguration>()
+                    .GetConnectionString("ApplicationDbContextConnection");
+                var dbSource = (connectionString != mainConnectionString && !string.IsNullOrWhiteSpace(connectionString) && connectionString.Contains("Server="))
+                    ? "Private Cloud DB"
+                    : "Main DB";
+
+                _logger.LogInformation("🔍 Creating subuser - Current user: {Email}, IsSubuser: {IsSubuser}, Database: {DbSource}",
+          currentUserEmail, isCurrentUserSubuser, dbSource);
 
                 // ✅ REMOVED: Redundant CanCreateSubusersAsync check
                 // If we reach here, it means basic permissions are validated
@@ -404,7 +445,7 @@ namespace BitRaserApiProject.Controllers
                     _logger.LogWarning("Failed to assign role {RoleName} to subuser {Email} in RBAC system", roleToAssign, request.subuser_email);
                 }
 
-                _logger.LogInformation("✅ Enhanced subuser created: ID={SubuserId}, Email={Email}", newSubuser.subuser_id, newSubuser.subuser_email);
+                _logger.LogInformation("✅ Enhanced subuser created: ID={SubuserId}, Email={Email} in {DbSource}", newSubuser.subuser_id, newSubuser.subuser_email, dbSource);
 
                 var response = new
                 {
@@ -422,6 +463,7 @@ namespace BitRaserApiProject.Controllers
                     createdAt = newSubuser.CreatedAt,
                     createdBy = isCurrentUserSubuser ? $"Subuser: {currentUserEmail}" : $"User: {currentUserEmail}",
                     roleAssignedToRBAC = roleAssigned,
+                    databaseSource = dbSource,  // ✅ NEW: Show which database was used
                     message = roleAssigned
             ? "Subuser created successfully with role assigned to RBAC"
                  : "Subuser created successfully (role assignment to RBAC failed)"

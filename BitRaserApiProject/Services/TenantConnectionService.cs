@@ -34,14 +34,24 @@ namespace BitRaserApiProject.Services
  public async Task<string> GetConnectionStringAsync()
         {
       var userEmail = GetCurrentUserEmail();
+      
+      _logger.LogInformation("🔍 GetConnectionStringAsync called - UserEmail from JWT: {Email}", userEmail ?? "NULL");
 
             if (string.IsNullOrEmpty(userEmail))
        {
-        _logger.LogWarning("No authenticated user found, using default Main DB");
+        _logger.LogWarning("⚠️ No authenticated user found, using default Main DB");
            return GetDefaultConnectionString();
             }
 
-     return await GetConnectionStringForUserAsync(userEmail);
+     var result = await GetConnectionStringForUserAsync(userEmail);
+     
+     // Log which database was selected
+     var mainConn = GetDefaultConnectionString();
+     var isPrivateCloud = (result != mainConn && !string.IsNullOrWhiteSpace(result) && result.Contains("Server="));
+     _logger.LogInformation("📌 GetConnectionStringAsync result for {Email}: Using {DbType}", 
+         userEmail, isPrivateCloud ? "PRIVATE CLOUD DB" : "MAIN DB");
+     
+     return result;
         }
 
         /// <summary>
@@ -154,9 +164,32 @@ namespace BitRaserApiProject.Services
       effectiveEmail, isSubuser ? $" (subuser: {userEmail})" : "");
 
          // ✅ Try to get connection string from PrivateCloudDatabases table (using effectiveEmail for parent)
-          var privateCloudConfig = await _mainDbContext.PrivateCloudDatabases
-       .AsNoTracking()
-       .FirstOrDefaultAsync(p => p.UserEmail == effectiveEmail && p.IsActive);
+         // ✅ FIX: Use case-insensitive comparison
+         var privateCloudConfig = await _mainDbContext.PrivateCloudDatabases
+             .AsNoTracking()
+             .FirstOrDefaultAsync(p => p.UserEmail.ToLower() == effectiveEmail.ToLower() && p.IsActive);
+         
+         // ✅ If not found, try without IsActive check to see if config exists but is inactive
+         if (privateCloudConfig == null)
+         {
+             var anyConfig = await _mainDbContext.PrivateCloudDatabases
+                 .AsNoTracking()
+                 .FirstOrDefaultAsync(p => p.UserEmail.ToLower() == effectiveEmail.ToLower());
+             
+             if (anyConfig != null)
+             {
+                 _logger.LogWarning("⚠️ Private Cloud config found for {Email} but IsActive={IsActive} (might be inactive)", effectiveEmail, anyConfig.IsActive);
+             }
+             else
+             {
+                 _logger.LogWarning("⚠️ No Private Cloud config found in PrivateCloudDatabases table for {Email}", effectiveEmail);
+             }
+         }
+         else
+         {
+             _logger.LogInformation("✅ Private Cloud config found for {Email}: IsActive={IsActive}, HasConnectionString={HasConn}", 
+                 effectiveEmail, privateCloudConfig.IsActive, !string.IsNullOrEmpty(privateCloudConfig.ConnectionString));
+         }
 
           if (privateCloudConfig != null && !string.IsNullOrEmpty(privateCloudConfig.ConnectionString))
            {
@@ -196,7 +229,7 @@ namespace BitRaserApiProject.Services
              }
   else
      {
-       _logger.LogWarning("User {Email} has private cloud enabled but no configuration found, using Main DB", effectiveEmail);
+       _logger.LogWarning("User {Email} has private cloud enabled but no valid configuration found, using Main DB", effectiveEmail);
                return GetDefaultConnectionString();
          }
     }

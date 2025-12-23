@@ -45,22 +45,53 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// ✅ Gets the correct database context - preferring middleware-provided context
+        /// ✅ Gets the correct database context - DIRECT TenantConnectionService approach
         /// </summary>
         private async Task<ApplicationDbContext> GetContextAsync()
         {
-            // ✅ FIRST: Try to get context from middleware (already resolved for subusers)
-            if (HttpContext.Items.TryGetValue("UserDbContext", out var dbContextObj) && dbContextObj is ApplicationDbContext middlewareContext)
-            {
-                var isPrivateCloud = HttpContext.Items["IsPrivateCloud"] as bool? ?? false;
-                var effectiveEmail = HttpContext.Items["EffectiveUserEmail"] as string ?? "unknown";
-                _logger.LogDebug("✅ Using middleware-provided DB context (Private: {IsPrivate}, EffectiveUser: {Email})", isPrivateCloud, effectiveEmail);
-                return middlewareContext;
-            }
+            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? "unknown";
             
-            // ✅ FALLBACK: Use factory (for cases where middleware didn't run)
-            _logger.LogDebug("⚠️ Middleware context not found, using DynamicDbContextFactory");
-            return await _contextFactory.CreateDbContextAsync();
+            _logger.LogInformation("🔍 EnhancedAuditReports.GetContextAsync called for user: {Email}", userEmail);
+            
+            try
+            {
+                // ✅ DIRECT APPROACH: Use TenantConnectionService to get correct connection string
+                var connectionString = await _tenantService.GetConnectionStringForUserAsync(userEmail);
+                var mainConnStr = HttpContext.RequestServices.GetRequiredService<IConfiguration>()
+                    .GetConnectionString("ApplicationDbContextConnection");
+                
+                var isPrivateCloud = (connectionString != mainConnStr && 
+                                     !string.IsNullOrWhiteSpace(connectionString) && 
+                                     connectionString.Contains("Server="));
+                
+                _logger.LogInformation("🔌 EnhancedAuditReports: Resolved {DbType} for user {Email}", 
+                    isPrivateCloud ? "PRIVATE CLOUD DB" : "MAIN DB", userEmail);
+                
+                // Create DbContext with resolved connection string
+                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                optionsBuilder.UseMySql(
+                    connectionString,
+                    new MySqlServerVersion(new Version(8, 0, 21)),
+                    mySqlOptions =>
+                    {
+                        mySqlOptions.EnableRetryOnFailure(
+                            maxRetryCount: 3,
+                            maxRetryDelay: TimeSpan.FromSeconds(5),
+                            errorNumbersToAdd: null);
+                        mySqlOptions.CommandTimeout(120);
+                    });
+                
+                var context = new ApplicationDbContext(optionsBuilder.Options);
+                _logger.LogInformation("✅ EnhancedAuditReports: Created {DbType} context for {Email}", 
+                    isPrivateCloud ? "Private Cloud" : "Main", userEmail);
+                
+                return context;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ EnhancedAuditReports: Error creating context for {Email}, falling back to factory", userEmail);
+                return await _contextFactory.CreateDbContextAsync();
+            }
         }
 
         /// <summary>
