@@ -1332,12 +1332,67 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                 // Track which fields were updated
                 var updatedFields = new List<string>();
 
-                // ✅ STEP 1: Try to find as SUBUSER first
+                // ✅ STEP 1: Try to find as SUBUSER first (in Main DB)
                 var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+                ApplicationDbContext? privateContextToUse = null;
+                string? parentEmail = null;
+                
+                // ✅ NEW: If subuser not in Main DB, search Private Cloud databases
+                if (subuser == null)
+                {
+                    _logger.LogInformation("🔍 Subuser {Email} not in Main DB, searching Private Cloud DBs...", currentUserEmail);
+                    
+                    var privateCloudUsers = await _context.Users
+                        .Where(u => u.is_private_cloud == true)
+                        .Select(u => new { u.user_email, u.user_id })
+                        .ToListAsync();
+                    
+                    foreach (var pcUser in privateCloudUsers)
+                    {
+                        try
+                        {
+                            var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
+                            var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUser.user_email);
+                            
+                            var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
+                            if (connectionString == mainConnectionString || string.IsNullOrWhiteSpace(connectionString) || !connectionString.Contains("Server="))
+                                continue;
+                            
+                            var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                            var serverVersion = new MySqlServerVersion(new Version(8, 0, 21));
+                            optionsBuilder.UseMySql(connectionString, serverVersion, mysqlOptions =>
+                            {
+                                mysqlOptions.CommandTimeout(5);
+                                mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(2), null);
+                            });
+                            
+                            var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+                            privateContext.Database.SetCommandTimeout(5);
+                            
+                            var privateSubuser = await privateContext.subuser.FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+                            if (privateSubuser != null)
+                            {
+                                subuser = privateSubuser;
+                                privateContextToUse = privateContext;
+                                parentEmail = pcUser.user_email;
+                                _logger.LogInformation("✅ Found subuser {Email} in Private Cloud DB (parent: {Parent})", currentUserEmail, parentEmail);
+                                break;
+                            }
+                            else
+                            {
+                                privateContext.Dispose();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "⚠️ Failed to search Private Cloud DB for user {Email}", pcUser.user_email);
+                        }
+                    }
+                }
                 
                 if (subuser != null)
                 {
-                    // ✅ SUBUSER FOUND - Update in current database
+                    // ✅ SUBUSER FOUND - Update in appropriate database
                     _logger.LogInformation("📝 Updating profile for SUBUSER: {Email}", currentUserEmail);
 
                     // Update name if provided
@@ -1371,11 +1426,82 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                     }
 
                     subuser.UpdatedAt = updateTime;
-                    _context.Entry(subuser).State = EntityState.Modified;
-                    await _context.SaveChangesAsync();
-
-                    _logger.LogInformation("✅ Profile updated for SUBUSER {Email}. Fields: {Fields}", 
-                        currentUserEmail, string.Join(", ", updatedFields));
+                    
+                    // ✅ Use the correct context - Private Cloud or Main DB
+                    if (privateContextToUse != null)
+                    {
+                        // Subuser found in Private Cloud DB
+                        privateContextToUse.Entry(subuser).State = EntityState.Modified;
+                        await privateContextToUse.SaveChangesAsync();
+                        _logger.LogInformation("✅ Profile updated for SUBUSER {Email} in Private Cloud DB. Fields: {Fields}", 
+                            currentUserEmail, string.Join(", ", updatedFields));
+                        
+                        // Dispose the private context
+                        await privateContextToUse.DisposeAsync();
+                    }
+                    else
+                    {
+                        // Subuser found in Main DB
+                        _context.Entry(subuser).State = EntityState.Modified;
+                        await _context.SaveChangesAsync();
+                        
+                        _logger.LogInformation("✅ Profile updated for SUBUSER {Email} in Main DB. Fields: {Fields}", 
+                            currentUserEmail, string.Join(", ", updatedFields));
+                    }
+                    
+                    // ✅ Only sync to Private Cloud if subuser was found in Main DB
+                    // (If found in Private Cloud, already updated above)
+                    if (privateContextToUse == null)
+                    {
+                        // Check if parent has private cloud enabled and sync there too
+                        var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == subuser.user_email);
+                        if (parentUser != null && parentUser.is_private_cloud == true)
+                    {
+                        try
+                        {
+                            _logger.LogInformation("🔍 Subuser's parent {Parent} has Private Cloud=true, updating profile in Private Cloud DB too...", subuser.user_email);
+                            
+                            var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
+                            var connectionString = await tenantService.GetConnectionStringForUserAsync(subuser.user_email);
+                            
+                            var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
+                            if (connectionString != mainConnectionString && !string.IsNullOrWhiteSpace(connectionString) && connectionString.Contains("Server="))
+                            {
+                                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                                var serverVersion = new MySqlServerVersion(new Version(8, 0, 21));
+                                optionsBuilder.UseMySql(connectionString, serverVersion, mysqlOptions =>
+                                {
+                                    mysqlOptions.CommandTimeout(5);
+                                    mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(2), null);
+                                });
+                                
+                                using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+                                privateContext.Database.SetCommandTimeout(5);
+                                
+                                var privateSubuser = await privateContext.subuser.FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+                                if (privateSubuser != null)
+                                {
+                                    // Apply same updates to Private Cloud DB
+                                    if (!string.IsNullOrWhiteSpace(request.Name))
+                                        privateSubuser.Name = request.Name.Trim();
+                                    if (request.Phone != null)
+                                        privateSubuser.Phone = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
+                                    if (!string.IsNullOrWhiteSpace(request.Timezone))
+                                        privateSubuser.timezone = request.Timezone.Trim();
+                                    privateSubuser.UpdatedAt = updateTime;
+                                    
+                                    privateContext.Entry(privateSubuser).State = EntityState.Modified;
+                                    await privateContext.SaveChangesAsync();
+                                    _logger.LogInformation("✅ ALSO updated profile in Private Cloud DB for subuser {Email}", currentUserEmail);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "⚠️ Failed to update profile in Private Cloud DB for subuser {Email}", currentUserEmail);
+                        }
+                        }
+                    }  // End of if (privateContextToUse == null)
 
                     return Ok(new
                     {
@@ -1433,8 +1559,56 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                     _context.Entry(user).State = EntityState.Modified;
                     await _context.SaveChangesAsync();
 
-                    _logger.LogInformation("✅ Profile updated for USER {Email}. Fields: {Fields}", 
+                    _logger.LogInformation("✅ Profile updated for USER {Email} in Main DB. Fields: {Fields}", 
                         currentUserEmail, string.Join(", ", updatedFields));
+                    
+                    // ✅ NEW: Also update Private Cloud DB if user has private cloud enabled
+                    if (user.is_private_cloud == true)
+                    {
+                        try
+                        {
+                            _logger.LogInformation("🔍 User {Email} has Private Cloud=true, updating profile in Private Cloud DB too...", currentUserEmail);
+                            
+                            var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
+                            var connectionString = await tenantService.GetConnectionStringForUserAsync(currentUserEmail);
+                            
+                            var mainConnectionString = _configuration.GetConnectionString("ApplicationDbContextConnection");
+                            if (connectionString != mainConnectionString && !string.IsNullOrWhiteSpace(connectionString) && connectionString.Contains("Server="))
+                            {
+                                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                                var serverVersion = new MySqlServerVersion(new Version(8, 0, 21));
+                                optionsBuilder.UseMySql(connectionString, serverVersion, mysqlOptions =>
+                                {
+                                    mysqlOptions.CommandTimeout(5);
+                                    mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(2), null);
+                                });
+                                
+                                using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+                                privateContext.Database.SetCommandTimeout(5);
+                                
+                                var privateUser = await privateContext.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+                                if (privateUser != null)
+                                {
+                                    // Apply same updates to Private Cloud DB
+                                    if (!string.IsNullOrWhiteSpace(request.Name))
+                                        privateUser.user_name = request.Name.Trim();
+                                    if (request.Phone != null)
+                                        privateUser.phone_number = string.IsNullOrWhiteSpace(request.Phone) ? null : request.Phone.Trim();
+                                    if (!string.IsNullOrWhiteSpace(request.Timezone))
+                                        privateUser.timezone = request.Timezone.Trim();
+                                    privateUser.updated_at = updateTime;
+                                    
+                                    privateContext.Entry(privateUser).State = EntityState.Modified;
+                                    await privateContext.SaveChangesAsync();
+                                    _logger.LogInformation("✅ ALSO updated profile in Private Cloud DB for user {Email}", currentUserEmail);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "⚠️ Failed to update profile in Private Cloud DB for user {Email}", currentUserEmail);
+                        }
+                    }
 
                     return Ok(new
                     {

@@ -54,24 +54,84 @@ namespace BitRaserApiProject.Services
   {
     _logger.LogInformation("🔍 TenantConnectionService: Resolving connection string for: {Email}", userEmail);
 
-    // ✅ STEP 1: Check if this email is a subuser
+    // ✅ STEP 1: Check if this email is a subuser in Main DB
     var subuserRecord = await _mainDbContext.subuser
         .AsNoTracking()
         .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
 
     string effectiveEmail = userEmail;
     bool isSubuser = false;
+    string? privateCloudConnectionString = null;
 
     if (subuserRecord != null)
     {
-        // This is a subuser - use parent's email for private cloud lookup
+        // This is a subuser found in Main DB - use parent's email for private cloud lookup
         effectiveEmail = subuserRecord.user_email;
         isSubuser = true;
-        _logger.LogInformation("👤 SUBUSER DETECTED: {SubuserEmail} → Using parent: {ParentEmail}", userEmail, effectiveEmail);
+        _logger.LogInformation("👤 SUBUSER DETECTED in Main DB: {SubuserEmail} → Using parent: {ParentEmail}", userEmail, effectiveEmail);
     }
     else
     {
-        _logger.LogInformation("👤 Regular user (not subuser): {Email}", userEmail);
+        _logger.LogInformation("👤 Not found as subuser in Main DB: {Email}, searching Private Cloud DBs...", userEmail);
+        
+        // ✅ NEW: Search Private Cloud databases for subuser
+        var privateCloudUsers = await _mainDbContext.Users
+            .AsNoTracking()
+            .Where(u => u.is_private_cloud == true)
+            .Select(u => new { u.user_email })
+            .ToListAsync();
+        
+        foreach (var pcUser in privateCloudUsers)
+        {
+            try
+            {
+                var pcConfig = await _mainDbContext.PrivateCloudDatabases
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(p => p.UserEmail == pcUser.user_email && p.IsActive);
+                
+                if (pcConfig == null || string.IsNullOrEmpty(pcConfig.ConnectionString))
+                    continue;
+                
+                var decryptedConn = DecryptConnectionString(pcConfig.ConnectionString);
+                if (string.IsNullOrWhiteSpace(decryptedConn) || !decryptedConn.Contains("Server="))
+                    continue;
+                
+                var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
+                var serverVersion = new MySqlServerVersion(new Version(8, 0, 21));
+                optionsBuilder.UseMySql(decryptedConn, serverVersion, mysqlOptions =>
+                {
+                    mysqlOptions.CommandTimeout(5);
+                    mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(2), null);
+                });
+                
+                using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
+                privateContext.Database.SetCommandTimeout(5);
+                
+                var pcSubuser = await privateContext.subuser
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+                
+                if (pcSubuser != null)
+                {
+                    effectiveEmail = pcUser.user_email;
+                    isSubuser = true;
+                    privateCloudConnectionString = decryptedConn;
+                    _logger.LogInformation("✅ SUBUSER FOUND in Private Cloud DB: {SubuserEmail} → Parent: {ParentEmail}", userEmail, effectiveEmail);
+                    break;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "⚠️ Failed to search Private Cloud DB for user {Email}", pcUser.user_email);
+            }
+        }
+        
+        // If found in Private Cloud DB, return that connection string directly
+        if (privateCloudConnectionString != null)
+        {
+            _logger.LogInformation("🔌 Returning Private Cloud connection for subuser: {SubuserEmail}", userEmail);
+            return privateCloudConnectionString;
+        }
     }
 
    // ✅ STEP 2: Query Main DB to get user configuration (using effective email)

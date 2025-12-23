@@ -226,7 +226,7 @@ namespace BitRaserApiProject.Controllers
                  {
                      UserEmail = m.user_email,
                      LicensesAssigned = 1,
-                     AssignedAt = m.license_activation_date.Value,
+                     AssignedAt = m.license_activation_date.GetValueOrDefault(),
                      AssignedBy = "System"
                  })
                        .ToListAsync();

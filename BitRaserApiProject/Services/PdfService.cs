@@ -353,7 +353,7 @@ public class PdfService
                      foreach (var log in reportData.ErasureLog)
                      {
                          t.Cell().Border(1).BorderColor(Colors.Grey.Darken1).Padding(5)
-                           .Text(SafePath(log.Target)).FontSize(10).WrapAnywhere();
+                           .Text(SafePath(log.Target)).FontSize(10);
                          t.Cell().Border(1).BorderColor(Colors.Grey.Darken1).Padding(5)
                    .Text(log.Size ?? "N/A").FontSize(10);
                          t.Cell().Border(1).BorderColor(Colors.Grey.Darken1).Padding(5)
@@ -375,8 +375,7 @@ public class PdfService
 
               row.RelativeItem().AlignCenter()
               .Text(reportData.DigitalSignature ?? "N/A")
-           .FontSize(8)
-      .WrapAnywhere();
+           .FontSize(8);
 
               row.RelativeItem().AlignRight().Text(t => t.CurrentPageNumber());
           });

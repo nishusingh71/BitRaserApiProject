@@ -347,9 +347,9 @@ downloadUrl = $"/api/SubusersManagement/download/{fileName}",
        InactiveSubusers = await query.CountAsync(s => s.status == "inactive"),
   PendingSubusers = await query.CountAsync(s => s.status == "pending"),
       SubusersByRole = await query
-    .GroupBy(s => s.Role)
+    .GroupBy(s => s.Role ?? "Unknown")
        .Select(g => new { Role = g.Key, Count = g.Count() })
-    .ToDictionaryAsync(x => x.Role, x => x.Count)
+    .ToDictionaryAsync(x => x.Role ?? "Unknown", x => x.Count)
      };
 
     return Ok(stats);
