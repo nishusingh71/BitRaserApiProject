@@ -876,6 +876,430 @@ namespace BitRaserApiProject.Controllers
             }
         }
 
+        #region PDF Export Settings Endpoints
+
+        /// <summary>
+        /// Save PDF export settings for the current user (One-time setup)
+        /// After saving, all future exports will automatically use these settings
+        /// </summary>
+        [HttpPost("export-settings")]
+        [Consumes("multipart/form-data")]
+        public async Task<IActionResult> SaveExportSettings([FromForm] SavePdfExportSettingsRequest request)
+        {
+            try
+            {
+                var context = await GetContextAsync();
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+                if (string.IsNullOrEmpty(userEmail))
+                    return Unauthorized(new { message = "User not authenticated" });
+
+                // Check if settings already exist for this user
+                var existingSettings = await context.PdfExportSettings
+                    .FirstOrDefaultAsync(s => s.UserEmail == userEmail);
+
+                if (existingSettings != null)
+                {
+                    // Update existing settings
+                    existingSettings.ReportTitle = request.ReportTitle ?? existingSettings.ReportTitle;
+                    existingSettings.HeaderText = request.HeaderText ?? existingSettings.HeaderText;
+                    existingSettings.TechnicianName = request.TechnicianName ?? existingSettings.TechnicianName;
+                    existingSettings.TechnicianDept = request.TechnicianDept ?? existingSettings.TechnicianDept;
+                    existingSettings.ValidatorName = request.ValidatorName ?? existingSettings.ValidatorName;
+                    existingSettings.ValidatorDept = request.ValidatorDept ?? existingSettings.ValidatorDept;
+                    existingSettings.UpdatedAt = DateTime.UtcNow;
+
+                    // Update images if provided
+                    if (request.HeaderLeftLogo != null && request.HeaderLeftLogo.Length > 0)
+                    {
+                        using var ms = new MemoryStream();
+                        await request.HeaderLeftLogo.CopyToAsync(ms);
+                        existingSettings.HeaderLeftLogoBase64 = Convert.ToBase64String(ms.ToArray());
+                    }
+
+                    if (request.HeaderRightLogo != null && request.HeaderRightLogo.Length > 0)
+                    {
+                        using var ms = new MemoryStream();
+                        await request.HeaderRightLogo.CopyToAsync(ms);
+                        existingSettings.HeaderRightLogoBase64 = Convert.ToBase64String(ms.ToArray());
+                    }
+
+                    if (request.WatermarkImage != null && request.WatermarkImage.Length > 0)
+                    {
+                        using var ms = new MemoryStream();
+                        await request.WatermarkImage.CopyToAsync(ms);
+                        existingSettings.WatermarkImageBase64 = Convert.ToBase64String(ms.ToArray());
+                    }
+
+                    if (request.TechnicianSignature != null && request.TechnicianSignature.Length > 0)
+                    {
+                        using var ms = new MemoryStream();
+                        await request.TechnicianSignature.CopyToAsync(ms);
+                        existingSettings.TechnicianSignatureBase64 = Convert.ToBase64String(ms.ToArray());
+                    }
+
+                    if (request.ValidatorSignature != null && request.ValidatorSignature.Length > 0)
+                    {
+                        using var ms = new MemoryStream();
+                        await request.ValidatorSignature.CopyToAsync(ms);
+                        existingSettings.ValidatorSignatureBase64 = Convert.ToBase64String(ms.ToArray());
+                    }
+
+                    await context.SaveChangesAsync();
+
+                    _logger.LogInformation("Updated PDF export settings for {Email}", userEmail);
+                    return Ok(new { 
+                        success = true, 
+                        message = "PDF export settings updated successfully",
+                        data = MapToSettingsResponse(existingSettings)
+                    });
+                }
+                else
+                {
+                    // Create new settings
+                    var newSettings = new PdfExportSettings
+                    {
+                        UserEmail = userEmail,
+                        ReportTitle = request.ReportTitle,
+                        HeaderText = request.HeaderText,
+                        TechnicianName = request.TechnicianName,
+                        TechnicianDept = request.TechnicianDept,
+                        ValidatorName = request.ValidatorName,
+                        ValidatorDept = request.ValidatorDept,
+                        IsActive = true,
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    // Save images as base64
+                    if (request.HeaderLeftLogo != null && request.HeaderLeftLogo.Length > 0)
+                    {
+                        using var ms = new MemoryStream();
+                        await request.HeaderLeftLogo.CopyToAsync(ms);
+                        newSettings.HeaderLeftLogoBase64 = Convert.ToBase64String(ms.ToArray());
+                    }
+
+                    if (request.HeaderRightLogo != null && request.HeaderRightLogo.Length > 0)
+                    {
+                        using var ms = new MemoryStream();
+                        await request.HeaderRightLogo.CopyToAsync(ms);
+                        newSettings.HeaderRightLogoBase64 = Convert.ToBase64String(ms.ToArray());
+                    }
+
+                    if (request.WatermarkImage != null && request.WatermarkImage.Length > 0)
+                    {
+                        using var ms = new MemoryStream();
+                        await request.WatermarkImage.CopyToAsync(ms);
+                        newSettings.WatermarkImageBase64 = Convert.ToBase64String(ms.ToArray());
+                    }
+
+                    if (request.TechnicianSignature != null && request.TechnicianSignature.Length > 0)
+                    {
+                        using var ms = new MemoryStream();
+                        await request.TechnicianSignature.CopyToAsync(ms);
+                        newSettings.TechnicianSignatureBase64 = Convert.ToBase64String(ms.ToArray());
+                    }
+
+                    if (request.ValidatorSignature != null && request.ValidatorSignature.Length > 0)
+                    {
+                        using var ms = new MemoryStream();
+                        await request.ValidatorSignature.CopyToAsync(ms);
+                        newSettings.ValidatorSignatureBase64 = Convert.ToBase64String(ms.ToArray());
+                    }
+
+                    context.PdfExportSettings.Add(newSettings);
+                    await context.SaveChangesAsync();
+
+                    _logger.LogInformation("Created PDF export settings for {Email}", userEmail);
+                    return CreatedAtAction(nameof(GetExportSettings), null, new { 
+                        success = true, 
+                        message = "PDF export settings saved successfully",
+                        data = MapToSettingsResponse(newSettings)
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving PDF export settings");
+                return StatusCode(500, new { success = false, message = "Error saving settings", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Save PDF export settings via JSON body (with base64 encoded images)
+        /// </summary>
+        [HttpPost("export-settings-json")]
+        public async Task<IActionResult> SaveExportSettingsJson([FromBody] SavePdfExportSettingsJsonRequest request)
+        {
+            try
+            {
+                var context = await GetContextAsync();
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+                if (string.IsNullOrEmpty(userEmail))
+                    return Unauthorized(new { message = "User not authenticated" });
+
+                // Check if settings already exist for this user
+                var existingSettings = await context.PdfExportSettings
+                    .FirstOrDefaultAsync(s => s.UserEmail == userEmail);
+
+                if (existingSettings != null)
+                {
+                    // Update existing settings
+                    existingSettings.ReportTitle = request.ReportTitle ?? existingSettings.ReportTitle;
+                    existingSettings.HeaderText = request.HeaderText ?? existingSettings.HeaderText;
+                    existingSettings.TechnicianName = request.TechnicianName ?? existingSettings.TechnicianName;
+                    existingSettings.TechnicianDept = request.TechnicianDept ?? existingSettings.TechnicianDept;
+                    existingSettings.ValidatorName = request.ValidatorName ?? existingSettings.ValidatorName;
+                    existingSettings.ValidatorDept = request.ValidatorDept ?? existingSettings.ValidatorDept;
+                    existingSettings.HeaderLeftLogoBase64 = request.HeaderLeftLogoBase64 ?? existingSettings.HeaderLeftLogoBase64;
+                    existingSettings.HeaderRightLogoBase64 = request.HeaderRightLogoBase64 ?? existingSettings.HeaderRightLogoBase64;
+                    existingSettings.WatermarkImageBase64 = request.WatermarkImageBase64 ?? existingSettings.WatermarkImageBase64;
+                    existingSettings.TechnicianSignatureBase64 = request.TechnicianSignatureBase64 ?? existingSettings.TechnicianSignatureBase64;
+                    existingSettings.ValidatorSignatureBase64 = request.ValidatorSignatureBase64 ?? existingSettings.ValidatorSignatureBase64;
+                    existingSettings.UpdatedAt = DateTime.UtcNow;
+
+                    await context.SaveChangesAsync();
+
+                    _logger.LogInformation("Updated PDF export settings (JSON) for {Email}", userEmail);
+                    return Ok(new { 
+                        success = true, 
+                        message = "PDF export settings updated successfully",
+                        data = MapToSettingsResponse(existingSettings)
+                    });
+                }
+                else
+                {
+                    // Create new settings
+                    var newSettings = new PdfExportSettings
+                    {
+                        UserEmail = userEmail,
+                        ReportTitle = request.ReportTitle,
+                        HeaderText = request.HeaderText,
+                        TechnicianName = request.TechnicianName,
+                        TechnicianDept = request.TechnicianDept,
+                        ValidatorName = request.ValidatorName,
+                        ValidatorDept = request.ValidatorDept,
+                        HeaderLeftLogoBase64 = request.HeaderLeftLogoBase64,
+                        HeaderRightLogoBase64 = request.HeaderRightLogoBase64,
+                        WatermarkImageBase64 = request.WatermarkImageBase64,
+                        TechnicianSignatureBase64 = request.TechnicianSignatureBase64,
+                        ValidatorSignatureBase64 = request.ValidatorSignatureBase64,
+                        IsActive = true,
+                        CreatedAt = DateTime.UtcNow
+                    };
+
+                    context.PdfExportSettings.Add(newSettings);
+                    await context.SaveChangesAsync();
+
+                    _logger.LogInformation("Created PDF export settings (JSON) for {Email}", userEmail);
+                    return CreatedAtAction(nameof(GetExportSettings), null, new { 
+                        success = true, 
+                        message = "PDF export settings saved successfully",
+                        data = MapToSettingsResponse(newSettings)
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error saving PDF export settings via JSON");
+                return StatusCode(500, new { success = false, message = "Error saving settings", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get current user's PDF export settings
+        /// </summary>
+        [HttpGet("export-settings")]
+        public async Task<IActionResult> GetExportSettings()
+        {
+            try
+            {
+                var context = await GetContextAsync();
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+                if (string.IsNullOrEmpty(userEmail))
+                    return Unauthorized(new { message = "User not authenticated" });
+
+                var settings = await context.PdfExportSettings
+                    .FirstOrDefaultAsync(s => s.UserEmail == userEmail && s.IsActive);
+
+                if (settings == null)
+                {
+                    return Ok(new { 
+                        success = true, 
+                        message = "No export settings found. Default values will be used.",
+                        hasSettings = false,
+                        data = (object?)null
+                    });
+                }
+
+                return Ok(new { 
+                    success = true, 
+                    hasSettings = true,
+                    data = MapToSettingsResponse(settings)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting PDF export settings");
+                return StatusCode(500, new { success = false, message = "Error getting settings", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Delete current user's PDF export settings
+        /// </summary>
+        [HttpDelete("export-settings")]
+        public async Task<IActionResult> DeleteExportSettings()
+        {
+            try
+            {
+                var context = await GetContextAsync();
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+                if (string.IsNullOrEmpty(userEmail))
+                    return Unauthorized(new { message = "User not authenticated" });
+
+                var settings = await context.PdfExportSettings
+                    .FirstOrDefaultAsync(s => s.UserEmail == userEmail);
+
+                if (settings == null)
+                {
+                    return NotFound(new { success = false, message = "No export settings found" });
+                }
+
+                context.PdfExportSettings.Remove(settings);
+                await context.SaveChangesAsync();
+
+                _logger.LogInformation("Deleted PDF export settings for {Email}", userEmail);
+                return Ok(new { success = true, message = "PDF export settings deleted successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting PDF export settings");
+                return StatusCode(500, new { success = false, message = "Error deleting settings", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Export single report to PDF using saved settings (no need to pass all parameters)
+        /// Just call this endpoint and saved settings will be automatically applied
+        /// </summary>
+        [HttpGet("{id}/export-pdf-with-settings")]
+        public async Task<IActionResult> ExportSingleReportPDFWithSettings(int id)
+        {
+            try
+            {
+                var context = await GetContextAsync();
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
+                var report = await context.AuditReports.FindAsync(id);
+
+                if (report == null) return NotFound();
+
+                // Authorization check
+                bool canExport = report.client_email == userEmail ||
+                   await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser);
+
+                if (!canExport)
+                {
+                    return StatusCode(403, new { error = "You can only export your own reports" });
+                }
+
+                // Get saved settings for this user
+                var settings = await context.PdfExportSettings
+                    .FirstOrDefaultAsync(s => s.UserEmail == userEmail && s.IsActive);
+
+                _logger.LogInformation("Exporting report {Id} to PDF with saved settings for {Email}", id, userEmail);
+
+                // Generate PDF with saved settings
+                var pdfBytes = await GenerateSingleReportPDFWithSavedSettings(report, settings);
+                var fileName = $"report_{report.report_id}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+
+                return File(pdfBytes, "application/pdf", fileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error exporting single report {Id} to PDF with settings", id);
+                return StatusCode(500, new { message = "Error exporting report", error = ex.Message });
+            }
+        }
+
+        private PdfExportSettingsResponse MapToSettingsResponse(PdfExportSettings settings)
+        {
+            return new PdfExportSettingsResponse
+            {
+                Id = settings.Id,
+                UserEmail = settings.UserEmail,
+                ReportTitle = settings.ReportTitle,
+                HeaderText = settings.HeaderText,
+                TechnicianName = settings.TechnicianName,
+                TechnicianDept = settings.TechnicianDept,
+                ValidatorName = settings.ValidatorName,
+                ValidatorDept = settings.ValidatorDept,
+                HasHeaderLeftLogo = !string.IsNullOrEmpty(settings.HeaderLeftLogoBase64),
+                HasHeaderRightLogo = !string.IsNullOrEmpty(settings.HeaderRightLogoBase64),
+                HasWatermarkImage = !string.IsNullOrEmpty(settings.WatermarkImageBase64),
+                HasTechnicianSignature = !string.IsNullOrEmpty(settings.TechnicianSignatureBase64),
+                HasValidatorSignature = !string.IsNullOrEmpty(settings.ValidatorSignatureBase64),
+                IsActive = settings.IsActive,
+                CreatedAt = settings.CreatedAt,
+                UpdatedAt = settings.UpdatedAt
+            };
+        }
+
+        private async Task<byte[]> GenerateSingleReportPDFWithSavedSettings(audit_reports report, PdfExportSettings? settings)
+        {
+            // Get logged-in user details
+            var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            var userDetails = await GetUserDetailsForPDF(userEmail);
+
+            // Parse D-Secure JSON format properly
+            ReportData reportData = await ParseDSecureReportData(report);
+
+            // Create proper report request with mapped data
+            var reportRequest = new ReportRequest
+            {
+                ReportData = reportData,
+                ReportTitle = settings?.ReportTitle ?? report.report_name ?? $"Report #{report.report_id}",
+                HeaderText = settings?.HeaderText ?? "D-SecureErase Audit Report",
+                TechnicianName = settings?.TechnicianName ?? userDetails.UserName,
+                TechnicianDept = settings?.TechnicianDept ?? userDetails.Department,
+                ValidatorName = settings?.ValidatorName ?? userDetails.UserName,
+                ValidatorDept = settings?.ValidatorDept ?? userDetails.Department
+            };
+
+            // Apply saved images if available
+            if (!string.IsNullOrEmpty(settings?.HeaderLeftLogoBase64))
+            {
+                reportRequest.HeaderLeftLogo = Convert.FromBase64String(settings.HeaderLeftLogoBase64);
+            }
+
+            if (!string.IsNullOrEmpty(settings?.HeaderRightLogoBase64))
+            {
+                reportRequest.HeaderRightLogo = Convert.FromBase64String(settings.HeaderRightLogoBase64);
+            }
+
+            if (!string.IsNullOrEmpty(settings?.WatermarkImageBase64))
+            {
+                reportRequest.WatermarkImage = Convert.FromBase64String(settings.WatermarkImageBase64);
+            }
+
+            if (!string.IsNullOrEmpty(settings?.TechnicianSignatureBase64))
+            {
+                reportRequest.TechnicianSignature = Convert.FromBase64String(settings.TechnicianSignatureBase64);
+            }
+
+            if (!string.IsNullOrEmpty(settings?.ValidatorSignatureBase64))
+            {
+                reportRequest.ValidatorSignature = Convert.FromBase64String(settings.ValidatorSignatureBase64);
+            }
+
+            return _pdfService.GenerateReport(reportRequest);
+        }
+
+        #endregion
+
         #region Private Helper Methods
 
         private string GenerateCsvContent(List<audit_reports> reports)

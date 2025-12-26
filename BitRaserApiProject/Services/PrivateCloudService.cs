@@ -252,6 +252,26 @@ INDEX idx_user_email (`user_email`),
   `RoleId` int(11) NOT NULL,
   `PermissionId` int(11) NOT NULL,
   PRIMARY KEY (`RoleId`, `PermissionId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;",
+
+["pdf_export_settings"] = @"CREATE TABLE IF NOT EXISTS `pdf_export_settings` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `user_email` VARCHAR(255) NOT NULL,
+  `report_title` VARCHAR(500) NULL,
+  `header_text` VARCHAR(500) NULL,
+  `technician_name` VARCHAR(255) NULL,
+  `technician_dept` VARCHAR(255) NULL,
+  `validator_name` VARCHAR(255) NULL,
+  `validator_dept` VARCHAR(255) NULL,
+  `header_left_logo` LONGTEXT NULL,
+  `header_right_logo` LONGTEXT NULL,
+  `watermark_image` LONGTEXT NULL,
+  `technician_signature` LONGTEXT NULL,
+  `validator_signature` LONGTEXT NULL,
+  `is_active` BOOLEAN DEFAULT TRUE,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME NULL,
+  UNIQUE INDEX `IX_pdf_export_settings_user_email` (`user_email`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;"
         };
 

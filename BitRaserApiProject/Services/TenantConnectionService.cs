@@ -8,6 +8,7 @@ namespace BitRaserApiProject.Services
     /// <summary>
   /// Implementation of tenant connection resolver
     /// Determines which database connection to use based on user's is_private_cloud setting
+    /// ✅ OPTIMIZED: Uses caching to reduce database load
     /// </summary>
   public class TenantConnectionService : ITenantConnectionService
     {
@@ -15,6 +16,12 @@ namespace BitRaserApiProject.Services
         private readonly ApplicationDbContext _mainDbContext;
         private readonly IConfiguration _configuration;
       private readonly ILogger<TenantConnectionService> _logger;
+      
+        // ✅ CACHE: Store connection strings to avoid repeated lookups
+        // Key: userEmail, Value: (connectionString, expireTime)
+        private static readonly Dictionary<string, (string ConnectionString, DateTime ExpireTime)> _connectionCache = new();
+        private static readonly object _cacheLock = new();
+        private const int CACHE_DURATION_MINUTES = 5;
 
      public TenantConnectionService(
     IHttpContextAccessor httpContextAccessor,
@@ -62,7 +69,24 @@ namespace BitRaserApiProject.Services
  {
             try
   {
-    _logger.LogInformation("🔍 TenantConnectionService: Resolving connection string for: {Email}", userEmail);
+    // ✅ CACHE CHECK: Return cached connection string if available
+    lock (_cacheLock)
+    {
+        if (_connectionCache.TryGetValue(userEmail.ToLower(), out var cached))
+        {
+            if (DateTime.UtcNow < cached.ExpireTime)
+            {
+                _logger.LogDebug("✅ Cache HIT for {Email}", userEmail);
+                return cached.ConnectionString;
+            }
+            else
+            {
+                _connectionCache.Remove(userEmail.ToLower());
+            }
+        }
+    }
+    
+    _logger.LogDebug("🔍 Cache MISS for {Email}, resolving connection string...", userEmail);
 
     // ✅ STEP 1: Check if this email is a subuser in Main DB
     var subuserRecord = await _mainDbContext.subuser
@@ -140,7 +164,7 @@ namespace BitRaserApiProject.Services
         if (privateCloudConnectionString != null)
         {
             _logger.LogInformation("🔌 Returning Private Cloud connection for subuser: {SubuserEmail}", userEmail);
-            return privateCloudConnectionString;
+            return CacheAndReturn(userEmail, privateCloudConnectionString);
         }
     }
 
@@ -204,46 +228,69 @@ namespace BitRaserApiProject.Services
         if (string.IsNullOrWhiteSpace(decryptedConnectionString))
               {
           _logger.LogError("Decrypted connection string is empty for user {Email}", effectiveEmail);
-     return GetDefaultConnectionString();
+     return CacheAndReturn(userEmail, GetDefaultConnectionString());
     }
 
         _logger.LogInformation("✅ Using decrypted private cloud connection for user {Email}{SubuserInfo}", 
             effectiveEmail, isSubuser ? $" (subuser: {userEmail})" : "");
-        return decryptedConnectionString;
+        return CacheAndReturn(userEmail, decryptedConnectionString);
        }
      catch (FormatException formatEx)
        {
      _logger.LogError(formatEx, "❌ Invalid connection string format for user {Email}: {Message}", effectiveEmail, formatEx.Message);
-     return GetDefaultConnectionString();
+     return CacheAndReturn(userEmail, GetDefaultConnectionString());
             }
   catch (CryptographicException cryptoEx)
 {
     _logger.LogError(cryptoEx, "❌ Failed to decrypt connection string for user {Email}: {Message}", effectiveEmail, cryptoEx.Message);
-  return GetDefaultConnectionString();
+  return CacheAndReturn(userEmail, GetDefaultConnectionString());
        }
        catch (Exception ex)
         {
          _logger.LogError(ex, "❌ Error using private cloud connection for user {Email}, falling back to Main DB", effectiveEmail);
-         return GetDefaultConnectionString();
+         return CacheAndReturn(userEmail, GetDefaultConnectionString());
        }
              }
   else
      {
        _logger.LogWarning("User {Email} has private cloud enabled but no valid configuration found, using Main DB", effectiveEmail);
-               return GetDefaultConnectionString();
+               return CacheAndReturn(userEmail, GetDefaultConnectionString());
          }
     }
       else
   {
         _logger.LogInformation("User {Email} using default Main DB", effectiveEmail);
- return GetDefaultConnectionString();
+ return CacheAndReturn(userEmail, GetDefaultConnectionString());
          }
             }
     catch (Exception ex)
           {
    _logger.LogError(ex, "Error resolving connection string for user {Email}, using default Main DB", userEmail);
-    return GetDefaultConnectionString();
+    return CacheAndReturn(userEmail, GetDefaultConnectionString());
   }
+        }
+        
+        /// <summary>
+        /// ✅ HELPER: Cache the connection string and return it
+        /// </summary>
+        private string CacheAndReturn(string userEmail, string connectionString)
+        {
+            lock (_cacheLock)
+            {
+                _connectionCache[userEmail.ToLower()] = (connectionString, DateTime.UtcNow.AddMinutes(CACHE_DURATION_MINUTES));
+            }
+            return connectionString;
+        }
+        
+        /// <summary>
+        /// ✅ HELPER: Clear cache for a specific user (useful after profile updates)
+        /// </summary>
+        public void ClearCacheForUser(string userEmail)
+        {
+            lock (_cacheLock)
+            {
+                _connectionCache.Remove(userEmail.ToLower());
+            }
         }
 
         /// <summary>

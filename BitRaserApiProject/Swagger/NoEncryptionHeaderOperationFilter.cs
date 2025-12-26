@@ -14,11 +14,11 @@ namespace BitRaserApiProject.Swagger
      // Skip adding parameter for excluded endpoints (they're already not encrypted)
     var path = context.ApiDescription.RelativePath?.ToLowerInvariant() ?? string.Empty;
      
-      var excludedPaths = new[]
+     var excludedPaths = new[]
             {
           "swagger",
-     "health",
-       "metrics",
+     "api/health",
+       "/metrics",
      "favicon.ico",
            ".well-known"
        };

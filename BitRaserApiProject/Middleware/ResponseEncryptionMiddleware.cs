@@ -200,10 +200,14 @@ return true;
   {
      "/api/auth/login",
      "/api/time/server-time",
-         "/time/server-time"
+         "/time/server-time",
+         "/api/contactformsubmissions",
+         "/api/enhancedauditreports/export-settings",
+         "/api/enhancedauditreports/export-settings-json",
+         "/api/rendermetrics"
    };
 
-  if (authPaths.Any(p => path.Equals(p, StringComparison.OrdinalIgnoreCase)))
+  if (authPaths.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
     {
      _logger.LogDebug("⏭️ Skipping encryption for auth endpoint: {Path}", path);
       return true;

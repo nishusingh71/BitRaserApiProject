@@ -52,6 +52,12 @@ namespace BitRaserApiProject
         // ✅ Forgot Password Requests (NO EMAIL - OTP returned in API response)
         public DbSet<ForgotPasswordRequest> ForgotPasswordRequests { get; set; }
 
+        // ✅ Contact Form Submissions
+        public DbSet<ContactFormSubmission> ContactFormSubmissions { get; set; }
+
+        // ✅ PDF Export Settings (for default report export configurations)
+        public DbSet<PdfExportSettings> PdfExportSettings { get; set; }
+
         public static string HashLicenseKey(string licenseKey)
         {
             using var sha256 = SHA256.Create();
@@ -104,6 +110,11 @@ namespace BitRaserApiProject
                 .Property(m => m.license_details_json)
                 .HasColumnType("json");
 
+            // ✅ INDEX: machines.user_email for fast user machine lookups
+            modelBuilder.Entity<machines>()
+                .HasIndex(m => m.user_email)
+                .HasDatabaseName("IX_machines_user_email");
+
             // Audit Reports Table
             modelBuilder.Entity<audit_reports>()
                 .HasKey(a => a.report_id);
@@ -127,6 +138,21 @@ namespace BitRaserApiProject
                 .Property(a => a.report_details_json)
                 .HasColumnType("json")
                 .IsRequired();
+
+            // ✅ INDEX: audit_reports.client_email for fast report lookups by user
+            modelBuilder.Entity<audit_reports>()
+                .HasIndex(a => a.client_email)
+                .HasDatabaseName("IX_audit_reports_client_email");
+
+            // ✅ INDEX: audit_reports.report_datetime for fast date-based filtering
+            modelBuilder.Entity<audit_reports>()
+                .HasIndex(a => a.report_datetime)
+                .HasDatabaseName("IX_audit_reports_report_datetime");
+
+            // ✅ COMPOSITE INDEX: audit_reports (client_email + report_datetime) for user+date queries
+            modelBuilder.Entity<audit_reports>()
+                .HasIndex(a => new { a.client_email, a.report_datetime })
+                .HasDatabaseName("IX_audit_reports_client_email_datetime");
 
             // Users Table
             modelBuilder.Entity<users>()
@@ -162,6 +188,11 @@ namespace BitRaserApiProject
             modelBuilder.Entity<users>()
                 .Property(u => u.license_details_json)
                 .HasColumnType("json");
+
+            // ✅ INDEX: users.is_private_cloud for fast Private Cloud user lookups
+            modelBuilder.Entity<users>()
+                .HasIndex(u => u.is_private_cloud)
+                .HasDatabaseName("IX_users_is_private_cloud");
 
             // Commands table
             modelBuilder.Entity<Commands>()
@@ -215,6 +246,26 @@ namespace BitRaserApiProject
                 .HasMaxLength(50)
                 .IsRequired();
 
+            // ✅ INDEX: Sessions.user_email for fast user session lookups
+            modelBuilder.Entity<Sessions>()
+                .HasIndex(s => s.user_email)
+                .HasDatabaseName("IX_sessions_user_email");
+
+            // ✅ INDEX: Sessions.login_time for date-based filtering
+            modelBuilder.Entity<Sessions>()
+                .HasIndex(s => s.login_time)
+                .HasDatabaseName("IX_sessions_login_time");
+
+            // ✅ INDEX: Sessions.session_status for status filtering
+            modelBuilder.Entity<Sessions>()
+                .HasIndex(s => s.session_status)
+                .HasDatabaseName("IX_sessions_status");
+
+            // ✅ COMPOSITE INDEX: Sessions (user_email + login_time) for user activity queries
+            modelBuilder.Entity<Sessions>()
+                .HasIndex(s => new { s.user_email, s.login_time })
+                .HasDatabaseName("IX_sessions_user_email_login_time");
+
             // Logs table
             modelBuilder.Entity<logs>()
                 .HasKey(l => l.log_id);
@@ -236,6 +287,26 @@ namespace BitRaserApiProject
             modelBuilder.Entity<logs>()
                 .Property(l => l.log_details_json)
                 .HasColumnType("json");
+
+            // ✅ INDEX: logs.user_email for fast user log lookups
+            modelBuilder.Entity<logs>()
+                .HasIndex(l => l.user_email)
+                .HasDatabaseName("IX_logs_user_email");
+
+            // ✅ INDEX: logs.log_level for filtering by log level
+            modelBuilder.Entity<logs>()
+                .HasIndex(l => l.log_level)
+                .HasDatabaseName("IX_logs_log_level");
+
+            // ✅ INDEX: logs.created_at for date-based filtering
+            modelBuilder.Entity<logs>()
+                .HasIndex(l => l.created_at)
+                .HasDatabaseName("IX_logs_created_at");
+
+            // ✅ COMPOSITE INDEX: logs (user_email + created_at) for user activity queries
+            modelBuilder.Entity<logs>()
+                .HasIndex(l => new { l.user_email, l.created_at })
+                .HasDatabaseName("IX_logs_user_email_created_at");
 
             // Subuser table
             modelBuilder.Entity<subuser>()
@@ -259,6 +330,21 @@ namespace BitRaserApiProject
                 .Property(s => s.user_email)
                 .HasMaxLength(255)
                 .IsRequired();
+
+            // ✅ INDEX: subuser.user_email for fast parent lookup (critical for GetSubusersByParent)
+            modelBuilder.Entity<subuser>()
+                .HasIndex(s => s.user_email)
+                .HasDatabaseName("IX_subuser_user_email");
+
+            // ✅ INDEX: subuser.status for filtering active/inactive subusers
+            modelBuilder.Entity<subuser>()
+                .HasIndex(s => s.status)
+                .HasDatabaseName("IX_subuser_status");
+
+            // ✅ COMPOSITE INDEX: subuser (user_email + status) for filtered parent queries
+            modelBuilder.Entity<subuser>()
+                .HasIndex(s => new { s.user_email, s.status })
+                .HasDatabaseName("IX_subuser_user_email_status");
 
             modelBuilder.Entity<subuser>()
                 .Property(s => s.Name)
@@ -775,6 +861,50 @@ new RolePermission { RoleId = 4, PermissionId = 32 },
                 entity.ToTable("licenses");
                 entity.HasIndex(x => x.LicenseKey).IsUnique();
             });
+
+            // ✅ ContactFormSubmission table configuration
+            modelBuilder.Entity<ContactFormSubmission>()
+                .HasKey(c => c.Id);
+
+            modelBuilder.Entity<ContactFormSubmission>()
+                .Property(c => c.Name)
+                .HasMaxLength(255)
+                .IsRequired();
+
+            modelBuilder.Entity<ContactFormSubmission>()
+                .Property(c => c.Email)
+                .HasMaxLength(255)
+                .IsRequired();
+
+            modelBuilder.Entity<ContactFormSubmission>()
+                .Property(c => c.Message)
+                .IsRequired();
+
+            modelBuilder.Entity<ContactFormSubmission>()
+                .HasIndex(c => c.Email)
+                .HasDatabaseName("IX_contact_form_email");
+
+            modelBuilder.Entity<ContactFormSubmission>()
+                .HasIndex(c => c.SubmittedAt)
+                .HasDatabaseName("IX_contact_form_submitted_at");
+
+            modelBuilder.Entity<ContactFormSubmission>()
+                .HasIndex(c => c.Status)
+                .HasDatabaseName("IX_contact_form_status");
+
+            // ✅ PdfExportSettings table configuration
+            modelBuilder.Entity<PdfExportSettings>()
+                .HasKey(p => p.Id);
+
+            modelBuilder.Entity<PdfExportSettings>()
+                .Property(p => p.UserEmail)
+                .HasMaxLength(255)
+                .IsRequired();
+
+            modelBuilder.Entity<PdfExportSettings>()
+                .HasIndex(p => p.UserEmail)
+                .IsUnique()
+                .HasDatabaseName("IX_pdf_export_settings_user_email");
         }
     }
 
