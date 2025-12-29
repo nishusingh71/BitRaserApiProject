@@ -20,17 +20,20 @@ namespace BitRaserApiProject.Controllers
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
         private readonly ILogger<LicenseManagementController> _logger;
+        private readonly ICacheService _cacheService;
 
         public LicenseManagementController(
     ApplicationDbContext context,
               IRoleBasedAuthService authService,
               IUserDataService userDataService,
-  ILogger<LicenseManagementController> logger)
+  ILogger<LicenseManagementController> logger,
+  ICacheService cacheService)
         {
             _context = context;
             _authService = authService;
             _userDataService = userDataService;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -311,7 +314,13 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                var settings = await GetCurrentLicenseSettings();
+                // ✅ CACHE: License statistics with default TTL
+                var cacheKey = $"{CacheService.CacheKeys.LicenseList}:stats";
+                var settings = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
+                {
+                    return await GetCurrentLicenseSettings();
+                }, CacheService.CacheTTL.Default);
+                
                 return Ok(settings);
             }
             catch (Exception ex)

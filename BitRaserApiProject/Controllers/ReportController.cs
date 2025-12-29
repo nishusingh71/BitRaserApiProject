@@ -12,10 +12,12 @@ namespace BitRaserApiProject.Controllers;
 public class ReportController : ControllerBase
 {
     private readonly PdfService _pdfService;
+    private readonly ICacheService _cacheService;
 
-    public ReportController(PdfService pdfService)
+    public ReportController(PdfService pdfService, ICacheService cacheService)
     {
         _pdfService = pdfService;
+        _cacheService = cacheService;
     }
 
     [HttpPost("generate")] // Accepts JSON body

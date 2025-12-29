@@ -20,28 +20,31 @@ namespace BitRaserApiProject.Controllers
     [ApiController]
     public class EnhancedSessionsController : ControllerBase
     {
-        private readonly DynamicDbContextFactory _contextFactory; // ✅ CHANGED
+        private readonly DynamicDbContextFactory _contextFactory;
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
-        private readonly ITenantConnectionService _tenantService; // ✅ ADDED
-        private readonly ILogger<EnhancedSessionsController> _logger; // ✅ ADDED
+        private readonly ITenantConnectionService _tenantService;
+        private readonly ILogger<EnhancedSessionsController> _logger;
+        private readonly ICacheService _cacheService;
 
         // Default session expiration time (configurable)
         private readonly TimeSpan DefaultSessionTimeout = TimeSpan.FromHours(24); // 24 hours
         private readonly TimeSpan ExtendedSessionTimeout = TimeSpan.FromDays(7);  // 7 days for remember me
 
         public EnhancedSessionsController(
-                DynamicDbContextFactory contextFactory, // ✅ CHANGED
+                DynamicDbContextFactory contextFactory,
               IRoleBasedAuthService authService,
                    IUserDataService userDataService,
-             ITenantConnectionService tenantService, // ✅ ADDED
-       ILogger<EnhancedSessionsController> logger) // ✅ ADDED
+             ITenantConnectionService tenantService,
+       ILogger<EnhancedSessionsController> logger,
+       ICacheService cacheService)
         {
-            _contextFactory = contextFactory; // ✅ CHANGED
+            _contextFactory = contextFactory;
             _authService = authService;
             _userDataService = userDataService;
-            _tenantService = tenantService; // ✅ ADDED
-            _logger = logger; // ✅ ADDED
+            _tenantService = tenantService;
+            _logger = logger;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -472,31 +475,36 @@ namespace BitRaserApiProject.Controllers
             if (!string.IsNullOrEmpty(userEmail))
                 query = query.Where(s => s.user_email == userEmail);
 
-            var stats = new
+            // ✅ CACHE: Session statistics with short TTL
+            var cacheKey = $"{CacheService.CacheKeys.SessionList}:stats:{userEmail ?? "all"}";
+            var stats = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
             {
-                TotalSessions = await query.CountAsync(),
-                ActiveSessions = await query.CountAsync(s => s.session_status == "active"),
-                ClosedSessions = await query.CountAsync(s => s.session_status == "closed"),
-                ExpiredSessions = await query.CountAsync(s => s.session_status == "expired"),
-                SessionsToday = await query.CountAsync(s => s.login_time.Date == DateTime.UtcNow.Date),
-                SessionsThisWeek = await query.CountAsync(s => s.login_time >= DateTime.UtcNow.AddDays(-7)),
-                SessionsThisMonth = await query.CountAsync(s => s.login_time.Month == DateTime.UtcNow.Month),
-                AverageSessionDuration = await CalculateAverageSessionDurationAsync(query),
-                TopDevices = await query
-       .Where(s => !string.IsNullOrEmpty(s.device_info))
-         .GroupBy(s => s.device_info)
-             .Select(g => new { Device = g.Key, Count = g.Count() })
-            .OrderByDescending(x => x.Count)
-        .Take(5)
-            .ToListAsync(),
-                TopIpAddresses = await query
-   .Where(s => !string.IsNullOrEmpty(s.ip_address))
-         .GroupBy(s => s.ip_address)
-      .Select(g => new { IpAddress = g.Key, Count = g.Count() })
-       .OrderByDescending(x => x.Count)
-      .Take(10)
-      .ToListAsync()
-            };
+                return new
+                {
+                    TotalSessions = await query.CountAsync(),
+                    ActiveSessions = await query.CountAsync(s => s.session_status == "active"),
+                    ClosedSessions = await query.CountAsync(s => s.session_status == "closed"),
+                    ExpiredSessions = await query.CountAsync(s => s.session_status == "expired"),
+                    SessionsToday = await query.CountAsync(s => s.login_time.Date == DateTime.UtcNow.Date),
+                    SessionsThisWeek = await query.CountAsync(s => s.login_time >= DateTime.UtcNow.AddDays(-7)),
+                    SessionsThisMonth = await query.CountAsync(s => s.login_time.Month == DateTime.UtcNow.Month),
+                    AverageSessionDuration = await CalculateAverageSessionDurationAsync(query),
+                    TopDevices = await query
+                        .Where(s => !string.IsNullOrEmpty(s.device_info))
+                        .GroupBy(s => s.device_info)
+                        .Select(g => new { Device = g.Key, Count = g.Count() })
+                        .OrderByDescending(x => x.Count)
+                        .Take(5)
+                        .ToListAsync(),
+                    TopIpAddresses = await query
+                        .Where(s => !string.IsNullOrEmpty(s.ip_address))
+                        .GroupBy(s => s.ip_address)
+                        .Select(g => new { IpAddress = g.Key, Count = g.Count() })
+                        .OrderByDescending(x => x.Count)
+                        .Take(10)
+                        .ToListAsync()
+                };
+            }, CacheService.CacheTTL.Short);
 
             return Ok(stats);
         }

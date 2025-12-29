@@ -20,17 +20,20 @@ namespace BitRaserApiProject.Controllers
         private readonly IRoleBasedAuthService _authService;
       private readonly IUserDataService _userDataService;
         private readonly ILogger<GroupManagementController> _logger;
+        private readonly ICacheService _cacheService;
 
         public GroupManagementController(
   ApplicationDbContext context,
        IRoleBasedAuthService authService,
             IUserDataService userDataService,
-     ILogger<GroupManagementController> logger)
+     ILogger<GroupManagementController> logger,
+     ICacheService cacheService)
         {
        _context = context;
             _authService = authService;
  _userDataService = userDataService;
       _logger = logger;
+      _cacheService = cacheService;
         }
 
         /// <summary>
@@ -150,7 +153,7 @@ if (string.IsNullOrEmpty(userEmail))
     var group = await _context.Roles
            .Include(r => r.RolePermissions)
  .ThenInclude(rp => rp.Permission)
-       .FirstOrDefaultAsync(r => r.RoleId == groupId);
+       .Where(r => r.RoleId == groupId).FirstOrDefaultAsync();
 
           if (group == null)
               {
@@ -234,7 +237,7 @@ UserCount = userCount,
  foreach (var permName in request.Permissions)
           {
  var permission = await _context.Permissions
-      .FirstOrDefaultAsync(p => p.PermissionName == permName);
+      .Where(p => p.PermissionName == permName).FirstOrDefaultAsync();
 
      if (permission != null)
   {
@@ -324,7 +327,7 @@ UserCount = userCount,
         foreach (var permName in request.Permissions)
       {
   var permission = await _context.Permissions
-    .FirstOrDefaultAsync(p => p.PermissionName == permName);
+    .Where(p => p.PermissionName == permName).FirstOrDefaultAsync();
 
       if (permission != null)
    {
@@ -591,7 +594,7 @@ TotalMembers = allMembers.Count
     try
           {
          // Check if user exists
-     var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+     var user = await _context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
     if (user != null)
  {
       // Check if already in group
@@ -610,7 +613,7 @@ TotalMembers = allMembers.Count
       else
   {
       // Check if subuser
-           var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+           var subuser = await _context.subuser.Where(s => s.subuser_email == email).FirstOrDefaultAsync();
    if (subuser != null)
 {
      if (!await _context.SubuserRoles.AnyAsync(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == groupId))

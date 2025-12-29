@@ -195,6 +195,22 @@ namespace BitRaserApiProject.Models
         [JsonPropertyName("hasValidatorSignature")]
         public bool HasValidatorSignature { get; set; }
 
+        // ✅ Actual base64 image data for frontend display
+        [JsonPropertyName("headerLeftLogoBase64")]
+        public string? HeaderLeftLogoBase64 { get; set; }
+
+        [JsonPropertyName("headerRightLogoBase64")]
+        public string? HeaderRightLogoBase64 { get; set; }
+
+        [JsonPropertyName("watermarkImageBase64")]
+        public string? WatermarkImageBase64 { get; set; }
+
+        [JsonPropertyName("technicianSignatureBase64")]
+        public string? TechnicianSignatureBase64 { get; set; }
+
+        [JsonPropertyName("validatorSignatureBase64")]
+        public string? ValidatorSignatureBase64 { get; set; }
+
         [JsonPropertyName("isActive")]
         public bool IsActive { get; set; }
 

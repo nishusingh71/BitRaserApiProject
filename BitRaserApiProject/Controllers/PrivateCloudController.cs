@@ -24,19 +24,22 @@ namespace BitRaserApiProject.Controllers
         private readonly ITenantConnectionService _tenantService;
         private readonly DynamicDbContextFactory _contextFactory;
         private readonly ILogger<PrivateCloudController> _logger;
+        private readonly ICacheService _cacheService;
 
         public PrivateCloudController(
             IPrivateCloudService privateCloudService,
       ApplicationDbContext context,
         ITenantConnectionService tenantService,
        DynamicDbContextFactory contextFactory,
-         ILogger<PrivateCloudController> logger)
+         ILogger<PrivateCloudController> logger,
+         ICacheService cacheService)
         {
    _privateCloudService = privateCloudService;
     _context = context;
    _tenantService = tenantService;
             _contextFactory = contextFactory;
           _logger = logger;
+          _cacheService = cacheService;
         }
 
         /// <summary>
@@ -139,7 +142,7 @@ public async Task<ActionResult<PrivateCloudDatabase>> GetConfig()
     }
 
            // Check if user has private cloud enabled
-      var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+      var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
      if (user == null || user.is_private_cloud != true)
      {
     return BadRequest(new 
@@ -206,7 +209,7 @@ public async Task<ActionResult<PrivateCloudDatabase>> GetConfig()
        }
 
      // Check if user has private cloud enabled
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+        var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
     if (user == null)
        {
     return NotFound(new { message = "User not found" });
@@ -635,7 +638,7 @@ if (subusersMigrated % 10 == 0)
       _logger.LogInformation("🚀 Starting complete setup for {Email}", userEmail);
 
          // Verify user has private cloud access
- var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+ var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
   if (user == null)
  {
     return NotFound(new { message = "User not found" });
@@ -880,7 +883,7 @@ tablesConfigured = !string.IsNullOrEmpty(dto.SelectedTables)
        var migrationResults = new Dictionary<string, object>();
 
   // Get user ID for filtering
-        var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+        var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
          if (user == null)
 {
       return BadRequest(new { message = "User not found" });
@@ -1167,7 +1170,7 @@ int userRolesMigrated = 0;
   _logger.LogInformation("🔑 Assigning default Manager role to user...");
        
      var managerRole = await privateContext.Roles
- .FirstOrDefaultAsync(r => r.RoleName == "Manager");
+ .Where(r => r.RoleName == "Manager").FirstOrDefaultAsync();
         
   int userRolesAssigned = 0;
      if (managerRole != null)

@@ -17,13 +17,16 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly IForgotPasswordService _service;
 private readonly ILogger<ForgotPasswordApiController> _logger;
+        private readonly ICacheService _cacheService;
 
         public ForgotPasswordApiController(
           IForgotPasswordService service,
- ILogger<ForgotPasswordApiController> logger)
+ ILogger<ForgotPasswordApiController> logger,
+ ICacheService cacheService)
         {
    _service = service;
 _logger = logger;
+   _cacheService = cacheService;
         }
 
         /// <summary>

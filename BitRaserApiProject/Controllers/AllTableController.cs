@@ -814,7 +814,7 @@ namespace BitRaserApiProject.Controllers
         public async Task<ActionResult<machines>> GetMachineByHash(string hash)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
-            var machine = await context.Machines.FirstOrDefaultAsync(m => m.fingerprint_hash == hash);
+            var machine = await context.Machines.Where(m => m.fingerprint_hash == hash).FirstOrDefaultAsync();
             return machine == null ? NotFound() : Ok(machine);
         }
 
@@ -826,7 +826,7 @@ namespace BitRaserApiProject.Controllers
         public async Task<ActionResult<machines>> GetMachineByMac(string mac)
         {
             using var context = await _contextFactory.CreateDbContextAsync();
-            var machine = await context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
+            var machine = await context.Machines.Where(m => m.mac_address == mac).FirstOrDefaultAsync();
             return machine == null ? NotFound() : Ok(machine);
         }
 
@@ -859,7 +859,7 @@ namespace BitRaserApiProject.Controllers
         {
             using var context = await _contextFactory.CreateDbContextAsync();
 
-            var machine = await context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
+            var machine = await context.Machines.Where(m => m.mac_address == mac).FirstOrDefaultAsync();
             if (machine == null) return NotFound(new { message = "Machine not found" });
 
             bool isActivated = machine.license_activated;
@@ -882,7 +882,7 @@ namespace BitRaserApiProject.Controllers
         {
             using var context = await _contextFactory.CreateDbContextAsync();
 
-            var machine = await context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
+            var machine = await context.Machines.Where(m => m.mac_address == mac).FirstOrDefaultAsync();
             if (machine == null || !machine.license_activated)
                 return NotFound(new { message = "Machine not found or not activated" });
 
@@ -919,7 +919,7 @@ namespace BitRaserApiProject.Controllers
             if (hash != updatedMachine.fingerprint_hash)
                 return BadRequest(new { message = "Fingerprint hash mismatch" });
 
-            var machine = await context.Machines.FirstOrDefaultAsync(m => m.fingerprint_hash == hash);
+            var machine = await context.Machines.Where(m => m.fingerprint_hash == hash).FirstOrDefaultAsync();
             if (machine == null) return NotFound();
 
             // Update allowed fields
@@ -947,7 +947,7 @@ namespace BitRaserApiProject.Controllers
         {
             using var context = await _contextFactory.CreateDbContextAsync();
 
-            var machine = await context.Machines.FirstOrDefaultAsync(m => m.fingerprint_hash == hash);
+            var machine = await context.Machines.Where(m => m.fingerprint_hash == hash).FirstOrDefaultAsync();
             if (machine == null) return NotFound();
 
             context.Machines.Remove(machine);
@@ -967,7 +967,7 @@ namespace BitRaserApiProject.Controllers
             if (additionalDays <= 0)
                 return BadRequest(new { message = "Additional days must be greater than zero" });
 
-            var machine = await context.Machines.FirstOrDefaultAsync(m => m.mac_address == mac);
+            var machine = await context.Machines.Where(m => m.mac_address == mac).FirstOrDefaultAsync();
             if (machine == null) return NotFound(new { message = "Machine not found" });
 
             machine.license_days_valid += additionalDays;
@@ -1019,7 +1019,7 @@ namespace BitRaserApiProject.Controllers
 
             _logger.LogInformation("🔍 Fetching user: {Email}", email);
 
-            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
 
             _logger.LogInformation(user != null ? "✅ User found: {Email}" : "❌ User not found: {Email}", email);
 
@@ -1038,7 +1038,7 @@ namespace BitRaserApiProject.Controllers
             if (user == null || string.IsNullOrEmpty(user.user_password) || string.IsNullOrEmpty(user.user_email))
                 return BadRequest("User, email, and password are required.");
 
-            var existingUser = await context.Users.FirstOrDefaultAsync(u => u.user_email == user.user_email);
+            var existingUser = await context.Users.Where(u => u.user_email == user.user_email).FirstOrDefaultAsync();
             if (existingUser != null)
                 return Conflict("Email already in use.");
 
@@ -1057,7 +1057,7 @@ namespace BitRaserApiProject.Controllers
         {
             using var context = await _contextFactory.CreateDbContextAsync();
 
-            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null)
                 return NotFound();
 
@@ -1089,7 +1089,7 @@ namespace BitRaserApiProject.Controllers
             using var context = await _contextFactory.CreateDbContextAsync();
 
             var decodedEmail = Uri.UnescapeDataString(email);
-            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == decodedEmail);
+            var user = await context.Users.Where(u => u.user_email == decodedEmail).FirstOrDefaultAsync();
             if (user == null) return NotFound();
 
             user.license_details_json = licenseJson;
@@ -1106,7 +1106,7 @@ namespace BitRaserApiProject.Controllers
         {
             using var context = await _contextFactory.CreateDbContextAsync();
 
-            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null)
                 return NotFound();
 
@@ -1124,7 +1124,7 @@ namespace BitRaserApiProject.Controllers
         {
             using var context = await _contextFactory.CreateDbContextAsync();
 
-            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null)
                 return NotFound();
 
@@ -1142,7 +1142,7 @@ namespace BitRaserApiProject.Controllers
         {
             using var context = await _contextFactory.CreateDbContextAsync();
 
-            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null)
                 return NotFound();
 
@@ -1220,7 +1220,7 @@ namespace BitRaserApiProject.Controllers
             _logger.LogInformation("🔐 Login attempt for: {Email}", login.Email);
 
             // First, check if it's a main user
-            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == login.Email);
+            var user = await context.Users.Where(u => u.user_email == login.Email).FirstOrDefaultAsync();
             if (user != null && BCrypt.Net.BCrypt.Verify(login.Password, user.hash_password))
             {
                 var token = GenerateJwtToken(login.Email, user.user_role ?? "User", "user");
@@ -1235,7 +1235,7 @@ namespace BitRaserApiProject.Controllers
             }
 
             // If not a main user, check if it's a subuser
-            var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == login.Email);
+            var subuser = await context.subuser.Where(s => s.subuser_email == login.Email).FirstOrDefaultAsync();
             if (subuser != null && BCrypt.Net.BCrypt.Verify(login.Password, subuser.subuser_password))
             {
                 var token = GenerateJwtToken(login.Email, subuser.Role ?? "Subuser", "subuser");
@@ -1376,7 +1376,7 @@ namespace BitRaserApiProject.Controllers
 
             _logger.LogInformation("🔍 Validating license for: {Email}", email);
 
-            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null)
                 return NotFound(new { message = "User not found" });
 

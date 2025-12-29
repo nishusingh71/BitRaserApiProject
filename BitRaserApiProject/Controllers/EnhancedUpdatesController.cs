@@ -22,17 +22,20 @@ namespace BitRaserApiProject.Controllers
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
         private readonly ILogger<EnhancedUpdatesController> _logger;
+        private readonly ICacheService _cacheService;
 
         public EnhancedUpdatesController(
             ApplicationDbContext context, 
             IRoleBasedAuthService authService,
             IUserDataService userDataService,
-            ILogger<EnhancedUpdatesController> logger)
+            ILogger<EnhancedUpdatesController> logger,
+            ICacheService cacheService)
         {
             _context = context;
             _authService = authService;
             _userDataService = userDataService;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -146,7 +149,7 @@ namespace BitRaserApiProject.Controllers
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
-            var update = await _context.Updates.FirstOrDefaultAsync(u => u.version_id == versionId);
+            var update = await _context.Updates.Where(u => u.version_id == versionId).FirstOrDefaultAsync();
             
             if (update == null)
                 return NotFound(new { message = $"Update with version ID {versionId} not found" });
@@ -228,7 +231,7 @@ namespace BitRaserApiProject.Controllers
 
             // Check if version already exists
             var existingVersion = await _context.Updates
-                .FirstOrDefaultAsync(u => u.version_number == request.VersionNumber);
+                .Where(u => u.version_number == request.VersionNumber).FirstOrDefaultAsync();
             
             if (existingVersion != null)
                 return Conflict(new { error = $"Version {request.VersionNumber} already exists" });
@@ -266,7 +269,7 @@ namespace BitRaserApiProject.Controllers
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
-            var update = await _context.Updates.FirstOrDefaultAsync(u => u.version_id == versionId);
+            var update = await _context.Updates.Where(u => u.version_id == versionId).FirstOrDefaultAsync();
             
             if (update == null)
                 return NotFound(new { message = $"Update with version ID {versionId} not found" });
@@ -311,7 +314,7 @@ namespace BitRaserApiProject.Controllers
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
             
-            var update = await _context.Updates.FirstOrDefaultAsync(u => u.version_id == versionId);
+            var update = await _context.Updates.Where(u => u.version_id == versionId).FirstOrDefaultAsync();
             
             if (update == null)
                 return NotFound(new { message = $"Update with version ID {versionId} not found" });
@@ -355,31 +358,36 @@ namespace BitRaserApiProject.Controllers
             var totalUpdates = await _context.Updates.CountAsync();
             var mandatoryUpdates = await _context.Updates.CountAsync(u => u.is_mandatory_update);
 
-            var recentUpdates = await _context.Updates
-                .Where(u => u.release_date >= DateTime.UtcNow.AddDays(-30))
-                .OrderByDescending(u => u.release_date)
-                .Take(5)
-                .Select(u => new {
-                    u.version_number,
-                    u.release_date,
-                    u.is_mandatory_update
-                })
-                .ToListAsync();
+            // ✅ CACHE: Update statistics with short TTL
+            var cacheKey = $"updates:stats:{currentUserEmail}";
+            var statistics = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
+            {
+                var recentUpdates = await _context.Updates
+                    .Where(u => u.release_date >= DateTime.UtcNow.AddDays(-30))
+                    .OrderByDescending(u => u.release_date)
+                    .Take(5)
+                    .Select(u => new {
+                        u.version_number,
+                        u.release_date,
+                        u.is_mandatory_update
+                    })
+                    .ToListAsync();
 
-            var statistics = new {
-                overview = new {
-                    totalUpdates,
-                    mandatoryUpdates,
-                    optionalUpdates = totalUpdates - mandatoryUpdates
-                },
-                recentActivity = new {
-                    updatesLast30Days = await _context.Updates.CountAsync(u => u.release_date >= DateTime.UtcNow.AddDays(-30)),
-                    updatesLast7Days = await _context.Updates.CountAsync(u => u.release_date >= DateTime.UtcNow.AddDays(-7)),
-                    recentUpdates = recentUpdates
-                },
-                generatedAt = DateTime.UtcNow,
-                generatedBy = currentUserEmail
-            };
+                return new {
+                    overview = new {
+                        totalUpdates,
+                        mandatoryUpdates,
+                        optionalUpdates = totalUpdates - mandatoryUpdates
+                    },
+                    recentActivity = new {
+                        updatesLast30Days = await _context.Updates.CountAsync(u => u.release_date >= DateTime.UtcNow.AddDays(-30)),
+                        updatesLast7Days = await _context.Updates.CountAsync(u => u.release_date >= DateTime.UtcNow.AddDays(-7)),
+                        recentUpdates = recentUpdates
+                    },
+                    generatedAt = DateTime.UtcNow,
+                    generatedBy = currentUserEmail
+                };
+            }, CacheService.CacheTTL.Short);
 
             return Ok(statistics);
         }
@@ -392,7 +400,7 @@ namespace BitRaserApiProject.Controllers
         public async Task<IActionResult> GetDownloadInfo(int versionId, [FromQuery] string? userAgent = null)
         {
             var update = await _context.Updates
-                .FirstOrDefaultAsync(u => u.version_id == versionId);
+                .Where(u => u.version_id == versionId).FirstOrDefaultAsync();
 
             if (update == null)
                 return NotFound(new { message = "Update not found or not available for download" });

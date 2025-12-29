@@ -21,17 +21,20 @@ namespace BitRaserApiProject.Controllers
         private readonly IUserDataService _userDataService;
         private readonly IRoleBasedAuthService _authService;
         private readonly ILogger<DynamicUserController> _logger;
+        private readonly ICacheService _cacheService;
 
         public DynamicUserController(
             ApplicationDbContext context,
             IUserDataService userDataService,
             IRoleBasedAuthService authService,
-            ILogger<DynamicUserController> logger)
+            ILogger<DynamicUserController> logger,
+            ICacheService cacheService)
         {
             _context = context;
             _userDataService = userDataService;
             _authService = authService;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         #region User/Subuser Profile Operations
@@ -387,66 +390,72 @@ namespace BitRaserApiProject.Controllers
 
             var isSubuser = await _userDataService.SubuserExistsAsync(email);
 
-            var machines = await _userDataService.GetMachinesByUserEmailAsync(email);
-            var reports = await _userDataService.GetAuditReportsByEmailAsync(email);
-            var sessions = await _userDataService.GetSessionsByEmailAsync(email);
-            var logs = await _userDataService.GetLogsByEmailAsync(email);
-
-            var baseStatistics = new
+            // ✅ CACHE: User statistics with short TTL
+            var cacheKey = $"user:stats:{email}";
+            var statistics = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
             {
-                user_email = email,
-                user_type = isSubuser ? "Subuser" : "User",
-                summary = new
-                {
-                    total_machines = machines.Count(),
-                    active_machines = machines.Count(m => m.license_activated),
-                    total_reports = reports.Count(),
-                    synced_reports = reports.Count(r => r.synced),
-                    total_sessions = sessions.Count(),
-                    active_sessions = sessions.Count(s => s.session_status == "active"),
-                    total_logs = logs.Count(),
-                    error_logs = logs.Count(l => l.log_level.ToLower().Contains("error"))
-                },
-                recent_activity = new
-                {
-                    last_login = sessions.OrderByDescending(s => s.login_time).FirstOrDefault()?.login_time,
-                    recent_machines = machines.OrderByDescending(m => m.created_at).Take(5).Select(m => new {
-                        m.mac_address,
-                        m.os_version,
-                        m.created_at,
-                        m.license_activated
-                    }),
-                    recent_reports = reports.OrderByDescending(r => r.report_datetime).Take(5).Select(r => new {
-                        r.report_id,
-                        r.report_name,
-                        r.report_datetime,
-                        r.synced
-                    })
-                }
-            };
+                var machines = await _userDataService.GetMachinesByUserEmailAsync(email);
+                var reports = await _userDataService.GetAuditReportsByEmailAsync(email);
+                var sessions = await _userDataService.GetSessionsByEmailAsync(email);
+                var logs = await _userDataService.GetLogsByEmailAsync(email);
 
-            if (!isSubuser)
-            {
-                var subusers = await _userDataService.GetSubusersByParentEmailAsync(email);
-                var extendedStatistics = new
+                var baseStatistics = new
                 {
-                    baseStatistics.user_email,
-                    baseStatistics.user_type,
-                    baseStatistics.summary,
-                    baseStatistics.recent_activity,
-                    subuser_management = new
+                    user_email = email,
+                    user_type = isSubuser ? "Subuser" : "User",
+                    summary = new
                     {
-                        total_subusers = subusers.Count(),
-                        subuser_list = subusers.Select(s => new {
-                            s.subuser_email,
-                            s.subuser_id
+                        total_machines = machines.Count(),
+                        active_machines = machines.Count(m => m.license_activated),
+                        total_reports = reports.Count(),
+                        synced_reports = reports.Count(r => r.synced),
+                        total_sessions = sessions.Count(),
+                        active_sessions = sessions.Count(s => s.session_status == "active"),
+                        total_logs = logs.Count(),
+                        error_logs = logs.Count(l => l.log_level.ToLower().Contains("error"))
+                    },
+                    recent_activity = new
+                    {
+                        last_login = sessions.OrderByDescending(s => s.login_time).FirstOrDefault()?.login_time,
+                        recent_machines = machines.OrderByDescending(m => m.created_at).Take(5).Select(m => new {
+                            m.mac_address,
+                            m.os_version,
+                            m.created_at,
+                            m.license_activated
+                        }),
+                        recent_reports = reports.OrderByDescending(r => r.report_datetime).Take(5).Select(r => new {
+                            r.report_id,
+                            r.report_name,
+                            r.report_datetime,
+                            r.synced
                         })
                     }
                 };
-                return Ok(extendedStatistics);
-            }
 
-            return Ok(baseStatistics);
+                if (!isSubuser)
+                {
+                    var subusers = await _userDataService.GetSubusersByParentEmailAsync(email);
+                    return new
+                    {
+                        baseStatistics.user_email,
+                        baseStatistics.user_type,
+                        baseStatistics.summary,
+                        baseStatistics.recent_activity,
+                        subuser_management = new
+                        {
+                            total_subusers = subusers.Count(),
+                            subuser_list = subusers.Select(s => new {
+                                s.subuser_email,
+                                s.subuser_id
+                            })
+                        }
+                    };
+                }
+
+                return (object)baseStatistics;
+            }, CacheService.CacheTTL.Short);
+
+            return Ok(statistics);
         }
 
         #endregion

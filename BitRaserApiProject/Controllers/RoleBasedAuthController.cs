@@ -12,6 +12,7 @@ using BitRaserApiProject.Services;
 using BitRaserApiProject.Attributes;
 using BitRaserApiProject.Models;
 using BitRaserApiProject.Helpers;
+using BitRaserApiProject.Utilities;  // For Base64EmailEncoder
 using BitRaserApiProject.Factories;  // ✅ ADD: For DynamicDbContextFactory
 
 namespace BitRaserApiProject.Controllers
@@ -25,19 +26,22 @@ namespace BitRaserApiProject.Controllers
         private readonly IRoleBasedAuthService _roleService;
         private readonly ILogger<RoleBasedAuthController> _logger;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly ICacheService _cacheService;
 
         public RoleBasedAuthController(
             ApplicationDbContext context,
             IConfiguration configuration,
             IRoleBasedAuthService roleService,
             ILogger<RoleBasedAuthController> logger,
-            IHttpClientFactory httpClientFactory)
+            IHttpClientFactory httpClientFactory,
+            ICacheService cacheService)
         {
             _context = context;
             _configuration = configuration;
             _roleService = roleService;
             _logger = logger;
             _httpClientFactory = httpClientFactory;
+            _cacheService = cacheService;
         }
 
         public class RoleBasedLoginRequest
@@ -147,7 +151,9 @@ namespace BitRaserApiProject.Controllers
                 _logger.LogInformation("🔍 STEP 1: Checking Main DB for user {Email}", request.Email);
                 
                 // Try to authenticate as main user first
-                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.Email);
+                var user = await _context.Users
+                    .Where(u => u.user_email == request.Email)
+                    .FirstOrDefaultAsync();
                 if (user != null && !string.IsNullOrEmpty(user.hash_password) && BCrypt.Net.BCrypt.Verify(request.Password, user.hash_password))
                 {
                     userEmail = request.Email;
@@ -168,7 +174,9 @@ namespace BitRaserApiProject.Controllers
                     // ✅ STEP 2a: Check MAIN DB for subuser FIRST (fastest path)
                     _logger.LogInformation("🔍 STEP 2a: Checking MAIN DB for subuser {Email}", request.Email);
                     
-                    var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+                    var subuser = await _context.subuser
+                        .Where(s => s.subuser_email == request.Email)
+                        .FirstOrDefaultAsync();
  
                     if (subuser != null)
                     {
@@ -176,7 +184,7 @@ namespace BitRaserApiProject.Controllers
                         
                         // Check if parent has private cloud enabled
                         var parentUser = await _context.Users
-                            .FirstOrDefaultAsync(u => u.user_email == subuser.user_email);
+                            .Where(u => u.user_email == subuser.user_email).FirstOrDefaultAsync();
                         
                         if (parentUser?.is_private_cloud == true)
                         {
@@ -203,7 +211,7 @@ namespace BitRaserApiProject.Controllers
                                     privateContext.Database.SetCommandTimeout(15); // ✅ Increased timeout
                                     
                                     var privateSubuser = await privateContext.subuser
-                                        .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+                                        .Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync();
                                     
                                     if (privateSubuser != null && BCrypt.Net.BCrypt.Verify(request.Password, privateSubuser.subuser_password))
                                     {
@@ -298,7 +306,7 @@ namespace BitRaserApiProject.Controllers
                                     privateContext.Database.SetCommandTimeout(10); // ✅ Increased timeout
    
                                     var privateSubuser = await privateContext.subuser
-                                        .FirstOrDefaultAsync(s => s.subuser_email == request.Email, cts.Token);
+                                        .Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync(cts.Token);
       
                                     if (privateSubuser != null && BCrypt.Net.BCrypt.Verify(request.Password, privateSubuser.subuser_password))
                                     {
@@ -386,7 +394,7 @@ namespace BitRaserApiProject.Controllers
    
                             using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
                             var privateSubuser = await privateContext.subuser
-                                .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+                                .Where(s => s.subuser_email == userEmail).FirstOrDefaultAsync();
    
                             if (privateSubuser != null)
                             {
@@ -557,13 +565,15 @@ namespace BitRaserApiProject.Controllers
                     return StatusCode(403, new { message = "Users with 'User' role cannot create subusers" });
 
                 // Get the parent user
-                var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+                var parentUser = await _context.Users
+                    .Where(u => u.user_email == userEmail)
+                    .FirstOrDefaultAsync();
                 if (parentUser == null)
                     return BadRequest(new { message = "Parent user not found" });
 
                 // Check if subuser email already exists
                 var existingSubuser = await _context.subuser
-                  .FirstOrDefaultAsync(s => s.subuser_email == request.SubuserEmail);
+                  .Where(s => s.subuser_email == request.SubuserEmail).FirstOrDefaultAsync();
                 if (existingSubuser != null)
                     return Conflict(new { message = "Subuser email already exists" });
 
@@ -751,10 +761,15 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                var roles = await _context.Roles
-                    .Select(r => new { r.RoleId, r.RoleName, r.Description, r.HierarchyLevel })
-                    .OrderBy(r => r.HierarchyLevel)
-                    .ToListAsync();
+                // ✅ CACHE: Roles rarely change, cache for 30 minutes
+                var cacheKey = CacheService.CacheKeys.RoleList;
+                var roles = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
+                {
+                    return await _context.Roles
+                        .Select(r => new { r.RoleId, r.RoleName, r.Description, r.HierarchyLevel })
+                        .OrderBy(r => r.HierarchyLevel)
+                        .ToListAsync();
+                }, CacheService.CacheTTL.Long);
 
                 return Ok(roles);
             }
@@ -771,9 +786,14 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                var permissions = await _context.Permissions
-                    .Select(p => new { p.PermissionId, p.PermissionName, p.Description })
-                    .ToListAsync();
+                // ✅ CACHE: Permissions rarely change, cache for 30 minutes
+                var cacheKey = CacheService.CacheKeys.PermissionList;
+                var permissions = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
+                {
+                    return await _context.Permissions
+                        .Select(p => new { p.PermissionId, p.PermissionName, p.Description })
+                        .ToListAsync();
+                }, CacheService.CacheTTL.Long);
 
                 return Ok(permissions);
             }
@@ -892,7 +912,9 @@ namespace BitRaserApiProject.Controllers
       if (isSubuser)
       {
     // ✅ Check MAIN DB first
-       var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+       var subuser = await _context.subuser
+                    .Where(s => s.subuser_email == userEmail)
+                    .FirstOrDefaultAsync();
        if (subuser != null)
       {
       // Found in MAIN DB - update here
@@ -903,7 +925,9 @@ namespace BitRaserApiProject.Controllers
           _logger.LogInformation("✅ Updated logout in Main DB for subuser {Email}", userEmail);
       
       // ✅ NEW: Also check if parent has Private Cloud and update there too!
-      var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == subuser.user_email);
+      var parentUser = await _context.Users
+                    .Where(u => u.user_email == subuser.user_email)
+                    .FirstOrDefaultAsync();
       if (parentUser != null && parentUser.is_private_cloud == true)
       {
           try
@@ -927,7 +951,7 @@ namespace BitRaserApiProject.Controllers
                   using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
                   privateContext.Database.SetCommandTimeout(5);
                   
-                  var privateSubuser = await privateContext.subuser.FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+                  var privateSubuser = await privateContext.subuser.Where(s => s.subuser_email == userEmail).FirstOrDefaultAsync();
                   if (privateSubuser != null)
                   {
                       privateSubuser.last_logout = logoutTime;
@@ -996,7 +1020,7 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                 privateContext.Database.SetCommandTimeout(5);
           
    var privateSubuser = await privateContext.subuser
-            .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+            .Where(s => s.subuser_email == userEmail).FirstOrDefaultAsync();
             
      if (privateSubuser != null)
       {
@@ -1049,7 +1073,9 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
  	else
          {
      // Regular user logout
- var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+ var user = await _context.Users
+                    .Where(u => u.user_email == userEmail)
+                    .FirstOrDefaultAsync();
       if (user != null)
       {
       user.last_logout = logoutTime;
@@ -1089,7 +1115,7 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                   using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
                   privateContext.Database.SetCommandTimeout(5);
                   
-                  var privateUser = await privateContext.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+                  var privateUser = await privateContext.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
                   
                   _logger.LogInformation("🔍 Private Cloud user lookup result: {Found}", privateUser != null);
                   
@@ -1189,7 +1215,7 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                 if (request.IsSubuser)
                 {
                     var subuser = await _context.subuser
-                   .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+                   .Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync();
 
                     if (subuser == null)
                         return NotFound(new { message = "Subuser not found" });
@@ -1204,7 +1230,7 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                 else
                 {
                     var user = await _context.Users
-               .FirstOrDefaultAsync(u => u.user_email == request.Email);
+               .Where(u => u.user_email == request.Email).FirstOrDefaultAsync();
 
                     if (user == null)
                         return NotFound(new { message = "User not found" });
@@ -1222,7 +1248,7 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                 foreach (var roleName in request.RoleNames)
                 {
                     var role = await _context.Roles
-        .FirstOrDefaultAsync(r => r.RoleName == roleName);
+        .Where(r => r.RoleName == roleName).FirstOrDefaultAsync();
 
                     if (role == null)
                         return BadRequest(new { message = $"Role '{roleName}' not found" });
@@ -1368,7 +1394,7 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                 }
 
                 // ✅ STEP 1: Try to find as SUBUSER in the correct database
-                var subuser = await targetContext.subuser.FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+                var subuser = await targetContext.subuser.Where(s => s.subuser_email == currentUserEmail).FirstOrDefaultAsync();
                 
                 if (subuser != null)
                 {
@@ -1435,7 +1461,7 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                 }
 
                 // ✅ STEP 2: NOT FOUND AS SUBUSER - Try to find as USER in the same context
-                var user = await targetContext.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+                var user = await targetContext.Users.Where(u => u.user_email == currentUserEmail).FirstOrDefaultAsync();
                 
                 if (user != null)
                 {
@@ -1555,7 +1581,9 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                 var updateTime = await GetServerTimeAsync();
 
                 // Check if target is subuser or user
-                var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == targetEmail);
+                var subuser = await _context.subuser
+                    .Where(s => s.subuser_email == targetEmail)
+                    .FirstOrDefaultAsync();
                 if (subuser != null)
                 {
                     subuser.timezone = request.Timezone;
@@ -1577,7 +1605,9 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                     });
                 }
 
-                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == targetEmail);
+                var user = await _context.Users
+                    .Where(u => u.user_email == targetEmail)
+                    .FirstOrDefaultAsync();
                 if (user != null)
                 {
                     user.timezone = request.Timezone;
@@ -1870,7 +1900,9 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                 var updateTime = await GetServerTimeAsync();
 
                 // Try to find as subuser first
-                var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+                var subuser = await _context.subuser
+                    .Where(s => s.subuser_email == currentUserEmail)
+                    .FirstOrDefaultAsync();
                 if (subuser != null)
                 {
                     // Verify current password
@@ -1943,7 +1975,9 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                 }
 
                 // Try to find as main user
-                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+                var user = await _context.Users
+                    .Where(u => u.user_email == currentUserEmail)
+                    .FirstOrDefaultAsync();
                 if (user != null)
                 {
                     // Verify current password
@@ -2041,6 +2075,364 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
                 });
             }
         }
+
+        #region Department & Group Management
+
+        /// <summary>
+        /// Assign subuser to department and/or group
+        /// Admin can organize subusers by department and group
+        /// </summary>
+        [HttpPut("subusers/{subuserEmail}/assign-department-group")]
+        [Authorize]
+        public async Task<IActionResult> AssignDepartmentGroup(string subuserEmail, [FromBody] AssignDeptGroupRequest request)
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+                    return Unauthorized(new { success = false, message = "User not authenticated" });
+
+                // Decode subuser email
+                var decodedSubuserEmail = Base64EmailEncoder.DecodeEmailParam(subuserEmail);
+
+                // Find subuser and verify ownership
+                var subuser = await _context.subuser
+                    .Where(s => s.subuser_email.ToLower() == decodedSubuserEmail.ToLower() 
+                                           && s.user_email.ToLower() == currentUserEmail.ToLower()).FirstOrDefaultAsync();
+
+                if (subuser == null)
+                {
+                    return NotFound(new { success = false, message = $"Subuser '{decodedSubuserEmail}' not found or not managed by you" });
+                }
+
+                // Update department if provided
+                if (!string.IsNullOrEmpty(request.Department))
+                {
+                    subuser.Department = request.Department;
+                }
+
+                // Update group if provided
+                if (request.GroupId.HasValue)
+                {
+                    var group = await _context.Groups.FindAsync(request.GroupId.Value);
+                    if (group == null)
+                    {
+                        return NotFound(new { success = false, message = $"Group with ID {request.GroupId} not found" });
+                    }
+                    subuser.GroupId = request.GroupId;
+                    subuser.subuser_group = group.name;
+                }
+                else if (!string.IsNullOrEmpty(request.GroupName))
+                {
+                    subuser.subuser_group = request.GroupName;
+                }
+
+                subuser.UpdatedAt = DateTime.UtcNow;
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("Assigned subuser {Subuser} to dept={Dept}, group={Group}", 
+                    decodedSubuserEmail, request.Department, request.GroupName ?? request.GroupId?.ToString());
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Subuser department/group updated successfully",
+                    data = new
+                    {
+                        subuserEmail = subuser.subuser_email,
+                        department = subuser.Department,
+                        groupId = subuser.GroupId,
+                        groupName = subuser.subuser_group
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error assigning department/group to subuser {Email}", subuserEmail);
+                return StatusCode(500, new { success = false, message = "Error updating subuser", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get all subusers by department
+        /// Returns subusers belonging to specified department
+        /// </summary>
+        [HttpGet("subusers/by-department/{department}")]
+        [Authorize]
+        public async Task<IActionResult> GetSubusersByDepartment(string department)
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+                    return Unauthorized(new { success = false, message = "User not authenticated" });
+
+                var decodedDept = Uri.UnescapeDataString(department);
+
+                var subusers = await _context.subuser
+                    .Where(s => s.user_email.ToLower() == currentUserEmail.ToLower() 
+                             && s.Department != null 
+                             && s.Department.ToLower() == decodedDept.ToLower())
+                    .Select(s => new
+                    {
+                        subuserEmail = s.subuser_email,
+                        name = s.Name,
+                        department = s.Department,
+                        groupId = s.GroupId,
+                        groupName = s.subuser_group,
+                        role = s.Role,
+                        status = s.status,
+                        lastLogin = s.last_login
+                    })
+                    .ToListAsync();
+
+                return Ok(new
+                {
+                    success = true,
+                    department = decodedDept,
+                    count = subusers.Count,
+                    subusers = subusers
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting subusers by department {Dept}", department);
+                return StatusCode(500, new { success = false, message = "Error fetching subusers", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get all subusers by group
+        /// Returns subusers belonging to specified group
+        /// </summary>
+        [HttpGet("subusers/by-group/{groupId:int}")]
+        [Authorize]
+        public async Task<IActionResult> GetSubusersByGroup(int groupId)
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+                    return Unauthorized(new { success = false, message = "User not authenticated" });
+
+                var group = await _context.Groups.FindAsync(groupId);
+                var groupName = group?.name;
+                
+                var subusers = await _context.subuser
+                    .Where(s => s.user_email.ToLower() == currentUserEmail.ToLower() 
+                             && (s.GroupId == groupId || s.subuser_group == groupName))
+                    .Select(s => new
+                    {
+                        subuserEmail = s.subuser_email,
+                        name = s.Name,
+                        department = s.Department,
+                        groupId = s.GroupId,
+                        groupName = s.subuser_group,
+                        role = s.Role,
+                        status = s.status,
+                        lastLogin = s.last_login
+                    })
+                    .ToListAsync();
+
+                return Ok(new
+                {
+                    success = true,
+                    groupId = groupId,
+                    groupName = group?.name,
+                    count = subusers.Count,
+                    subusers = subusers
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting subusers by group {GroupId}", groupId);
+                return StatusCode(500, new { success = false, message = "Error fetching subusers", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get all departments with subuser counts
+        /// Returns list of all departments used by current user's subusers
+        /// </summary>
+        [HttpGet("departments")]
+        [Authorize]
+        public async Task<IActionResult> GetDepartments()
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+                    return Unauthorized(new { success = false, message = "User not authenticated" });
+
+                var departments = await _context.subuser
+                    .Where(s => s.user_email.ToLower() == currentUserEmail.ToLower() && s.Department != null)
+                    .GroupBy(s => s.Department)
+                    .Select(g => new
+                    {
+                        department = g.Key,
+                        subuserCount = g.Count()
+                    })
+                    .ToListAsync();
+
+                return Ok(new
+                {
+                    success = true,
+                    count = departments.Count,
+                    departments = departments
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting departments");
+                return StatusCode(500, new { success = false, message = "Error fetching departments", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Reassign all resources from one user/subuser to another
+        /// Transfers machines, reports, sessions to target user
+        /// </summary>
+        [HttpPost("reassign-resources")]
+        [Authorize]
+        public async Task<IActionResult> ReassignResources([FromBody] ReassignResourcesRequest request)
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+                    return Unauthorized(new { success = false, message = "User not authenticated" });
+
+                // Decode emails
+                var fromEmail = Base64EmailEncoder.DecodeEmailParam(request.FromEmail);
+                var toEmail = Base64EmailEncoder.DecodeEmailParam(request.ToEmail);
+
+                // Verify target exists (subuser under current user)
+                var targetSubuser = await _context.subuser
+                    .Where(s => s.subuser_email.ToLower() == toEmail.ToLower() 
+                                           && s.user_email.ToLower() == currentUserEmail.ToLower()).FirstOrDefaultAsync();
+
+                if (targetSubuser == null)
+                {
+                    return NotFound(new { success = false, message = $"Target subuser '{toEmail}' not found or not managed by you" });
+                }
+
+                var results = new Dictionary<string, int>();
+
+                // Reassign Machines
+                if (request.ResourceTypes == null || request.ResourceTypes.Contains("machines"))
+                {
+                    var machines = await _context.Machines
+                        .Where(m => m.subuser_email != null && m.subuser_email.ToLower() == fromEmail.ToLower())
+                        .ToListAsync();
+
+                    foreach (var machine in machines)
+                    {
+                        machine.subuser_email = toEmail;
+                        machine.updated_at = DateTime.UtcNow;
+                    }
+                    results["machines"] = machines.Count;
+                }
+
+                // Reassign Reports
+                if (request.ResourceTypes == null || request.ResourceTypes.Contains("reports"))
+                {
+                    var reports = await _context.AuditReports
+                        .Where(r => r.client_email.ToLower() == fromEmail.ToLower())
+                        .ToListAsync();
+
+                    foreach (var report in reports)
+                    {
+                        report.client_email = toEmail;
+                    }
+                    results["reports"] = reports.Count;
+                }
+
+                // Reassign Sessions
+                if (request.ResourceTypes == null || request.ResourceTypes.Contains("sessions"))
+                {
+                    var sessions = await _context.Sessions
+                        .Where(s => s.user_email.ToLower() == fromEmail.ToLower())
+                        .ToListAsync();
+
+                    foreach (var session in sessions)
+                    {
+                        session.user_email = toEmail;
+                    }
+                    results["sessions"] = sessions.Count;
+                }
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("Reassigned resources from {From} to {To}: {Results}", 
+                    fromEmail, toEmail, string.Join(", ", results.Select(r => $"{r.Key}={r.Value}")));
+
+                return Ok(new
+                {
+                    success = true,
+                    message = $"Resources reassigned successfully from {fromEmail} to {toEmail}",
+                    fromEmail = fromEmail,
+                    toEmail = toEmail,
+                    reassigned = results,
+                    totalResourcesTransferred = results.Values.Sum()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error reassigning resources");
+                return StatusCode(500, new { success = false, message = "Error reassigning resources", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Bulk assign multiple subusers to a department
+        /// </summary>
+        [HttpPost("subusers/bulk-assign-department")]
+        [Authorize]
+        public async Task<IActionResult> BulkAssignDepartment([FromBody] BulkAssignDeptRequest request)
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+                    return Unauthorized(new { success = false, message = "User not authenticated" });
+
+                if (request.SubuserEmails == null || !request.SubuserEmails.Any())
+                {
+                    return BadRequest(new { success = false, message = "At least one subuser email is required" });
+                }
+
+                var decodedEmails = request.SubuserEmails.Select(e => Base64EmailEncoder.DecodeEmailParam(e).ToLower()).ToList();
+
+                var subusers = await _context.subuser
+                    .Where(s => s.user_email.ToLower() == currentUserEmail.ToLower() 
+                             && decodedEmails.Contains(s.subuser_email.ToLower()))
+                    .ToListAsync();
+
+                foreach (var subuser in subusers)
+                {
+                    subuser.Department = request.Department;
+                    subuser.UpdatedAt = DateTime.UtcNow;
+                }
+
+                await _context.SaveChangesAsync();
+
+                return Ok(new
+                {
+                    success = true,
+                    message = $"Assigned {subusers.Count} subusers to department '{request.Department}'",
+                    department = request.Department,
+                    updatedCount = subusers.Count,
+                    updatedEmails = subusers.Select(s => s.subuser_email).ToList()
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error bulk assigning department");
+                return StatusCode(500, new { success = false, message = "Error updating subusers", error = ex.Message });
+            }
+        }
+
+        #endregion
 
         /// <summary>
         /// Request model for editing profile (name, phone, timezone)
@@ -2153,5 +2545,72 @@ var connectionString = await tenantService.GetConnectionStringForUserAsync(pcUse
             [Required(ErrorMessage = "Permission names are required")]
             public List<string> PermissionNames { get; set; } = new List<string>();
         }
+
+        #region Department & Group Request Models
+
+        /// <summary>
+        /// Request model for assigning department/group to subuser
+        /// </summary>
+        public class AssignDeptGroupRequest
+        {
+            /// <summary>
+            /// Department name to assign
+            /// </summary>
+            public string? Department { get; set; }
+
+            /// <summary>
+            /// Group ID to assign (will also set GroupName from DB)
+            /// </summary>
+            public int? GroupId { get; set; }
+
+            /// <summary>
+            /// Group name to assign (used if GroupId not provided)
+            /// </summary>
+            public string? GroupName { get; set; }
+        }
+
+        /// <summary>
+        /// Request model for reassigning resources between users
+        /// </summary>
+        public class ReassignResourcesRequest
+        {
+            /// <summary>
+            /// Source email (user/subuser to transfer from)
+            /// </summary>
+            [Required(ErrorMessage = "FromEmail is required")]
+            public string FromEmail { get; set; } = string.Empty;
+
+            /// <summary>
+            /// Target email (subuser to transfer to)
+            /// </summary>
+            [Required(ErrorMessage = "ToEmail is required")]
+            public string ToEmail { get; set; } = string.Empty;
+
+            /// <summary>
+            /// Resource types to transfer: "machines", "reports", "sessions"
+            /// If null/empty, all resource types will be transferred
+            /// </summary>
+            public List<string>? ResourceTypes { get; set; }
+        }
+
+        /// <summary>
+        /// Request model for bulk assigning department to subusers
+        /// </summary>
+        public class BulkAssignDeptRequest
+        {
+            /// <summary>
+            /// List of subuser emails to update
+            /// </summary>
+            [Required(ErrorMessage = "SubuserEmails are required")]
+            public List<string> SubuserEmails { get; set; } = new();
+
+            /// <summary>
+            /// Department name to assign to all subusers
+            /// </summary>
+            [Required(ErrorMessage = "Department is required")]
+            public string Department { get; set; } = string.Empty;
+        }
+
+        #endregion
     }
 }

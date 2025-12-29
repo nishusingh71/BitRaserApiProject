@@ -19,7 +19,47 @@ namespace BitRaserApiProject.Models.DTOs
         public string license_key { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "Hardware ID is required")]
-    public string hwid { get; set; } = string.Empty;
+        public string hwid { get; set; } = string.Empty;
+
+        // ✅ MACHINE-RELATED FIELDS (Optional but recommended for tracking)
+        
+        /// <summary>Machine/Computer name</summary>
+        [MaxLength(255)]
+        public string? machine_name { get; set; }
+        
+        /// <summary>MAC Address of network interface</summary>
+        [MaxLength(50)]
+        public string? mac_address { get; set; }
+        
+        /// <summary>Machine serial number from BIOS/System</summary>
+        [MaxLength(100)]
+        public string? serial_number { get; set; }
+        
+        /// <summary>Machine model (e.g., "Dell Latitude 5520")</summary>
+        [MaxLength(200)]
+        public string? model { get; set; }
+        
+        /// <summary>Machine manufacturer (e.g., "Dell Inc.")</summary>
+        [MaxLength(100)]
+        public string? manufacturer { get; set; }
+        
+        /// <summary>Operating system info (e.g., "Windows 11 Pro 22H2")</summary>
+        [MaxLength(200)]
+        public string? os_info { get; set; }
+        
+        /// <summary>IP address of the machine</summary>
+        [MaxLength(45)]
+        public string? ip_address { get; set; }
+        
+        /// <summary>CPU information</summary>
+        [MaxLength(200)]
+        public string? cpu_info { get; set; }
+        
+        /// <summary>Total RAM in GB</summary>
+        public int? ram_gb { get; set; }
+        
+        /// <summary>Total storage/disk size in GB</summary>
+        public int? storage_gb { get; set; }
     }
 
     /// <summary>
@@ -28,11 +68,32 @@ namespace BitRaserApiProject.Models.DTOs
     public class ActivateLicenseResponse
     {
         public string status { get; set; } = string.Empty; // OK / INVALID_KEY / REVOKED / LICENSE_EXPIRED / HW_MISMATCH / ERROR
- public string? expiry { get; set; } // yyyy-MM-dd format
+        public string? expiry { get; set; } // yyyy-MM-dd format
         public string? edition { get; set; } // BASIC / PRO / ENTERPRISE
         public int? server_revision { get; set; }
         public string? license_status { get; set; } // ACTIVE / REVOKED / EXPIRED
+        
+        // ✅ MACHINE INFO (returned when activation is successful)
+        public MachineInfoResponse? machine_info { get; set; }
     }
+    
+    /// <summary>
+    /// Machine information response - returns recorded machine details
+    /// </summary>
+    public class MachineInfoResponse
+    {
+        public string? machine_name { get; set; }
+        public string? mac_address { get; set; }
+        public string? serial_number { get; set; }
+        public string? model { get; set; }
+        public string? manufacturer { get; set; }
+        public string? os_info { get; set; }
+        public string? ip_address { get; set; }
+        public string? cpu_info { get; set; }
+        public int? ram_gb { get; set; }
+        public int? storage_gb { get; set; }
+    }
+
 
     #endregion
 

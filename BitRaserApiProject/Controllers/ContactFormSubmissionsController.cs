@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using BitRaserApiProject.Models;
 using System.Text.Json.Serialization;
+using BitRaserApiProject.Services;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -14,13 +15,16 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly ILogger<ContactFormSubmissionsController> _logger;
+        private readonly ICacheService _cacheService;
 
         public ContactFormSubmissionsController(
             ApplicationDbContext context,
-            ILogger<ContactFormSubmissionsController> logger)
+            ILogger<ContactFormSubmissionsController> logger,
+            ICacheService cacheService)
         {
             _context = context;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         /// <summary>

@@ -9,3 +9,5 @@ Documentation/
 
 # SQL database files
 *.sql
+
+.env

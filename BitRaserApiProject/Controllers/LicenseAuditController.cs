@@ -20,17 +20,20 @@ namespace BitRaserApiProject.Controllers
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
         private readonly ILogger<LicenseAuditController> _logger;
+        private readonly ICacheService _cacheService;
 
         public LicenseAuditController(
         ApplicationDbContext context,
             IRoleBasedAuthService authService,
             IUserDataService userDataService,
-            ILogger<LicenseAuditController> _logger)
+            ILogger<LicenseAuditController> logger,
+            ICacheService cacheService)
         {
             _context = context;
           _authService = authService;
   _userDataService = userDataService;
-         this._logger = _logger;
+         this._logger = logger;
+         _cacheService = cacheService;
         }
 
         /// <summary>

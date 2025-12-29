@@ -133,6 +133,49 @@ namespace BitRaserApiProject.Models
 
         public bool? is_domain_admin { get; set; } = false; // Is this user a domain admin?
 
+        // ✅ QUOTA & LIMITS - Set by admin, enforced everywhere (including private cloud)
+        // These fields are READ-ONLY for users - only admin can modify via main DB
+        
+        /// <summary>
+        /// Maximum number of subusers this user can create
+        /// </summary>
+        public int? max_subusers { get; set; } = 5;
+
+        /// <summary>
+        /// Maximum number of groups this user can create
+        /// </summary>
+        public int? max_groups { get; set; } = 3;
+
+        /// <summary>
+        /// Maximum number of departments this user can use
+        /// </summary>
+        public int? max_departments { get; set; } = 3;
+
+        /// <summary>
+        /// Maximum total licenses this user can allocate
+        /// </summary>
+        public int? max_licenses { get; set; } = 10;
+
+        /// <summary>
+        /// License expiry date - after this date, all write operations blocked
+        /// </summary>
+        public DateTime? license_expiry_date { get; set; }
+
+        /// <summary>
+        /// Current number of subusers used (auto-updated)
+        /// </summary>
+        public int? used_subusers { get; set; } = 0;
+
+        /// <summary>
+        /// Current total licenses allocated to subusers (auto-updated)
+        /// </summary>
+        public int? used_licenses { get; set; } = 0;
+
+        /// <summary>
+        /// Quota last synced to private cloud
+        /// </summary>
+        public DateTime? quota_synced_at { get; set; }
+
         // Existing fields
 
         public string? payment_details_json { get; set; } // JSON storing payment details
@@ -157,6 +200,30 @@ namespace BitRaserApiProject.Models
         public string ip_address { get; set; } // User IP address
         public string device_info { get; set; } // Device/browser info
         public string session_status { get; set; } // Status: active, closed, expired
+
+        // ✅ NEW: Activity Tracking Fields
+        /// <summary>
+        /// Type of activity: LOGIN, LOGOUT, REPORT_DOWNLOAD, SUBUSER_CREATE, etc.
+        /// </summary>
+        [MaxLength(50)]
+        public string? activity_type { get; set; }
+
+        /// <summary>
+        /// JSON with additional activity details
+        /// </summary>
+        public string? activity_details { get; set; }
+
+        /// <summary>
+        /// ID of affected resource (subuser_id, report_id, etc.)
+        /// </summary>
+        [MaxLength(100)]
+        public string? resource_id { get; set; }
+
+        /// <summary>
+        /// Type of resource: subuser, report, machine, group, department
+        /// </summary>
+        [MaxLength(50)]
+        public string? resource_type { get; set; }
     }
 
     public class logs

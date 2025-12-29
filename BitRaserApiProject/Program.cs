@@ -9,6 +9,7 @@ using BitRaserApiProject.Middleware;
 using BitRaserApiProject.Swagger;
 using BitRaserApiProject.Converters;  // ✅ ADD: Custom DateTime Converters
 using BitRaserApiProject.Factories;   // ✅ ADD: Factories for multi-tenant support
+using BitRaserApiProject.Diagnostics; // ✅ ADD: TiDB Diagnostics & Observability
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;  // ✅ ADD: For DataProtection in Docker
 using Microsoft.EntityFrameworkCore;
@@ -223,7 +224,10 @@ builder.Services.AddCors(options =>
 // ✅ Configure MAIN database context - SIMPLE STATIC CONNECTION
 // Controllers that need Private Cloud routing should use DynamicDbContextFactory
 // This avoids synchronous database lookups during DI resolution which causes login failures
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
+// ✅ Configure MAIN database context with Connection Pooling and Diagnostics Interceptor
+// WHY AddDbContextPool? - Reuses DbContext instances, reduces allocation overhead
+// Pool size 20 is optimal for TiDB Cloud free tier (max ~100 connections)
+builder.Services.AddDbContextPool<ApplicationDbContext>((serviceProvider, options) =>
 {
     options.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 21)),
         mysqlOptions =>
@@ -233,7 +237,16 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
                 maxRetryDelay: TimeSpan.FromSeconds(10),
                 errorNumbersToAdd: null);
             mysqlOptions.CommandTimeout(30);
+            // ✅ Connection pool size limit for TiDB
+            mysqlOptions.MaxBatchSize(100);
         });
+
+    // ✅ ADD: Diagnostics Interceptor for SQL query monitoring
+    var interceptor = serviceProvider.GetService<DbDiagnosticsInterceptor>();
+    if (interceptor != null)
+    {
+        options.AddInterceptors(interceptor);
+    }
 
     // Enhanced logging and performance options
     if (builder.Environment.IsDevelopment())
@@ -244,7 +257,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 
     // Performance optimizations
     options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
-});
+}, poolSize: 20);  // ✅ Pool size limited to 20 for TiDB
 
 // Configure JWT Authentication with enhanced security
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -325,6 +338,8 @@ builder.Services.AddScoped<DynamicRouteService>();
 builder.Services.AddScoped<MigrationUtilityService>();
 builder.Services.AddScoped<PdfService>();
 builder.Services.AddScoped<IDapperService, DapperService>();  // ✅ NEW: Dapper Service for high-performance queries
+builder.Services.AddScoped<IQuotaService, QuotaService>();    // ✅ NEW: Quota & Limits Service
+builder.Services.AddScoped<IActivityLogService, ActivityLogService>(); // ✅ NEW: Activity Logging Service
 
 // ✅ FORGOT PASSWORD SERVICES - OTP AND EMAIL (OLD - RETAINED FOR BACKWARD COMPATIBILITY)
 builder.Services.AddSingleton<IOtpService, OtpService>();
@@ -334,7 +349,7 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IForgotPasswordRepository, ForgotPasswordRepository>();
 builder.Services.AddScoped<IForgotPasswordService, ForgotPasswordService>();
 
-// ✅ AUTO-CLEANUP BACKGROUND SERVICE FOR EXPIRED PASSWORD RESET REQUESTS
+// ✅ AUTO-CLEANUP BACKGROUND SERVICE FOR EXPIRED PASSWORD RESET REQUESTS (Runs once per day)
 builder.Services.AddHostedService<ForgotPasswordCleanupBackgroundService>();
 
 // ✅ KEEP-ALIVE SERVICE TO PREVENT RENDER.COM FREE TIER SPIN-DOWN
@@ -350,13 +365,33 @@ builder.Services.AddScoped<IPrivateCloudService, PrivateCloudService>();
 // ✅ DATABASE CONTEXT FACTORY - Multi-tenant database routing
 builder.Services.AddScoped<IDatabaseContextFactory, DatabaseContextFactory>();
 
+// ✅ POLAR PAYMENT SERVICE - Payment integration with Polar.sh
+builder.Services.AddHttpClient("PolarApi", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+builder.Services.AddScoped<IPolarPaymentService, PolarPaymentService>();
+
 // ✅ HYBRID MULTI-TENANT SUPPORT - Automatic tenant routing
 builder.Services.AddHttpContextAccessor();  // Required for reading JWT claims
 builder.Services.AddScoped<ITenantConnectionService, TenantConnectionService>();
 builder.Services.AddScoped<DynamicDbContextFactory>();
 
-// Add memory cache
-builder.Services.AddMemoryCache();
+// ✅ ENTERPRISE CACHING SYSTEM - IMemoryCache with prefix invalidation
+// Singleton for cache persistence across requests
+builder.Services.AddEnterpriseCaching(options =>
+{
+    options.SizeLimit = 2048;  // Max 2048 cache entries
+    options.CompactionPercentage = 0.25;  // Remove 25% when limit reached
+});
+
+// ✅ TIDB DIAGNOSTICS & OBSERVABILITY SYSTEM
+// Thread-safe in-memory metrics store (Singleton for global metrics)
+builder.Services.AddSingleton<DiagnosticsMetricsStore>();
+// DB Command Interceptor for SQL query monitoring
+builder.Services.AddSingleton<DbDiagnosticsInterceptor>();
+// TiDB Health Service for cluster inspection
+builder.Services.AddScoped<ITiDbHealthService, TiDbHealthService>();
 
 // Configure Controllers with enhanced JSON options
 builder.Services.AddControllers()
@@ -612,6 +647,10 @@ app.UseRateLimiting();
 // Place AFTER Authorization and BEFORE other custom middleware
 // This encrypts all API responses automatically
 app.UseResponseEncryption();
+
+// ✅ TIDB DIAGNOSTICS: Request-level DB tracking middleware
+// Place BEFORE DatabaseContext middleware to track all DB operations
+app.UseDbRequestTracking();
 
 // ✅ PRIVATE CLOUD: Automatic database context routing middleware
 // This middleware automatically detects user from JWT and injects appropriate DB context

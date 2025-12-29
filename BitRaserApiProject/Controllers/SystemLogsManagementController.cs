@@ -152,7 +152,7 @@ EventType = ExtractEventTypeFromMessage(l.log_message),
          return Unauthorized(new { message = "User not authenticated" });
  }
 
-    var log = await _context.logs.FirstOrDefaultAsync(l => l.log_id == logId);
+    var log = await _context.logs.Where(l => l.log_id == logId).FirstOrDefaultAsync();
 
        if (log == null)
             {

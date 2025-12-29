@@ -265,7 +265,7 @@ namespace BitRaserApiProject.Controllers
 
                     foreach (var invalidSubuser in invalidSubusers)
                     {
-                        var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == invalidSubuser.user_email);
+                        var parentUser = await _context.Users.Where(u => u.user_email == invalidSubuser.user_email).FirstOrDefaultAsync();
                         if (parentUser != null)
                         {
                             invalidSubuser.superuser_id = parentUser.user_id;
@@ -292,7 +292,7 @@ namespace BitRaserApiProject.Controllers
                         .Where(s => !s.SubuserRoles.Any())
                         .ToListAsync();
 
-                    var defaultRole = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == "SubUser");
+                    var defaultRole = await _context.Roles.Where(r => r.RoleName == "SubUser").FirstOrDefaultAsync();
                     if (defaultRole != null)
                     {
                         foreach (var subuser in subusersWithoutRoles)
@@ -779,7 +779,7 @@ namespace BitRaserApiProject.Controllers
 
                 result.TotalItems = subusersWithoutRoles.Count;
 
-                var defaultRole = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == "SubUser");
+                var defaultRole = await _context.Roles.Where(r => r.RoleName == "SubUser").FirstOrDefaultAsync();
                 if (defaultRole == null)
                 {
                     result.ErrorMessages.Add("Default 'SubUser' role not found. Create it first.");

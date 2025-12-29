@@ -25,19 +25,22 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
-        private readonly DynamicDbContextFactory _contextFactory; // ✅ ADD THIS
-        private readonly ILogger<EnhancedSubusersController> _logger; // ✅ ADD THIS
+        private readonly DynamicDbContextFactory _contextFactory;
+        private readonly ILogger<EnhancedSubusersController> _logger;
+        private readonly ICacheService _cacheService;
 
         public EnhancedSubusersController(
          IRoleBasedAuthService authService,
       IUserDataService userDataService,
-            DynamicDbContextFactory contextFactory, // ✅ ADD THIS
-            ILogger<EnhancedSubusersController> logger) // ✅ ADD THIS
+            DynamicDbContextFactory contextFactory,
+            ILogger<EnhancedSubusersController> logger,
+            ICacheService cacheService)
         {
             _authService = authService;
             _userDataService = userDataService;
-            _contextFactory = contextFactory; // ✅ ADD THIS
-            _logger = logger; // ✅ ADD THIS
+            _contextFactory = contextFactory;
+            _logger = logger;
+            _cacheService = cacheService;
         }
 
         // ✅ ADD THIS HELPER METHOD
@@ -171,7 +174,7 @@ namespace BitRaserApiProject.Controllers
           .ThenInclude(sr => sr.Role)
           .ThenInclude(r => r.RolePermissions)
           .ThenInclude(rp => rp.Permission)
-         .FirstOrDefaultAsync(s => s.subuser_email.ToLower() == decodedEmail); // ✅ Use decoded email
+         .Where(s => s.subuser_email.ToLower() == decodedEmail).FirstOrDefaultAsync(); // ✅ Use decoded email
 
             if (subuser == null)
                 return NotFound($"Subuser with email {decodedEmail} not found");
@@ -387,7 +390,7 @@ namespace BitRaserApiProject.Controllers
                 _logger.LogInformation("💾 Creating subuser in database for user: {Email}", currentUserEmail);
 
                 // Check if subuser already exists
-                var existingSubuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+                var existingSubuser = await _context.subuser.Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync();
                 if (existingSubuser != null)
                 {
                     _logger.LogWarning("⚠️ Subuser already exists: {Email}", request.Email);
@@ -402,7 +405,7 @@ namespace BitRaserApiProject.Controllers
                 {
                     // ✅ If SUBUSER is creating: Find their parent user IN SAME DB
                     var currentSubuser = await _context.subuser
-                  .FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+                  .Where(s => s.subuser_email == currentUserEmail).FirstOrDefaultAsync();
 
                     if (currentSubuser == null)
                     {
@@ -420,7 +423,7 @@ namespace BitRaserApiProject.Controllers
                 {
                     // ✅ If REGULAR USER is creating: Use their email as parent
                     // ✅ FIX: Find user IN SAME DYNAMIC CONTEXT (private or main)
-                    var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+                    var parentUser = await _context.Users.Where(u => u.user_email == currentUserEmail).FirstOrDefaultAsync();
 
                     if (parentUser == null)
                     {
@@ -488,6 +491,11 @@ namespace BitRaserApiProject.Controllers
                 _logger.LogInformation("💾 Saving subuser to database: {SubuserEmail}", newSubuser.subuser_email);
                 _context.subuser.Add(newSubuser);
                 await _context.SaveChangesAsync();
+                
+                // ✅ CACHE INVALIDATION: Clear subuser caches on create
+                _cacheService.RemoveByPrefix($"{CacheService.CacheKeys.Subuser}:{currentUserEmail}");
+                _cacheService.RemoveByPrefix(CacheService.CacheKeys.SubuserList);
+                
                 _logger.LogInformation("✅ Subuser saved successfully with ID: {SubuserId}", newSubuser.subuser_id);
 
                 // ✅ Assign default SubUser role (or custom role if validated above)
@@ -502,7 +510,7 @@ namespace BitRaserApiProject.Controllers
                 var createdSubuser = await _context.subuser
           .Include(s => s.SubuserRoles)
               .ThenInclude(sr => sr.Role)
-             .FirstOrDefaultAsync(s => s.subuser_id == newSubuser.subuser_id);
+             .Where(s => s.subuser_id == newSubuser.subuser_id).FirstOrDefaultAsync();
 
                 var response = new
                 {
@@ -554,7 +562,7 @@ namespace BitRaserApiProject.Controllers
             // ✅ ADD DYNAMIC CONTEXT
             using var _context = await GetContextAsync();
 
-            var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+            var subuser = await _context.subuser.Where(s => s.subuser_email == email).FirstOrDefaultAsync();
 
             if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
@@ -595,7 +603,7 @@ namespace BitRaserApiProject.Controllers
             if (!string.IsNullOrEmpty(request.Notes))
                 subuser.Notes = request.Notes;
 
-            var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+            var parentUser = await _context.Users.Where(u => u.user_email == currentUserEmail).FirstOrDefaultAsync();
             if (parentUser != null)
             {
                 subuser.UpdatedBy = parentUser.user_id;
@@ -604,6 +612,11 @@ namespace BitRaserApiProject.Controllers
 
             _context.Entry(subuser).State = EntityState.Modified;
             await _context.SaveChangesAsync();
+
+            // ✅ CACHE INVALIDATION: Clear subuser caches on update
+            _cacheService.Remove($"{CacheService.CacheKeys.Subuser}:{email}");
+            _cacheService.RemoveByPrefix($"{CacheService.CacheKeys.Subuser}:{subuser.user_email}");
+            _cacheService.RemoveByPrefix(CacheService.CacheKeys.SubuserList);
 
             return Ok(new
             {
@@ -631,7 +644,7 @@ namespace BitRaserApiProject.Controllers
                 // ✅ ADD DYNAMIC CONTEXT
                 using var _context = await GetContextAsync();
 
-                var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+                var subuser = await _context.subuser.Where(s => s.subuser_email == email).FirstOrDefaultAsync();
 
                 if (subuser == null)
                     return NotFound(new
@@ -754,7 +767,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 // Update audit fields
-                var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+                var parentUser = await _context.Users.Where(u => u.user_email == currentUserEmail).FirstOrDefaultAsync();
                 if (parentUser != null)
                 {
                     subuser.UpdatedBy = parentUser.user_id;
@@ -840,7 +853,7 @@ namespace BitRaserApiProject.Controllers
 
                 // Find subuser by both parent email and subuser email
                 var subuser = await _context.subuser
-             .FirstOrDefaultAsync(s => s.user_email == parentEmail && s.subuser_email == subuserEmail);
+             .Where(s => s.user_email == parentEmail && s.subuser_email == subuserEmail).FirstOrDefaultAsync();
 
                 if (subuser == null)
                     return NotFound(new
@@ -948,7 +961,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 // Update audit fields
-                var parentUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+                var parentUser = await _context.Users.Where(u => u.user_email == currentUserEmail).FirstOrDefaultAsync();
                 if (parentUser != null)
                 {
                     subuser.UpdatedBy = parentUser.user_id;
@@ -1006,7 +1019,7 @@ namespace BitRaserApiProject.Controllers
             // ✅ ADD DYNAMIC CONTEXT
             using var _context = await GetContextAsync();
 
-            var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+            var subuser = await _context.subuser.Where(s => s.subuser_email == email).FirstOrDefaultAsync();
 
             if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
@@ -1036,14 +1049,14 @@ namespace BitRaserApiProject.Controllers
 
         private async Task AssignRoleToSubuserAsync(ApplicationDbContext context, string subuserEmail, string roleName, string assignedByEmail)
         {
-            var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == subuserEmail);
-            var role = await context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
+            var subuser = await context.subuser.Where(s => s.subuser_email == subuserEmail).FirstOrDefaultAsync();
+            var role = await context.Roles.Where(r => r.RoleName == roleName).FirstOrDefaultAsync();
 
             if (subuser != null && role != null)
             {
                 // Check if role already assigned
                 var existingRole = await context.Set<SubuserRole>()
-                   .FirstOrDefaultAsync(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == role.RoleId);
+                   .Where(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == role.RoleId).FirstOrDefaultAsync();
 
                 if (existingRole == null)
                 {

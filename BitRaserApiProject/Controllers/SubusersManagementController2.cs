@@ -20,17 +20,20 @@ namespace BitRaserApiProject.Controllers
      private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
    private readonly ILogger<SubusersManagementController2> _logger;
+   private readonly ICacheService _cacheService;
 
   public SubusersManagementController2(
       ApplicationDbContext context,
    IRoleBasedAuthService authService,
 IUserDataService userDataService,
- ILogger<SubusersManagementController2> logger)
+ ILogger<SubusersManagementController2> logger,
+ ICacheService cacheService)
         {
         _context = context;
        _authService = authService;
    _userDataService = userDataService;
          _logger = logger;
+         _cacheService = cacheService;
         }
 
         /// <summary>
@@ -66,7 +69,7 @@ if (string.IsNullOrEmpty(userEmail))
 // Apply user filter
        if (!canViewAll)
         {
-       var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+       var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
        if (user != null)
         {
    query = query.Where(s => s.user_email == userEmail);
@@ -163,7 +166,7 @@ Page = filters.Page,
       return StatusCode(403, new { message = "Insufficient permissions to deactivate subusers" });
    }
 
-     var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_id == request.SubuserId);
+     var subuser = await _context.subuser.Where(s => s.subuser_id == request.SubuserId).FirstOrDefaultAsync();
       if (subuser == null)
 {
      return NotFound(new { message = "Subuser not found" });
@@ -206,7 +209,7 @@ Page = filters.Page,
  return StatusCode(403, new { message = "Insufficient permissions to reset passwords" });
        }
 
-   var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_id == request.SubuserId);
+   var subuser = await _context.subuser.Where(s => s.subuser_id == request.SubuserId).FirstOrDefaultAsync();
 if (subuser == null)
        {
   return NotFound(new { message = "Subuser not found" });
@@ -259,7 +262,7 @@ if (subuser == null)
     return StatusCode(403, new { message = "Insufficient permissions to update permissions" });
      }
 
- var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_id == request.SubuserId);
+ var subuser = await _context.subuser.Where(s => s.subuser_id == request.SubuserId).FirstOrDefaultAsync();
        if (subuser == null)
       {
     return NotFound(new { message = "Subuser not found" });

@@ -21,15 +21,18 @@ namespace BitRaserApiProject.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IConfiguration _configuration;
         private readonly ILogger<EnhancedAuthController> _logger;
+        private readonly ICacheService _cacheService;
 
         public EnhancedAuthController(
             ApplicationDbContext context, 
             IConfiguration configuration,
-            ILogger<EnhancedAuthController> logger)
+            ILogger<EnhancedAuthController> logger,
+            ICacheService cacheService)
         {
             _context = context;
             _configuration = configuration;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         public class LoginRequest
@@ -50,6 +53,7 @@ namespace BitRaserApiProject.Controllers
         /// <summary>
         /// Enhanced login with session creation for both users and subusers
         /// </summary>
+
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] LoginRequest request)
         {
@@ -64,7 +68,7 @@ namespace BitRaserApiProject.Controllers
                 bool isSubuser = false;
 
                 // Try to authenticate as main user first
-                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.Email);
+                var user = await _context.Users.Where(u => u.user_email == request.Email).FirstOrDefaultAsync();
                 if (user != null && !string.IsNullOrEmpty(user.hash_password) && BCrypt.Net.BCrypt.Verify(request.Password, user.hash_password))
                 {
                     userEmail = request.Email;
@@ -73,7 +77,7 @@ namespace BitRaserApiProject.Controllers
                 else
                 {
                     // Try to authenticate as subuser
-                    var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+                    var subuser = await _context.subuser.Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync();
                     if (subuser != null && BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
                     {
                         userEmail = request.Email;
@@ -160,9 +164,9 @@ namespace BitRaserApiProject.Controllers
 
                 // Verify session is still active
                 var session = await _context.Sessions
-                    .FirstOrDefaultAsync(s => s.session_id == sessionId && 
+                    .Where(s => s.session_id == sessionId && 
                                              s.user_email == userEmail && 
-                                             s.session_status == "active");
+                                             s.session_status == "active").FirstOrDefaultAsync();
 
                 if (session == null)
                 {

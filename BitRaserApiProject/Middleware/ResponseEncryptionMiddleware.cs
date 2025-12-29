@@ -204,7 +204,8 @@ return true;
          "/api/contactformsubmissions",
          "/api/enhancedauditreports/export-settings",
          "/api/enhancedauditreports/export-settings-json",
-         "/api/rendermetrics"
+         "/api/rendermetrics",
+         "/api/diagnostics"
    };
 
   if (authPaths.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))

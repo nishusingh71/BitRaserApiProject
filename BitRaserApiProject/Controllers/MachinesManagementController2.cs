@@ -20,17 +20,20 @@ private readonly ApplicationDbContext _context;
   private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
         private readonly ILogger<MachinesManagementController2> _logger;
+        private readonly ICacheService _cacheService;
 
 public MachinesManagementController2(
       ApplicationDbContext context,
 IRoleBasedAuthService authService,
      IUserDataService userDataService,
-       ILogger<MachinesManagementController2> logger)
+       ILogger<MachinesManagementController2> logger,
+       ICacheService cacheService)
         {
     _context = context;
         _authService = authService;
 _userDataService = userDataService;
    _logger = logger;
+   _cacheService = cacheService;
         }
 
   /// <summary>
@@ -162,7 +165,7 @@ if (!string.IsNullOrEmpty(filters.EraseOption) && filters.EraseOption != "All Op
      }
 
             var machine = await _context.Machines
-      .FirstOrDefaultAsync(m => m.fingerprint_hash == fingerprintHash);
+      .Where(m => m.fingerprint_hash == fingerprintHash).FirstOrDefaultAsync();
 
   if (machine == null)
             {
@@ -223,7 +226,7 @@ if (string.IsNullOrEmpty(userEmail))
            }
 
   var machine = await _context.Machines
-     .FirstOrDefaultAsync(m => m.fingerprint_hash == request.FingerprintHash);
+     .Where(m => m.fingerprint_hash == request.FingerprintHash).FirstOrDefaultAsync();
 
       if (machine == null)
        {
@@ -274,7 +277,7 @@ if (string.IsNullOrEmpty(userEmail))
           }
 
      var machine = await _context.Machines
-   .FirstOrDefaultAsync(m => m.fingerprint_hash == request.FingerprintHash);
+   .Where(m => m.fingerprint_hash == request.FingerprintHash).FirstOrDefaultAsync();
 
    if (machine == null)
           {

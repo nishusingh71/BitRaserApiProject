@@ -27,6 +27,7 @@ namespace BitRaserApiProject.Controllers
         private readonly IUserDataService _userDataService;
         private readonly PdfService _pdfService;
         private readonly ILogger<EnhancedAuditReportsController> _logger;
+        private readonly ICacheService _cacheService;
 
         public EnhancedAuditReportsController(
    DynamicDbContextFactory contextFactory,
@@ -34,7 +35,8 @@ namespace BitRaserApiProject.Controllers
          IRoleBasedAuthService authService,
     IUserDataService userDataService,
          PdfService pdfService,
-         ILogger<EnhancedAuditReportsController> logger)
+         ILogger<EnhancedAuditReportsController> logger,
+         ICacheService cacheService)
         {
             _contextFactory = contextFactory;
             _tenantService = tenantService;
@@ -42,6 +44,7 @@ namespace BitRaserApiProject.Controllers
             _userDataService = userDataService;
             _pdfService = pdfService;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -342,6 +345,9 @@ namespace BitRaserApiProject.Controllers
                 context.AuditReports.Add(report);
                 await context.SaveChangesAsync();
 
+                // ✅ CACHE INVALIDATION: Clear report caches
+                _cacheService.RemoveByPrefix(CacheService.CacheKeys.ReportList);
+
                 _logger.LogInformation("✅ Created report {Id} for {Email} in {DbType} database",
              report.report_id, report.client_email,
                   await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
@@ -402,6 +408,10 @@ namespace BitRaserApiProject.Controllers
                 context.Entry(report).State = EntityState.Modified;
                 await context.SaveChangesAsync();
 
+                // ✅ CACHE INVALIDATION: Clear report caches
+                _cacheService.Remove($"{CacheService.CacheKeys.Report}:{id}");
+                _cacheService.RemoveByPrefix(CacheService.CacheKeys.ReportList);
+
                 _logger.LogInformation("✅ Updated report {Id} in {DbType} database",
                 id, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
 
@@ -441,6 +451,10 @@ namespace BitRaserApiProject.Controllers
 
                 context.AuditReports.Remove(report);
                 await context.SaveChangesAsync();
+
+                // ✅ CACHE INVALIDATION: Clear report caches
+                _cacheService.Remove($"{CacheService.CacheKeys.Report}:{id}");
+                _cacheService.RemoveByPrefix(CacheService.CacheKeys.ReportList);
 
                 _logger.LogInformation("✅ Deleted report {Id} from {DbType} database",
                       id, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
@@ -603,26 +617,31 @@ namespace BitRaserApiProject.Controllers
                 if (!string.IsNullOrEmpty(clientEmail))
                     query = query.Where(r => r.client_email == clientEmail);
 
-                var stats = new
+                // ✅ CACHE: Statistics with short TTL for near-real-time balance
+                var cacheKey = $"{CacheService.CacheKeys.ReportList}:stats:{clientEmail ?? "all"}:{userEmail}";
+                var stats = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
                 {
-                    TotalReports = await query.CountAsync(),
-                    SyncedReports = await query.CountAsync(r => r.synced),
-                    PendingReports = await query.CountAsync(r => !r.synced),
-                    ReportsThisMonth = await query.CountAsync(r => r.report_datetime.Month == DateTime.UtcNow.Month),
-                    ReportsThisWeek = await query.CountAsync(r => r.report_datetime >= DateTime.UtcNow.AddDays(-7)),
-                    ReportsToday = await query.CountAsync(r => r.report_datetime.Date == DateTime.UtcNow.Date),
-                    ErasureMethods = await query
-                      .GroupBy(r => r.erasure_method)
-             .Select(g => new { Method = g.Key, Count = g.Count() })
-                           .ToListAsync(),
-                    ClientEmails = clientEmail == null ?
-                  await query
-                    .GroupBy(r => r.client_email)
-              .Select(g => new { Email = g.Key, Count = g.Count() })
-                    .OrderByDescending(x => x.Count)
-                       .Take(10)
-                     .ToListAsync() : null
-                };
+                    return new
+                    {
+                        TotalReports = await query.CountAsync(),
+                        SyncedReports = await query.CountAsync(r => r.synced),
+                        PendingReports = await query.CountAsync(r => !r.synced),
+                        ReportsThisMonth = await query.CountAsync(r => r.report_datetime.Month == DateTime.UtcNow.Month),
+                        ReportsThisWeek = await query.CountAsync(r => r.report_datetime >= DateTime.UtcNow.AddDays(-7)),
+                        ReportsToday = await query.CountAsync(r => r.report_datetime.Date == DateTime.UtcNow.Date),
+                        ErasureMethods = await query
+                          .GroupBy(r => r.erasure_method)
+                          .Select(g => new { Method = g.Key, Count = g.Count() })
+                          .ToListAsync(),
+                        ClientEmails = clientEmail == null ?
+                            await query
+                                .GroupBy(r => r.client_email)
+                                .Select(g => new { Email = g.Key, Count = g.Count() })
+                                .OrderByDescending(x => x.Count)
+                                .Take(10)
+                                .ToListAsync() : null
+                    };
+                }, CacheService.CacheTTL.Short);
 
                 _logger.LogInformation("Retrieved statistics from {DbType} database",
                      await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
@@ -896,7 +915,8 @@ namespace BitRaserApiProject.Controllers
 
                 // Check if settings already exist for this user
                 var existingSettings = await context.PdfExportSettings
-                    .FirstOrDefaultAsync(s => s.UserEmail == userEmail);
+                    .Where(s => s.UserEmail == userEmail)
+                    .FirstOrDefaultAsync();
 
                 if (existingSettings != null)
                 {
@@ -1040,7 +1060,8 @@ namespace BitRaserApiProject.Controllers
 
                 // Check if settings already exist for this user
                 var existingSettings = await context.PdfExportSettings
-                    .FirstOrDefaultAsync(s => s.UserEmail == userEmail);
+                    .Where(s => s.UserEmail == userEmail)
+                    .FirstOrDefaultAsync();
 
                 if (existingSettings != null)
                 {
@@ -1121,7 +1142,8 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { message = "User not authenticated" });
 
                 var settings = await context.PdfExportSettings
-                    .FirstOrDefaultAsync(s => s.UserEmail == userEmail && s.IsActive);
+                    .Where(s => s.UserEmail == userEmail && s.IsActive)
+                    .FirstOrDefaultAsync();
 
                 if (settings == null)
                 {
@@ -1161,7 +1183,8 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { message = "User not authenticated" });
 
                 var settings = await context.PdfExportSettings
-                    .FirstOrDefaultAsync(s => s.UserEmail == userEmail);
+                    .Where(s => s.UserEmail == userEmail)
+                    .FirstOrDefaultAsync();
 
                 if (settings == null)
                 {
@@ -1208,7 +1231,8 @@ namespace BitRaserApiProject.Controllers
 
                 // Get saved settings for this user
                 var settings = await context.PdfExportSettings
-                    .FirstOrDefaultAsync(s => s.UserEmail == userEmail && s.IsActive);
+                    .Where(s => s.UserEmail == userEmail && s.IsActive)
+                    .FirstOrDefaultAsync();
 
                 _logger.LogInformation("Exporting report {Id} to PDF with saved settings for {Email}", id, userEmail);
 
@@ -1222,6 +1246,151 @@ namespace BitRaserApiProject.Controllers
             {
                 _logger.LogError(ex, "Error exporting single report {Id} to PDF with settings", id);
                 return StatusCode(500, new { message = "Error exporting report", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Export multiple reports to PDF as ZIP file using saved settings
+        /// Single API call for batch download - no need to call individual endpoints
+        /// </summary>
+        /// <param name="request">List of report IDs to export</param>
+        [HttpPost("batch-export-pdf")]
+        public async Task<IActionResult> BatchExportReportsPDF([FromBody] BatchExportRequest request)
+        {
+            try
+            {
+                if (request.ReportIds == null || !request.ReportIds.Any())
+                {
+                    return BadRequest(new { error = "At least one report ID is required" });
+                }
+
+                var context = await GetContextAsync();
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
+
+                // Get saved settings for this user
+                var settings = await context.PdfExportSettings
+                    .Where(s => s.UserEmail == userEmail && s.IsActive)
+                    .FirstOrDefaultAsync();
+
+                _logger.LogInformation("Batch exporting {Count} reports for {Email}", request.ReportIds.Count, userEmail);
+
+                // Get all requested reports
+                var reports = await context.AuditReports
+                    .Where(r => request.ReportIds.Contains(r.report_id))
+                    .ToListAsync();
+
+                if (!reports.Any())
+                {
+                    return NotFound(new { error = "No reports found with the provided IDs" });
+                }
+
+                // Check authorization for each report
+                var hasExportAllPermission = await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser);
+                
+                var authorizedReports = reports.Where(r => 
+                    r.client_email == userEmail || hasExportAllPermission
+                ).ToList();
+
+                if (!authorizedReports.Any())
+                {
+                    return StatusCode(403, new { error = "You don't have permission to export any of the selected reports" });
+                }
+
+                // If only one report, return PDF directly
+                if (authorizedReports.Count == 1)
+                {
+                    var singleReport = authorizedReports.First();
+                    var pdfBytes = await GenerateSingleReportPDFWithSavedSettings(singleReport, settings);
+                    var fileName = $"report_{singleReport.report_id}_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+                    return File(pdfBytes, "application/pdf", fileName);
+                }
+
+                // Multiple reports - create ZIP file
+                using var memoryStream = new MemoryStream();
+                using (var archive = new System.IO.Compression.ZipArchive(memoryStream, System.IO.Compression.ZipArchiveMode.Create, true))
+                {
+                    foreach (var report in authorizedReports)
+                    {
+                        try
+                        {
+                            var pdfBytes = await GenerateSingleReportPDFWithSavedSettings(report, settings);
+                            var entryName = $"report_{report.report_id}_{report.report_name?.Replace(" ", "_") ?? "export"}.pdf";
+                            
+                            var entry = archive.CreateEntry(entryName, System.IO.Compression.CompressionLevel.Fastest);
+                            using var entryStream = entry.Open();
+                            await entryStream.WriteAsync(pdfBytes, 0, pdfBytes.Length);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Failed to generate PDF for report {Id}, skipping", report.report_id);
+                        }
+                    }
+                }
+
+                memoryStream.Position = 0;
+                var zipFileName = $"reports_batch_{DateTime.UtcNow:yyyyMMdd_HHmmss}.zip";
+
+                _logger.LogInformation("Batch export completed: {Count} reports exported for {Email}", 
+                    authorizedReports.Count, userEmail);
+
+                return File(memoryStream.ToArray(), "application/zip", zipFileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error batch exporting reports to PDF");
+                return StatusCode(500, new { message = "Error exporting reports", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Preview single report as PDF (inline display in browser)
+        /// Uses saved settings if available
+        /// </summary>
+        /// <param name="id">Report ID to preview</param>
+        [HttpGet("{id}/preview")]
+        public async Task<IActionResult> PreviewReportPDF(int id)
+        {
+            try
+            {
+                var context = await GetContextAsync();
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
+                var report = await context.AuditReports.FindAsync(id);
+
+                if (report == null) 
+                {
+                    return NotFound(new { error = "Report not found" });
+                }
+
+                // Authorization check
+                bool canPreview = report.client_email == userEmail ||
+                   await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser);
+
+                if (!canPreview)
+                {
+                    return StatusCode(403, new { error = "You can only preview your own reports" });
+                }
+
+                // Get saved settings for this user
+                var settings = await context.PdfExportSettings
+                    .Where(s => s.UserEmail == userEmail && s.IsActive)
+                    .FirstOrDefaultAsync();
+
+                _logger.LogInformation("Previewing report {Id} for {Email}", id, userEmail);
+
+                // Generate PDF with saved settings
+                var pdfBytes = await GenerateSingleReportPDFWithSavedSettings(report, settings);
+
+                // Return PDF inline (for browser preview) instead of attachment (download)
+                Response.Headers.Append("Content-Disposition", $"inline; filename=\"report_{report.report_id}_preview.pdf\"");
+                
+                return File(pdfBytes, "application/pdf");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error previewing report {Id}", id);
+                return StatusCode(500, new { message = "Error previewing report", error = ex.Message });
             }
         }
 
@@ -1242,6 +1411,12 @@ namespace BitRaserApiProject.Controllers
                 HasWatermarkImage = !string.IsNullOrEmpty(settings.WatermarkImageBase64),
                 HasTechnicianSignature = !string.IsNullOrEmpty(settings.TechnicianSignatureBase64),
                 HasValidatorSignature = !string.IsNullOrEmpty(settings.ValidatorSignatureBase64),
+                // ✅ Return actual base64 image data
+                HeaderLeftLogoBase64 = settings.HeaderLeftLogoBase64,
+                HeaderRightLogoBase64 = settings.HeaderRightLogoBase64,
+                WatermarkImageBase64 = settings.WatermarkImageBase64,
+                TechnicianSignatureBase64 = settings.TechnicianSignatureBase64,
+                ValidatorSignatureBase64 = settings.ValidatorSignatureBase64,
                 IsActive = settings.IsActive,
                 CreatedAt = settings.CreatedAt,
                 UpdatedAt = settings.UpdatedAt
@@ -1953,5 +2128,16 @@ SectorsErased = "Unknown"
 
         [FromForm]
         public IFormFile? ValidatorSignature { get; set; }
+    }
+
+    /// <summary>
+    /// Batch export request model for downloading multiple reports
+    /// </summary>
+    public class BatchExportRequest
+    {
+        /// <summary>
+        /// List of report IDs to export as PDF
+        /// </summary>
+        public List<int> ReportIds { get; set; } = new();
     }
 }

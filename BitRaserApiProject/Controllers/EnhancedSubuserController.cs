@@ -26,17 +26,26 @@ namespace BitRaserApiProject.Controllers
         private readonly DynamicDbContextFactory _contextFactory;
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
-        private readonly ILogger<EnhancedSubuserController> _logger; // ✅ FIXED
+        private readonly IQuotaService _quotaService;
+        private readonly ICacheService _cacheService;
+        private readonly IActivityLogService _activityLogService;
+        private readonly ILogger<EnhancedSubuserController> _logger;
 
         public EnhancedSubuserController(
            DynamicDbContextFactory contextFactory,
         IRoleBasedAuthService authService,
          IUserDataService userDataService,
-      ILogger<EnhancedSubuserController> logger) // ✅ FIXED
+         IQuotaService quotaService,
+         ICacheService cacheService,
+         IActivityLogService activityLogService,
+      ILogger<EnhancedSubuserController> logger)
         {
             _contextFactory = contextFactory;
             _authService = authService;
             _userDataService = userDataService;
+            _quotaService = quotaService;
+            _cacheService = cacheService;
+            _activityLogService = activityLogService;
             _logger = logger;
         }
 
@@ -70,7 +79,7 @@ namespace BitRaserApiProject.Controllers
                 _logger.LogInformation("🔍 GetSubusers called by {Email}, Database: {DbSource}", currentUserEmail, dbSource);
 
                 // ✅ Check if user is subuser in the CORRECT database context (not Main DB only)
-                var currentSubuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+                var currentSubuser = await context.subuser.Where(s => s.subuser_email == currentUserEmail).FirstOrDefaultAsync();
                 bool isCurrentUserSubuser = currentSubuser != null;
                 string? parentEmail = currentSubuser?.user_email;
 
@@ -171,7 +180,7 @@ namespace BitRaserApiProject.Controllers
               .ThenInclude(sr => sr.Role)
           .ThenInclude(r => r.RolePermissions)
         .ThenInclude(rp => rp.Permission)
-                  .FirstOrDefaultAsync(s => s.subuser_email.ToLower() == decodedEmail); // ✅ Use decoded email
+                  .Where(s => s.subuser_email.ToLower() == decodedEmail).FirstOrDefaultAsync(); // ✅ Use decoded email
 
                 if (subuser == null) return NotFound($"Subuser with email {decodedEmail} not found");
 
@@ -251,7 +260,7 @@ namespace BitRaserApiProject.Controllers
                     : "Main DB";
 
                 // ✅ Check if user is subuser in the CORRECT database context
-                var currentSubuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+                var currentSubuser = await context.subuser.Where(s => s.subuser_email == currentUserEmail).FirstOrDefaultAsync();
                 bool isCurrentUserSubuser = currentSubuser != null;
 
                 _logger.LogInformation("🔍 GetSubusersByParent called by {Email} for parent {ParentEmail}, Database: {DbSource}", 
@@ -342,6 +351,29 @@ namespace BitRaserApiProject.Controllers
                 var userRoles = await _authService.GetUserRolesAsync(currentUserEmail!, isCurrentUserSubuser);
                 _logger.LogInformation("User roles: {Roles}", string.Join(", ", userRoles));
 
+                // ✅ QUOTA CHECK - Enforced from MAIN DB (cannot be bypassed even in Private Cloud)
+                var parentEmail = isCurrentUserSubuser 
+                    ? (await context.subuser.Where(s => s.subuser_email == currentUserEmail).FirstOrDefaultAsync())?.user_email ?? currentUserEmail!
+                    : currentUserEmail!;
+
+                var quotaCheck = await _quotaService.CanCreateSubuserAsync(parentEmail);
+                if (!quotaCheck.CanProceed)
+                {
+                    _logger.LogWarning("⚠️ Quota limit reached for {Email}: {Message}", parentEmail, quotaCheck.Message);
+                    return StatusCode(403, new
+                    {
+                        success = false,
+                        error = "QUOTA_LIMIT_REACHED",
+                        message = quotaCheck.Message,
+                        limit = quotaCheck.Limit,
+                        used = quotaCheck.Used,
+                        remaining = quotaCheck.Remaining
+                    });
+                }
+
+                _logger.LogInformation("✅ Quota check passed for {Email}: {Limit} max, {Used} used, {Remaining} remaining",
+                    parentEmail, quotaCheck.Limit, quotaCheck.Used, quotaCheck.Remaining);
+
                 // Validate input - only email and password are required
                 if (string.IsNullOrEmpty(request.subuser_email) || string.IsNullOrEmpty(request.subuser_password))
                 {
@@ -370,7 +402,7 @@ namespace BitRaserApiProject.Controllers
                 {
                     // ✅ If SUBUSER is creating: Find their parent user
                     var currentSubuser = await context.subuser
-                   .FirstOrDefaultAsync(s => s.subuser_email == currentUserEmail);
+                   .Where(s => s.subuser_email == currentUserEmail).FirstOrDefaultAsync();
 
                     if (currentSubuser == null)
                     {
@@ -452,6 +484,27 @@ namespace BitRaserApiProject.Controllers
 
                 _logger.LogInformation("✅ Enhanced subuser created: ID={SubuserId}, Email={Email} in {DbSource}", newSubuser.subuser_id, newSubuser.subuser_email, dbSource);
 
+                // ✅ INCREMENT USED SUBUSER COUNT in MAIN DB
+                await _quotaService.IncrementSubuserCountAsync(parentEmail);
+                
+                // ✅ UPDATE LICENSE USAGE if license was allocated
+                if (request.license_allocation.HasValue && request.license_allocation.Value > 0)
+                {
+                    await _quotaService.UpdateUsedLicensesAsync(parentEmail, request.license_allocation.Value);
+                }
+
+                // ✅ INVALIDATE CACHE: Clear quota & license cache for this user
+                _cacheService.RemoveByPrefix($"quota:status:{parentEmail}");
+                _cacheService.RemoveByPrefix($"license:info:{parentEmail}");
+
+                // ✅ LOG ACTIVITY: Subuser created
+                await _activityLogService.LogActivityAsync(
+                    currentUserEmail!,
+                    ActivityTypes.SUBUSER_CREATE,
+                    newSubuser.subuser_id.ToString(),
+                    "subuser",
+                    new { subuserEmail = newSubuser.subuser_email, department = newSubuser.Department });
+
                 var response = new
                 {
                     success = true,
@@ -506,7 +559,7 @@ namespace BitRaserApiProject.Controllers
 
                 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-                var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+                var subuser = await context.subuser.Where(s => s.subuser_email == email).FirstOrDefaultAsync();
 
                 if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
@@ -656,7 +709,7 @@ namespace BitRaserApiProject.Controllers
                 {
                     // First try to find by subuser_email directly
                     targetSubuser = await context.subuser
-                 .FirstOrDefaultAsync(s => s.subuser_email == request.subuser_email);
+                 .Where(s => s.subuser_email == request.subuser_email).FirstOrDefaultAsync();
 
                     // If parentUserEmail is also provided, validate it matches
                     if (targetSubuser != null && !string.IsNullOrEmpty(request.parentUserEmail))
@@ -807,6 +860,20 @@ namespace BitRaserApiProject.Controllers
                     }
                 }
 
+                // Update license_allocation if provided
+                if (request.license_allocation.HasValue)
+                {
+                    targetSubuser.license_allocation = request.license_allocation.Value;
+                    updatedFields.Add("license_allocation");
+                }
+
+                // Update status if provided
+                if (!string.IsNullOrEmpty(request.status))
+                {
+                    targetSubuser.status = request.status;
+                    updatedFields.Add("status");
+                }
+
                 if (updatedFields.Count == 0)
                 {
                     return BadRequest(new { message = "No fields to update. Please provide at least one field to update" });
@@ -880,7 +947,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
-                var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+                var subuser = await context.subuser.Where(s => s.subuser_email == email).FirstOrDefaultAsync();
 
                 if (subuser == null)
                 {
@@ -1027,7 +1094,7 @@ namespace BitRaserApiProject.Controllers
 
                 // Find subuser - NO NEED for parent user email
                 var subuser = await context.subuser
-                      .FirstOrDefaultAsync(s => s.subuser_email == request.SubuserEmail);
+                      .Where(s => s.subuser_email == request.SubuserEmail).FirstOrDefaultAsync();
 
                 if (subuser == null)
                 {
@@ -1152,7 +1219,7 @@ namespace BitRaserApiProject.Controllers
                 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
-                var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+                var subuser = await context.subuser.Where(s => s.subuser_email == email).FirstOrDefaultAsync();
                 if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
                 // Check if user can assign roles to this subuser
@@ -1200,7 +1267,7 @@ namespace BitRaserApiProject.Controllers
                 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
-                var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+                var subuser = await context.subuser.Where(s => s.subuser_email == email).FirstOrDefaultAsync();
                 if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
                 // Check permissions
@@ -1212,11 +1279,11 @@ namespace BitRaserApiProject.Controllers
                     return StatusCode(403, new { error = "You can only remove roles from your own subusers" });
                 }
 
-                var role = await context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
+                var role = await context.Roles.Where(r => r.RoleName == roleName).FirstOrDefaultAsync();
                 if (role == null) return NotFound($"Role {roleName} not found");
 
                 var subuserRole = await context.SubuserRoles
-              .FirstOrDefaultAsync(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == role.RoleId);
+              .Where(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == role.RoleId).FirstOrDefaultAsync();
 
                 if (subuserRole == null)
                     return NotFound($"Role {roleName} not assigned to subuser {email}");
@@ -1256,7 +1323,7 @@ namespace BitRaserApiProject.Controllers
 
                 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-                var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+                var subuser = await context.subuser.Where(s => s.subuser_email == email).FirstOrDefaultAsync();
 
                 if (subuser == null) return NotFound($"Subuser with email {email} not found");
 
@@ -1274,11 +1341,34 @@ namespace BitRaserApiProject.Controllers
 
                 _logger.LogInformation("✅ Subuser deleted: {Email}", email);
 
+                // ✅ DECREMENT USED SUBUSER COUNT in MAIN DB
+                var parentEmail = subuser.user_email;
+                await _quotaService.DecrementSubuserCountAsync(parentEmail);
+                
+                // ✅ RETURN LICENSE USAGE if license was allocated
+                if (subuser.license_allocation.HasValue && subuser.license_allocation.Value > 0)
+                {
+                    await _quotaService.UpdateUsedLicensesAsync(parentEmail, -subuser.license_allocation.Value);
+                }
+
+                // ✅ INVALIDATE CACHE: Clear quota & license cache for this user
+                _cacheService.RemoveByPrefix($"quota:status:{parentEmail}");
+                _cacheService.RemoveByPrefix($"license:info:{parentEmail}");
+
+                // ✅ LOG ACTIVITY: Subuser deleted
+                await _activityLogService.LogActivityAsync(
+                    currentUserEmail!,
+                    ActivityTypes.SUBUSER_DELETE,
+                    subuser.subuser_id.ToString(),
+                    "subuser",
+                    new { subuserEmail = email, parentEmail });
+
                 return Ok(new
                 {
                     message = "Subuser deleted successfully",
                     subuserEmail = email,
-                    deletedAt = DateTime.UtcNow
+                    deletedAt = DateTime.UtcNow,
+                    quotaFreed = true
                 });
             }
             catch (Exception ex)
@@ -1342,26 +1432,245 @@ namespace BitRaserApiProject.Controllers
             }
         }
 
+        /// <summary>
+        /// Get quota status for current user (from MAIN DB - cannot be bypassed)
+        /// Shows max limits, current usage, and remaining quotas
+        /// ✅ ENCRYPTED RESPONSE - Sensitive quota data
+        /// </summary>
+        [HttpGet("quota-status")]
+        [EncryptResponse]
+        public async Task<IActionResult> GetQuotaStatus()
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+                    return Unauthorized(new { message = "User not authenticated" });
+
+                // Get parent email if current user is a subuser (optimized with WHERE)
+                using var context = await _contextFactory.CreateDbContextAsync();
+                var isSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+                var parentEmail = isSubuser
+                    ? (await context.subuser.Where(s => s.subuser_email == currentUserEmail).Select(s => s.user_email).FirstOrDefaultAsync()) ?? currentUserEmail
+                    : currentUserEmail;
+
+                // ✅ CACHE: Get quota from cache or fetch from DB (5 min TTL)
+                var cacheKey = $"quota:status:{parentEmail}";
+                var quota = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
+                {
+                    return await _quotaService.GetQuotaStatusAsync(parentEmail);
+                }, TimeSpan.FromMinutes(5));
+
+                return Ok(new
+                {
+                    success = true,
+                    userEmail = parentEmail,
+                    cached = true,
+                    quotas = new
+                    {
+                        subusers = new { max = quota.MaxSubusers, used = quota.UsedSubusers, remaining = quota.RemainingSubusers },
+                        groups = new { max = quota.MaxGroups, used = quota.UsedGroups, remaining = quota.RemainingGroups },
+                        departments = new { max = quota.MaxDepartments, used = quota.UsedDepartments },
+                        licenses = new { max = quota.MaxLicenses, used = quota.UsedLicenses, remaining = quota.RemainingLicenses }
+                    },
+                    license = new
+                    {
+                        hasExpiry = quota.HasLicenseExpiry,
+                        expiryDate = quota.LicenseExpiryDate,
+                        isExpired = quota.IsLicenseExpired,
+                        daysRemaining = quota.DaysUntilExpiry
+                    },
+                    lastSyncedAt = quota.QuotaSyncedAt
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting quota status");
+                return StatusCode(500, new { message = "Error getting quota status", error = ex.Message });
+            }
+        }
+        /// <summary>
+        /// Get available licenses for current user
+        /// Shows total allocation, used licenses, and available licenses
+        /// ✅ ENCRYPTED RESPONSE - Sensitive license data
+        /// </summary>
+        [HttpGet("license-info")]
+        [EncryptResponse]
+        public async Task<IActionResult> GetLicenseInfo()
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+                    return Unauthorized(new { message = "User not authenticated" });
+
+                // ✅ CACHE: Check cache first (3 min TTL)
+                var cacheKey = $"license:info:{currentUserEmail}";
+                var cachedResult = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
+                {
+                    using var context = await _contextFactory.CreateDbContextAsync();
+
+                    // ✅ Optimized query with WHERE and projection
+                    var subusers = await context.subuser
+                        .Where(s => s.user_email == currentUserEmail)
+                        .Select(s => new
+                        {
+                            subuserEmail = s.subuser_email,
+                            name = s.Name,
+                            licenseAllocation = s.license_allocation ?? 0,
+                            status = s.status
+                        })
+                        .ToListAsync();
+
+                    var totalAllocated = subusers.Sum(s => s.licenseAllocation);
+                    var activeSubusers = subusers.Count(s => s.status == "active");
+
+                    // Get user's total license pool (from main user if available)
+                    var userLicensePool = await context.subuser
+                        .Where(s => s.subuser_email == currentUserEmail)
+                        .Select(s => s.license_allocation ?? 0)
+                        .FirstOrDefaultAsync();
+
+                    if (userLicensePool == 0)
+                    {
+                        userLicensePool = totalAllocated + 100; // Placeholder
+                    }
+
+                    return new
+                    {
+                        success = true,
+                        userEmail = currentUserEmail,
+                        totalLicensePool = userLicensePool,
+                        totalAllocated = totalAllocated,
+                        availableLicenses = userLicensePool - totalAllocated,
+                        subuserCount = subusers.Count,
+                        activeSubusers = activeSubusers,
+                        subusers = subusers,
+                        cached = true
+                    };
+                }, TimeSpan.FromMinutes(3));
+
+                return Ok(cachedResult);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting license info");
+                return StatusCode(500, new { message = "Error getting license info", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Transfer/Revoke license allocation from one subuser to another
+        /// Admin can revoke licenses from inactive subuser and assign to another
+        /// </summary>
+        [HttpPost("transfer-license")]
+        public async Task<IActionResult> TransferLicense([FromBody] TransferLicenseRequest request)
+        {
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+                    return Unauthorized(new { message = "User not authenticated" });
+
+                var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+
+                // Validate request
+                if (string.IsNullOrEmpty(request.ToSubuserEmail))
+                    return BadRequest(new { message = "Target subuser email is required" });
+
+                if (request.LicenseCount <= 0)
+                    return BadRequest(new { message = "License count must be greater than 0" });
+
+                // Find source subuser (if revoking from someone)
+                subuser? fromSubuser = null;
+                if (!string.IsNullOrEmpty(request.FromSubuserEmail))
+                {
+                    fromSubuser = await context.subuser
+                        .Where(s => s.subuser_email == request.FromSubuserEmail 
+                                                && s.user_email == currentUserEmail).FirstOrDefaultAsync();
+                    
+                    if (fromSubuser == null)
+                        return NotFound(new { message = $"Source subuser '{request.FromSubuserEmail}' not found or not owned by you" });
+
+                    if ((fromSubuser.license_allocation ?? 0) < request.LicenseCount)
+                        return BadRequest(new { 
+                            message = "Insufficient licenses to transfer",
+                            available = fromSubuser.license_allocation ?? 0,
+                            requested = request.LicenseCount
+                        });
+                }
+
+                // Find target subuser
+                var toSubuser = await context.subuser
+                    .Where(s => s.subuser_email == request.ToSubuserEmail 
+                                            && s.user_email == currentUserEmail).FirstOrDefaultAsync();
+
+                if (toSubuser == null)
+                    return NotFound(new { message = $"Target subuser '{request.ToSubuserEmail}' not found or not owned by you" });
+
+                // Perform transfer
+                if (fromSubuser != null)
+                {
+                    // Revoke from source
+                    fromSubuser.license_allocation = (fromSubuser.license_allocation ?? 0) - request.LicenseCount;
+                    fromSubuser.UpdatedAt = DateTime.UtcNow;
+                }
+
+                // Add to target
+                toSubuser.license_allocation = (toSubuser.license_allocation ?? 0) + request.LicenseCount;
+                toSubuser.UpdatedAt = DateTime.UtcNow;
+
+                await context.SaveChangesAsync();
+
+                _logger.LogInformation("License transfer: {Count} licenses from {From} to {To}",
+                    request.LicenseCount, 
+                    request.FromSubuserEmail ?? "pool",
+                    request.ToSubuserEmail);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = $"Successfully transferred {request.LicenseCount} license(s)",
+                    fromSubuser = fromSubuser != null ? new
+                    {
+                        email = fromSubuser.subuser_email,
+                        newAllocation = fromSubuser.license_allocation
+                    } : null,
+                    toSubuser = new
+                    {
+                        email = toSubuser.subuser_email,
+                        newAllocation = toSubuser.license_allocation
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error transferring license");
+                return StatusCode(500, new { message = "Error transferring license", error = ex.Message });
+            }
+        }
+
         #region Private Helper Methods
 
         private async Task<bool> AssignRoleToSubuserAsync(string subuserEmail, string roleName, string assignedByEmail, ApplicationDbContext context)
         {
             try
             {
-                var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == subuserEmail);
+                var subuser = await context.subuser.Where(s => s.subuser_email == subuserEmail).FirstOrDefaultAsync();
                 if (subuser == null)
                 {
                     _logger.LogWarning("Subuser {Email} not found for role assignment", subuserEmail);
                     return false;
                 }
 
-                var role = await context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
+                var role = await context.Roles.Where(r => r.RoleName == roleName).FirstOrDefaultAsync();
                 if (role == null)
                 {
                     _logger.LogWarning("Role {RoleName} not found, creating default User role instead", roleName);
 
                     // Fallback to default role if specified role doesn't exist
-                    role = await context.Roles.FirstOrDefaultAsync(r => r.RoleName == "User");
+                    role = await context.Roles.Where(r => r.RoleName == "User").FirstOrDefaultAsync();
                     if (role == null)
                     {
                         _logger.LogError("No default role found in system");
@@ -1371,7 +1680,7 @@ namespace BitRaserApiProject.Controllers
 
                 // Check if role already assigned
                 var existingRole = await context.SubuserRoles
-               .FirstOrDefaultAsync(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == role.RoleId);
+               .Where(sr => sr.SubuserId == subuser.subuser_id && sr.RoleId == role.RoleId).FirstOrDefaultAsync();
 
                 if (existingRole == null)
                 {
@@ -1517,6 +1826,17 @@ namespace BitRaserApiProject.Controllers
 
         [EmailAddress(ErrorMessage = "Invalid new parent email format")]
         public string? new_parentUserEmail { get; set; }
+
+        /// <summary>
+        /// License allocation for this subuser (can be updated by admin)
+        /// </summary>
+        public int? license_allocation { get; set; }
+
+        /// <summary>
+        /// Status of the subuser (active, inactive, suspended)
+        /// </summary>
+        [MaxLength(20)]
+        public string? status { get; set; }
     }
 
     /// <summary>
@@ -1556,6 +1876,32 @@ namespace BitRaserApiProject.Controllers
     public class AssignRoleRequest
     {
         public string RoleName { get; set; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Transfer license request model
+    /// </summary>
+    public class TransferLicenseRequest
+    {
+        /// <summary>
+        /// Source subuser email (optional - if null, licenses from pool)
+        /// </summary>
+        [EmailAddress(ErrorMessage = "Invalid source email format")]
+        public string? FromSubuserEmail { get; set; }
+
+        /// <summary>
+        /// Target subuser email (required)
+        /// </summary>
+        [Required(ErrorMessage = "Target subuser email is required")]
+        [EmailAddress(ErrorMessage = "Invalid target email format")]
+        public string ToSubuserEmail { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Number of licenses to transfer
+        /// </summary>
+        [Required(ErrorMessage = "License count is required")]
+        [Range(1, 10000, ErrorMessage = "License count must be between 1 and 10000")]
+        public int LicenseCount { get; set; }
     }
 
     #endregion

@@ -20,12 +20,14 @@ namespace BitRaserApiProject.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
+        private readonly ICacheService _cacheService;
 
-        public EnhancedProfileController(ApplicationDbContext context, IRoleBasedAuthService authService, IUserDataService userDataService)
+        public EnhancedProfileController(ApplicationDbContext context, IRoleBasedAuthService authService, IUserDataService userDataService, ICacheService cacheService)
         {
             _context = context;
             _authService = authService;
             _userDataService = userDataService;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -114,7 +116,7 @@ namespace BitRaserApiProject.Controllers
             var currentUser = await _context.Users
                 .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
-                .FirstOrDefaultAsync(u => u.user_email == currentUserEmail);
+                .Where(u => u.user_email == currentUserEmail).FirstOrDefaultAsync();
 
             if (currentUser == null) return NotFound("User not found");
 
@@ -446,7 +448,7 @@ namespace BitRaserApiProject.Controllers
                 .ThenInclude(ur => ur.Role)
                 .ThenInclude(r => r.RolePermissions)
                 .ThenInclude(rp => rp.Permission)
-                .FirstOrDefaultAsync(u => u.user_email == userEmail);
+                .Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
             
             if (user == null) return NotFound("User profile not found");
 
@@ -501,7 +503,7 @@ namespace BitRaserApiProject.Controllers
                 .ThenInclude(sr => sr.Role)
                 .ThenInclude(r => r.RolePermissions)
                 .ThenInclude(rp => rp.Permission)
-                .FirstOrDefaultAsync(s => s.subuser_email == subuserEmail);
+                .Where(s => s.subuser_email == subuserEmail).FirstOrDefaultAsync();
             
             if (subuser == null) return NotFound("Subuser profile not found");
 
@@ -549,7 +551,7 @@ namespace BitRaserApiProject.Controllers
 
         private async Task<IActionResult> UpdateUserProfile(string userEmail, UpdateProfileRequest request)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+            var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
             if (user == null) return NotFound("User profile not found");
 
             // Update allowed fields
@@ -573,7 +575,7 @@ namespace BitRaserApiProject.Controllers
 
         private async Task<IActionResult> UpdateSubuserProfile(string subuserEmail, UpdateProfileRequest request)
         {
-            var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == subuserEmail);
+            var subuser = await _context.subuser.Where(s => s.subuser_email == subuserEmail).FirstOrDefaultAsync();
             if (subuser == null) return NotFound("Subuser profile not found");
 
             // For subusers, we can only update limited information
@@ -632,7 +634,7 @@ namespace BitRaserApiProject.Controllers
                 var subuser = await _context.subuser
                     .Include(s => s.SubuserRoles)
                     .ThenInclude(sr => sr.Role)
-                    .FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+                    .Where(s => s.subuser_email == userEmail).FirstOrDefaultAsync();
 
                 if (subuser == null) return null;
 
@@ -654,7 +656,7 @@ namespace BitRaserApiProject.Controllers
                 var user = await _context.Users
                     .Include(u => u.UserRoles)
                     .ThenInclude(ur => ur.Role)
-                    .FirstOrDefaultAsync(u => u.user_email == userEmail);
+                    .Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
 
                 if (user == null) return null;
 
@@ -716,7 +718,7 @@ namespace BitRaserApiProject.Controllers
             // Users can manage their own subusers
             if (isTargetSubuser)
             {
-                var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == targetUserEmail);
+                var subuser = await _context.subuser.Where(s => s.subuser_email == targetUserEmail).FirstOrDefaultAsync();
                 return subuser?.user_email == managerEmail;
             }
 

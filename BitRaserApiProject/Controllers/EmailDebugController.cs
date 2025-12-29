@@ -4,6 +4,7 @@ using BitRaserApiProject.Utilities;
 using System.Security.Claims;
 using BitRaserApiProject.Factories;
 using Microsoft.EntityFrameworkCore;
+using BitRaserApiProject.Services;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -17,13 +18,16 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly ILogger<EmailDebugController> _logger;
         private readonly DynamicDbContextFactory _contextFactory;
+        private readonly ICacheService _cacheService;
 
         public EmailDebugController(
             ILogger<EmailDebugController> logger,
-            DynamicDbContextFactory contextFactory)
+            DynamicDbContextFactory contextFactory,
+            ICacheService cacheService)
         {
             _logger = logger;
             _contextFactory = contextFactory;
+            _cacheService = cacheService;
         }
 
         /// <summary>

@@ -24,6 +24,7 @@ namespace BitRaserApiProject.Controllers
         private readonly IRoleBasedAuthService _authService;
         private readonly ILogger<DynamicSystemController> _logger;
         private readonly ApplicationDbContext _context;
+        private readonly ICacheService _cacheService;
 
         public DynamicSystemController(
             IDynamicPermissionService permissionService, 
@@ -31,7 +32,8 @@ namespace BitRaserApiProject.Controllers
             IUserDataService userDataService,
             IRoleBasedAuthService authService,
             ILogger<DynamicSystemController> logger,
-            ApplicationDbContext context)
+            ApplicationDbContext context,
+            ICacheService cacheService)
         {
             _permissionService = permissionService;
             _routeService = routeService;
@@ -39,6 +41,7 @@ namespace BitRaserApiProject.Controllers
             _authService = authService;
             _logger = logger;
             _context = context;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -771,7 +774,7 @@ namespace BitRaserApiProject.Controllers
                 var rolesCreated = 0;
 
                 // Ensure SubUser role exists
-                var subuserRole = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == "SubUser");
+                var subuserRole = await _context.Roles.Where(r => r.RoleName == "SubUser").FirstOrDefaultAsync();
                 if (subuserRole == null)
                 {
                     subuserRole = new Role

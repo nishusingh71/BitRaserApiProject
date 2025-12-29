@@ -11,7 +11,7 @@ namespace BitRaserApiProject.Controllers
     /// Enhanced Admin Dashboard Controller - Complete Dashboard Management
     /// Based on BitRaser Admin Dashboard Design
     /// </summary>
- [ApiController]
+     [ApiController]
     [Route("api/[controller]")]
     [Authorize]
     public class EnhancedDashboardController : ControllerBase
@@ -20,17 +20,20 @@ namespace BitRaserApiProject.Controllers
   private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
         private readonly ILogger<EnhancedDashboardController> _logger;
+        private readonly ICacheService _cacheService;
 
         public EnhancedDashboardController(
     ApplicationDbContext context,
     IRoleBasedAuthService authService,
          IUserDataService userDataService,
-            ILogger<EnhancedDashboardController> logger)
+            ILogger<EnhancedDashboardController> logger,
+            ICacheService cacheService)
     {
             _context = context;
        _authService = authService;
             _userDataService = userDataService;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -55,77 +58,84 @@ namespace BitRaserApiProject.Controllers
    return StatusCode(403, new { message = "Insufficient permissions to view dashboard" });
         }
 
-            // Calculate metrics
-    var totalLicenses = await _context.Machines.CountAsync();
- var activeLicenses = await _context.Machines.CountAsync(m => m.license_activated);
- var availableLicenses = totalLicenses - activeLicenses;
-              
-       // Calculate license percentage change (last 30 days)
-            var thirtyDaysAgo = DateTime.UtcNow.AddDays(-30);
- var previousTotal = await _context.Machines.CountAsync(m => m.created_at < thirtyDaysAgo);
-          var licenseChangePercent = previousTotal > 0 ? 
- ((totalLicenses - previousTotal) / (double)previousTotal * 100) : 0;
-
-     // Active Users
-   var totalUsers = await _context.Users.CountAsync();
-       var activeUsers = await _context.Users.CountAsync(u => u.updated_at >= thirtyDaysAgo);
-         var userChangePercent = previousTotal > 0 ?
-         ((activeUsers) / (double)totalUsers * 100) : 0;
-
-  // Available Licenses
-         var availableChangePercent = totalLicenses > 0 ?
-               ((availableLicenses) / (double)totalLicenses * 100) : 0;
-
-    // Success Rate (from logs)
-  var totalLogs = await _context.logs.CountAsync(l => l.created_at >= thirtyDaysAgo);
-        var successLogs = await _context.logs.CountAsync(l => 
- l.created_at >= thirtyDaysAgo && l.log_level == "Info");
-            var successRate = totalLogs > 0 ? (successLogs / (double)totalLogs * 100) : 99.2;
-
-                return Ok(new EnhancedDashboardOverviewDto
+                // ✅ CACHE: Dashboard stats with short TTL for near-real-time balance
+                var cacheKey = $"{CacheService.CacheKeys.DashboardStats}:{userEmail}";
+                var dashboardData = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
                 {
-WelcomeMessage = $"Welcome back, {userEmail}",
-       Metrics = new DashboardMetricsDto
-          {
-    TotalLicenses = new MetricDto
-      {
-           Value = totalLicenses,
-     Label = "Total Licenses",
-       ChangePercent = Math.Round(licenseChangePercent, 1),
- ChangeDirection = licenseChangePercent >= 0 ? "up" : "down",
-  Icon = "license"
-          },
-     ActiveUsers = new MetricDto
-  {
-         Value = activeUsers,
-            Label = "Active Users",
-      ChangePercent = Math.Round(userChangePercent, 1),
-   ChangeDirection = userChangePercent >= 0 ? "up" : "down",
-   Icon = "users"
-              },
-            AvailableLicenses = new MetricDto
-     {
-            Value = availableLicenses,
-     Label = "Available Licenses",
-     ChangePercent = Math.Round(availableChangePercent, 1),
-          ChangeDirection = "down", // Less available is typically negative
-    Icon = "license-available"
-        },
-      SuccessRate = new MetricDto
-            {
-        Value = (int)Math.Round(successRate, 0),
-             Label = "Success Rate",
-          ChangePercent = 0.3,
-     ChangeDirection = "up",
-  Icon = "success",
-       Unit = "%"
-      }
-  },
-        TotalUsers = totalUsers,
-      ActiveUsers = activeUsers,
-         TotalMachines = totalLicenses,
-     ActiveMachines = activeLicenses
-      });
+                    // Calculate metrics
+                    var totalLicenses = await _context.Machines.CountAsync();
+                    var activeLicenses = await _context.Machines.CountAsync(m => m.license_activated);
+                    var availableLicenses = totalLicenses - activeLicenses;
+                    
+                    // Calculate license percentage change (last 30 days)
+                    var thirtyDaysAgo = DateTime.UtcNow.AddDays(-30);
+                    var previousTotal = await _context.Machines.CountAsync(m => m.created_at < thirtyDaysAgo);
+                    var licenseChangePercent = previousTotal > 0 ? 
+                        ((totalLicenses - previousTotal) / (double)previousTotal * 100) : 0;
+
+                    // Active Users
+                    var totalUsers = await _context.Users.CountAsync();
+                    var activeUsers = await _context.Users.CountAsync(u => u.updated_at >= thirtyDaysAgo);
+                    var userChangePercent = previousTotal > 0 ?
+                        ((activeUsers) / (double)totalUsers * 100) : 0;
+
+                    // Available Licenses
+                    var availableChangePercent = totalLicenses > 0 ?
+                        ((availableLicenses) / (double)totalLicenses * 100) : 0;
+
+                    // Success Rate (from logs)
+                    var totalLogs = await _context.logs.CountAsync(l => l.created_at >= thirtyDaysAgo);
+                    var successLogs = await _context.logs.CountAsync(l => 
+                        l.created_at >= thirtyDaysAgo && l.log_level == "Info");
+                    var successRate = totalLogs > 0 ? (successLogs / (double)totalLogs * 100) : 99.2;
+
+                    return new EnhancedDashboardOverviewDto
+                    {
+                        WelcomeMessage = $"Welcome back, {userEmail}",
+                        Metrics = new DashboardMetricsDto
+                        {
+                            TotalLicenses = new MetricDto
+                            {
+                                Value = totalLicenses,
+                                Label = "Total Licenses",
+                                ChangePercent = Math.Round(licenseChangePercent, 1),
+                                ChangeDirection = licenseChangePercent >= 0 ? "up" : "down",
+                                Icon = "license"
+                            },
+                            ActiveUsers = new MetricDto
+                            {
+                                Value = activeUsers,
+                                Label = "Active Users",
+                                ChangePercent = Math.Round(userChangePercent, 1),
+                                ChangeDirection = userChangePercent >= 0 ? "up" : "down",
+                                Icon = "users"
+                            },
+                            AvailableLicenses = new MetricDto
+                            {
+                                Value = availableLicenses,
+                                Label = "Available Licenses",
+                                ChangePercent = Math.Round(availableChangePercent, 1),
+                                ChangeDirection = "down",
+                                Icon = "license-available"
+                            },
+                            SuccessRate = new MetricDto
+                            {
+                                Value = (int)Math.Round(successRate, 0),
+                                Label = "Success Rate",
+                                ChangePercent = 0.3,
+                                ChangeDirection = "up",
+                                Icon = "success",
+                                Unit = "%"
+                            }
+                        },
+                        TotalUsers = totalUsers,
+                        ActiveUsers = activeUsers,
+                        TotalMachines = totalLicenses,
+                        ActiveMachines = activeLicenses
+                    };
+                }, CacheService.CacheTTL.VeryShort); // 1 minute for dashboard data
+
+                return Ok(dashboardData);
             }
           catch (Exception ex)
           {

@@ -22,19 +22,22 @@ namespace BitRaserApiProject.Controllers
         private readonly IUserDataService _userDataService;
         private readonly PdfService _pdfService;
       private readonly ILogger<ReportGenerationController> _logger;
+      private readonly ICacheService _cacheService;
 
         public ReportGenerationController(
         ApplicationDbContext context,
        IRoleBasedAuthService authService,
             IUserDataService userDataService,
        PdfService pdfService,
-     ILogger<ReportGenerationController> logger)
+     ILogger<ReportGenerationController> logger,
+     ICacheService cacheService)
         {
        _context = context;
             _authService = authService;
           _userDataService = userDataService;
             _pdfService = pdfService;
     _logger = logger;
+    _cacheService = cacheService;
         }
 
    /// <summary>
@@ -172,7 +175,7 @@ string fileName = $"{request.ReportTitle.Replace(" ", "_")}_{DateTime.UtcNow:yyy
            }
 
          var report = await _context.Set<GeneratedReport>()
-    .FirstOrDefaultAsync(r => r.ReportId == reportId);
+    .Where(r => r.ReportId == reportId).FirstOrDefaultAsync();
 
    if (report == null)
         {
@@ -379,7 +382,7 @@ bool canViewAll = await _authService.HasPermissionAsync(userEmail, "READ_ALL_REP
        }
 
            var report = await _context.Set<GeneratedReport>()
-   .FirstOrDefaultAsync(r => r.ReportId == reportId);
+   .Where(r => r.ReportId == reportId).FirstOrDefaultAsync();
 
     if (report == null)
               {

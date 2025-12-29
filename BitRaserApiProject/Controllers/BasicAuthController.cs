@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using BCrypt.Net;
+using BitRaserApiProject.Services;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -14,11 +15,13 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly IConfiguration _configuration;
+        private readonly ICacheService _cacheService;
 
-        public BasicAuthController(ApplicationDbContext context, IConfiguration configuration)
+        public BasicAuthController(ApplicationDbContext context, IConfiguration configuration, ICacheService cacheService)
         {
             _context = context;
             _configuration = configuration;
+            _cacheService = cacheService;
         }
 
         public class BasicLoginRequest
@@ -41,7 +44,7 @@ namespace BitRaserApiProject.Controllers
 
         private async Task<bool> IsValidUserAsync(string email, string password)
         {
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await _context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null)
                 return false;
 

@@ -5,6 +5,8 @@ using BitRaserApiProject.Models;
 using System.Security.Claims;
 using System.ComponentModel.DataAnnotations;
 
+using BitRaserApiProject.Services;
+
 namespace BitRaserApiProject.Controllers
 {
     /// <summary>
@@ -19,11 +21,13 @@ namespace BitRaserApiProject.Controllers
   {
         private readonly ApplicationDbContext _context;
         private readonly ILogger<GroupController> _logger;
+        private readonly ICacheService _cacheService;
 
-      public GroupController(ApplicationDbContext context, ILogger<GroupController> logger)
+      public GroupController(ApplicationDbContext context, ILogger<GroupController> logger, ICacheService cacheService)
         {
           _context = context;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -43,41 +47,49 @@ namespace BitRaserApiProject.Controllers
          if (string.IsNullOrEmpty(userEmail))
           return Unauthorized(new { message = "User not authenticated" });
 
-    var query = _context.Groups.AsQueryable();
+                // ✅ CACHE: Use cache for group listings
+                var cacheKey = $"{CacheService.CacheKeys.GroupList}:{search ?? "all"}:{status ?? "all"}:{page}:{pageSize}";
+                
+                var result = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
+                {
+                    var query = _context.Groups.AsQueryable();
 
-      // Apply filters
-     if (!string.IsNullOrEmpty(search))
-          query = query.Where(g =>
-      g.name.Contains(search) ||
-(g.description != null && g.description.Contains(search)));
+                    // Apply filters
+                    if (!string.IsNullOrEmpty(search))
+                        query = query.Where(g =>
+                            g.name.Contains(search) ||
+                            (g.description != null && g.description.Contains(search)));
 
-       if (!string.IsNullOrEmpty(status))
-         query = query.Where(g => g.status == status);
+                    if (!string.IsNullOrEmpty(status))
+                        query = query.Where(g => g.status == status);
 
-      var total = await query.CountAsync();
+                    var total = await query.CountAsync();
 
-   var groups = await query
-      .OrderByDescending(g => g.created_at)
-     .Skip((page - 1) * pageSize)
-    .Take(pageSize)
-        .Select(g => new GroupResponseDto
-  {
-         GroupId = g.group_id,
-    GroupName = g.name,
-            GroupDescription = g.description,
-         GroupLicenseAllocation = g.license_allocation,
-           GroupPermission = g.permissions_json,
-     Status = g.status,
-         CreatedAt = g.created_at,
-         UpdatedAt = g.updated_at
-    })
-.ToListAsync();
+                    var groups = await query
+                        .OrderByDescending(g => g.created_at)
+                        .Skip((page - 1) * pageSize)
+                        .Take(pageSize)
+                        .Select(g => new GroupResponseDto
+                        {
+                            GroupId = g.group_id,
+                            GroupName = g.name,
+                            GroupDescription = g.description,
+                            GroupLicenseAllocation = g.license_allocation,
+                            GroupPermission = g.permissions_json,
+                            Status = g.status,
+                            CreatedAt = g.created_at,
+                            UpdatedAt = g.updated_at
+                        })
+                        .ToListAsync();
 
-      Response.Headers.Append("X-Total-Count", total.ToString());
+                    return new { Total = total, Groups = groups };
+                }, CacheService.CacheTTL.Short);
+
+     Response.Headers.Append("X-Total-Count", result.Total.ToString());
      Response.Headers.Append("X-Page", page.ToString());
   Response.Headers.Append("X-Page-Size", pageSize.ToString());
 
-                return Ok(groups);
+                return Ok(result.Groups);
   }
             catch (Exception ex)
 {
@@ -99,21 +111,30 @@ _logger.LogError(ex, "Error fetching groups");
      if (string.IsNullOrEmpty(userEmail))
         return Unauthorized(new { message = "User not authenticated" });
 
-      var group = await _context.Groups.FindAsync(id);
-        if (group == null)
+                // ✅ CACHE: Cache individual group lookups
+                var cacheKey = $"{CacheService.CacheKeys.Group}:{id}";
+                var groupDto = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
+                {
+                    var group = await _context.Groups.FindAsync(id);
+                    if (group == null) return null;
+
+                    return new GroupResponseDto
+                    {
+                        GroupId = group.group_id,
+                        GroupName = group.name,
+                        GroupDescription = group.description,
+                        GroupLicenseAllocation = group.license_allocation,
+                        GroupPermission = group.permissions_json,
+                        Status = group.status,
+                        CreatedAt = group.created_at,
+                        UpdatedAt = group.updated_at
+                    };
+                }, CacheService.CacheTTL.Medium);
+
+      if (groupDto == null)
          return NotFound(new { message = "Group not found" });
 
-      return Ok(new GroupResponseDto
-                {
-GroupId = group.group_id,
-      GroupName = group.name,
-    GroupDescription = group.description,
-    GroupLicenseAllocation = group.license_allocation,
-     GroupPermission = group.permissions_json,
-  Status = group.status,
- CreatedAt = group.created_at,
-  UpdatedAt = group.updated_at
-    });
+      return Ok(groupDto);
          }
             catch (Exception ex)
  {
@@ -156,6 +177,9 @@ GroupId = group.group_id,
 
      _context.Groups.Add(group);
      await _context.SaveChangesAsync();
+
+     // ✅ CACHE INVALIDATION: Clear group caches
+     _cacheService.RemoveByPrefix(CacheService.CacheKeys.GroupList);
 
       _logger.LogInformation("Group {GroupName} created by {Email}", dto.GroupName, userEmail);
 
@@ -215,6 +239,10 @@ GroupId = group.group_id,
 
       await _context.SaveChangesAsync();
 
+      // ✅ CACHE INVALIDATION: Clear group caches
+      _cacheService.Remove($"{CacheService.CacheKeys.Group}:{id}");
+      _cacheService.RemoveByPrefix(CacheService.CacheKeys.GroupList);
+
       _logger.LogInformation("Group {GroupId} updated by {Email}", id, userEmail);
 
                 return Ok(new
@@ -268,6 +296,10 @@ GroupId = group.group_id,
 
         await _context.SaveChangesAsync();
 
+        // ✅ CACHE INVALIDATION: Clear group caches
+        _cacheService.Remove($"{CacheService.CacheKeys.Group}:{id}");
+        _cacheService.RemoveByPrefix(CacheService.CacheKeys.GroupList);
+
         _logger.LogInformation("Group {GroupId} partially updated by {Email}", id, userEmail);
 
   return Ok(new
@@ -317,6 +349,10 @@ if (group == null)
 
      _context.Groups.Remove(group);
         await _context.SaveChangesAsync();
+
+        // ✅ CACHE INVALIDATION: Clear group caches
+        _cacheService.Remove($"{CacheService.CacheKeys.Group}:{id}");
+        _cacheService.RemoveByPrefix(CacheService.CacheKeys.GroupList);
 
         _logger.LogInformation("Group {GroupId} deleted by {Email}", id, userEmail);
 
@@ -439,7 +475,7 @@ Name = s.Name ?? s.subuser_email,
    if (group == null)
   return NotFound(new { message = "Group not found" });
 
-      var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == dto.Email);
+      var subuser = await _context.subuser.Where(s => s.subuser_email == dto.Email).FirstOrDefaultAsync();
            if (subuser == null)
  return NotFound(new { message = "Subuser not found with this email" });
 
@@ -533,7 +569,7 @@ return NotFound(new { message = "Group not found" });
 
         var subuser = await _context.subuser
         .Include(s => s.GroupId)
-          .FirstOrDefaultAsync(s => s.subuser_email == email);
+          .Where(s => s.subuser_email == email).FirstOrDefaultAsync();
 
         if (subuser == null)
    return NotFound(new { message = "Subuser not found" });
@@ -578,37 +614,44 @@ GroupLicenseAllocation = group.license_allocation,
             if (string.IsNullOrEmpty(userEmail))
     return Unauthorized(new { message = "User not authenticated" });
 
-      var totalGroups = await _context.Groups.CountAsync();
-         var activeGroups = await _context.Groups.CountAsync(g => g.status == "active");
-           var inactiveGroups = await _context.Groups.CountAsync(g => g.status == "inactive");
-      var totalLicenseAllocation = await _context.Groups.SumAsync(g => (int?)g.license_allocation) ?? 0;
-   var totalMembers = await _context.subuser.CountAsync(s => s.GroupId != null);
-
-                var groupsWithMemberCount = await _context.Groups
-          .Select(g => new
-  {
-       Group = g,
-     MemberCount = _context.subuser.Count(s => s.GroupId == g.group_id)
-        })
-          .OrderByDescending(x => x.MemberCount)
-       .Take(5)
-             .ToListAsync();
-
-         return Ok(new GroupStatisticsResponseDto
+                // ✅ CACHE: Group statistics with short TTL
+                var cacheKey = $"{CacheService.CacheKeys.GroupList}:stats";
+                var statsDto = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
                 {
-     TotalGroups = totalGroups,
-        ActiveGroups = activeGroups,
-      InactiveGroups = inactiveGroups,
-             TotalLicenseAllocation = totalLicenseAllocation,
-     TotalMembers = totalMembers,
-               TopGroups = groupsWithMemberCount.Select(x => new TopGroupDto
-   {
-     GroupId = x.Group.group_id,
-          GroupName = x.Group.name,
-   MemberCount = x.MemberCount,
-   LicenseAllocation = x.Group.license_allocation
-           }).ToList()
-     });
+                    var totalGroups = await _context.Groups.CountAsync();
+                    var activeGroups = await _context.Groups.CountAsync(g => g.status == "active");
+                    var inactiveGroups = await _context.Groups.CountAsync(g => g.status == "inactive");
+                    var totalLicenseAllocation = await _context.Groups.SumAsync(g => (int?)g.license_allocation) ?? 0;
+                    var totalMembers = await _context.subuser.CountAsync(s => s.GroupId != null);
+
+                    var groupsWithMemberCount = await _context.Groups
+                        .Select(g => new
+                        {
+                            Group = g,
+                            MemberCount = _context.subuser.Count(s => s.GroupId == g.group_id)
+                        })
+                        .OrderByDescending(x => x.MemberCount)
+                        .Take(5)
+                        .ToListAsync();
+
+                    return new GroupStatisticsResponseDto
+                    {
+                        TotalGroups = totalGroups,
+                        ActiveGroups = activeGroups,
+                        InactiveGroups = inactiveGroups,
+                        TotalLicenseAllocation = totalLicenseAllocation,
+                        TotalMembers = totalMembers,
+                        TopGroups = groupsWithMemberCount.Select(x => new TopGroupDto
+                        {
+                            GroupId = x.Group.group_id,
+                            GroupName = x.Group.name,
+                            MemberCount = x.MemberCount,
+                            LicenseAllocation = x.Group.license_allocation
+                        }).ToList()
+                    };
+                }, CacheService.CacheTTL.Short);
+
+     return Ok(statsDto);
         }
             catch (Exception ex)
     {

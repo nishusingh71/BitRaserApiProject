@@ -450,7 +450,7 @@ UpdatedAt = DateTime.UtcNow
         private async Task<string> GetSettingValue(string category, string key, string defaultValue)
      {
       var setting = await _context.Set<SystemSetting>()
- .FirstOrDefaultAsync(s => s.Category == category && s.SettingKey == key);
+ .Where(s => s.Category == category && s.SettingKey == key).FirstOrDefaultAsync();
 
   return setting?.SettingValue ?? defaultValue;
         }
@@ -458,7 +458,7 @@ UpdatedAt = DateTime.UtcNow
         private async Task UpdateSetting(string category, string key, string value, string updatedBy)
      {
 var setting = await _context.Set<SystemSetting>()
-       .FirstOrDefaultAsync(s => s.Category == category && s.SettingKey == key);
+       .Where(s => s.Category == category && s.SettingKey == key).FirstOrDefaultAsync();
 
    if (setting == null)
        {

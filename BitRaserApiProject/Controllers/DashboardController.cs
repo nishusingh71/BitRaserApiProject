@@ -8,6 +8,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using BCrypt.Net;
+using BitRaserApiProject.Services;
 
 namespace BitRaserApiProject.Controllers    
 {
@@ -22,17 +23,20 @@ namespace BitRaserApiProject.Controllers
         private readonly IConfiguration _configuration;
         private readonly IRoleBasedAuthService _authService;
         private readonly ILogger<DashboardAuthController> _logger;
+        private readonly ICacheService _cacheService;
 
         public DashboardAuthController(
             ApplicationDbContext context,
             IConfiguration configuration,
             IRoleBasedAuthService authService,
-            ILogger<DashboardAuthController> logger)
+            ILogger<DashboardAuthController> logger,
+            ICacheService cacheService)
         {
             _context = context;
             _configuration = configuration;
             _authService = authService;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         // POST: api/DashboardAuth/login
@@ -48,7 +52,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 // Try main user authentication
-                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.Email);
+                var user = await _context.Users.Where(u => u.user_email == request.Email).FirstOrDefaultAsync();
                 
                 if (user != null && !string.IsNullOrEmpty(user.hash_password) && 
                     BCrypt.Net.BCrypt.Verify(request.Password, user.hash_password))
@@ -80,7 +84,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 // Try subuser authentication
-                var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+                var subuser = await _context.subuser.Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync();
                 
                 if (subuser != null && !string.IsNullOrEmpty(subuser.subuser_password) && 
                     BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
@@ -191,15 +195,18 @@ namespace BitRaserApiProject.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
         private readonly ILogger<AdminDashboardController> _logger;
+        private readonly ICacheService _cacheService;
 
         public AdminDashboardController(
             ApplicationDbContext context,
             IRoleBasedAuthService authService,
-            ILogger<AdminDashboardController> logger)
+            ILogger<AdminDashboardController> logger,
+            ICacheService cacheService)
         {
             _context = context;
             _authService = authService;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         // GET: api/AdminDashboard/overview
@@ -307,15 +314,18 @@ namespace BitRaserApiProject.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
         private readonly ILogger<DashboardUsersController> _logger;
+        private readonly ICacheService _cacheService;
 
         public DashboardUsersController(
             ApplicationDbContext context,
             IRoleBasedAuthService authService,
-            ILogger<DashboardUsersController> logger)
+            ILogger<DashboardUsersController> logger,
+            ICacheService cacheService)
         {
             _context = context;
             _authService = authService;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         // GET: api/DashboardUsers
@@ -590,15 +600,18 @@ namespace BitRaserApiProject.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
         private readonly ILogger<DashboardLicensesController> _logger;
+        private readonly ICacheService _cacheService;
 
         public DashboardLicensesController(
             ApplicationDbContext context,
             IRoleBasedAuthService authService,
-            ILogger<DashboardLicensesController> logger)
+            ILogger<DashboardLicensesController> logger,
+            ICacheService cacheService)
         {
             _context = context;
             _authService = authService;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         // GET: api/DashboardLicenses
@@ -704,7 +717,7 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { message = "User not authenticated" });
                 }
 
-                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+                var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
                 if (user != null)
                 {
                     return Ok(new DashboardUserDto
@@ -719,7 +732,7 @@ namespace BitRaserApiProject.Controllers
                     });
                 }
 
-                var subuser = await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == userEmail);
+                var subuser = await _context.subuser.Where(s => s.subuser_email == userEmail).FirstOrDefaultAsync();
                 if (subuser != null)
                 {
                     return Ok(new DashboardUserDto
@@ -755,7 +768,7 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { message = "User not authenticated" });
                 }
 
-                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
+                var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
                 if (user != null)
                 {
                     user.user_name = request.Name;

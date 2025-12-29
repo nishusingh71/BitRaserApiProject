@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using BitRaserApiProject.Models;
 using BitRaserApiProject.Helpers;  // ✅ ADD: For DateTimeHelper
+using BitRaserApiProject.Services;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -22,15 +23,18 @@ namespace BitRaserApiProject.Controllers
         private readonly ApplicationDbContext _context;
         private readonly ILogger<LoginActivityController> _logger;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly ICacheService _cacheService;
 
         public LoginActivityController(
             ApplicationDbContext context,
             ILogger<LoginActivityController> logger,
-            IHttpClientFactory httpClientFactory)
+            IHttpClientFactory httpClientFactory,
+            ICacheService cacheService)
         {
      _context = context;
             _logger = logger;
    _httpClientFactory = httpClientFactory;
+   _cacheService = cacheService;
   }
 
   #region Helper Methods
@@ -84,7 +88,7 @@ namespace BitRaserApiProject.Controllers
             try
 {
             var user = await _context.Users
-     .FirstOrDefaultAsync(u => u.user_email == request.Email);
+     .Where(u => u.user_email == request.Email).FirstOrDefaultAsync();
 
         if (user == null)
      {
@@ -137,7 +141,7 @@ namespace BitRaserApiProject.Controllers
             try
             {
   var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.user_email == request.Email);
+            .Where(u => u.user_email == request.Email).FirstOrDefaultAsync();
 
                 if (user == null)
    {
@@ -188,7 +192,7 @@ data = new
         try
           {
          var user = await _context.Users
-       .FirstOrDefaultAsync(u => u.user_email == email);
+       .Where(u => u.user_email == email).FirstOrDefaultAsync();
 
  if (user == null)
      {
@@ -235,7 +239,7 @@ data = new
             try
    {
           var subuser = await _context.subuser
-             .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+             .Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync();
 
          if (subuser == null)
         {
@@ -291,7 +295,7 @@ data = new
     try
       {
          var subuser = await _context.subuser
-         .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+         .Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync();
 
   if (subuser == null)
    {
@@ -344,7 +348,7 @@ data = new
     try
             {
           var subuser = await _context.subuser
-      .FirstOrDefaultAsync(s => s.subuser_email == email);
+      .Where(s => s.subuser_email == email).FirstOrDefaultAsync();
 
  if (subuser == null)
     {

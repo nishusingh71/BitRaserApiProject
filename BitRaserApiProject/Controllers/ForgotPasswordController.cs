@@ -24,19 +24,22 @@ namespace BitRaserApiProject.Controllers
   private readonly IEmailService _emailService;
    private readonly ILogger<ForgotPasswordController> _logger;
         private readonly IConfiguration _configuration;
+        private readonly ICacheService _cacheService;
 
         public ForgotPasswordController(
             ApplicationDbContext context,
      IOtpService otpService,
     IEmailService emailService,
       ILogger<ForgotPasswordController> logger,
-  IConfiguration configuration)
+  IConfiguration configuration,
+  ICacheService cacheService)
         {
    _context = context;
   _otpService = otpService;
   _emailService = emailService;
       _logger = logger;
             _configuration = configuration;
+   _cacheService = cacheService;
    }
 
         /// <summary>
@@ -59,10 +62,10 @@ namespace BitRaserApiProject.Controllers
 
         // Check if email exists in Users or Subusers table
         var user = await _context.Users
-          .FirstOrDefaultAsync(u => u.user_email == request.Email);
+          .Where(u => u.user_email == request.Email).FirstOrDefaultAsync();
 
     var subuser = await _context.subuser
-      .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+      .Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync();
 
 if (user == null && subuser == null)
          {
@@ -149,10 +152,10 @@ message = "OTP has been sent to your email. Please check your inbox.",
 
       // Check if email exists
   var user = await _context.Users
-    .FirstOrDefaultAsync(u => u.user_email == request.Email);
+    .Where(u => u.user_email == request.Email).FirstOrDefaultAsync();
 
   var subuser = await _context.subuser
-          .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+          .Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync();
 
     if (user == null && subuser == null)
     {
@@ -262,10 +265,10 @@ message = "OTP has been sent to your email. Please check your inbox.",
 
                 // Find user in Users or Subusers table
          var user = await _context.Users
-          .FirstOrDefaultAsync(u => u.user_email == request.Email);
+          .Where(u => u.user_email == request.Email).FirstOrDefaultAsync();
 
         var subuser = await _context.subuser
-                .FirstOrDefaultAsync(s => s.subuser_email == request.Email);
+                .Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync();
 
                 if (user == null && subuser == null)
 {

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text.Json;
 using BitRaserApiProject.Models;
+using BitRaserApiProject.Services;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -17,11 +18,13 @@ namespace BitRaserApiProject.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly ILogger<LogoutController> _logger;
+        private readonly ICacheService _cacheService;
 
-        public LogoutController(ApplicationDbContext context, ILogger<LogoutController> logger)
+        public LogoutController(ApplicationDbContext context, ILogger<LogoutController> logger, ICacheService cacheService)
         {
             _context = context;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         public class LogoutRequest
@@ -83,9 +86,9 @@ namespace BitRaserApiProject.Controllers
                 {
                     // End specific session
                     var specificSession = await _context.Sessions
-                        .FirstOrDefaultAsync(s => s.session_id == request.SessionId && 
+                        .Where(s => s.session_id == request.SessionId && 
                                                  s.user_email == userEmail && 
-                                                 s.session_status == "active");
+                                                 s.session_status == "active").FirstOrDefaultAsync();
 
                     if (specificSession != null)
                     {
@@ -101,9 +104,9 @@ namespace BitRaserApiProject.Controllers
                 {
                     // End current session from JWT token
                     var currentSession = await _context.Sessions
-                        .FirstOrDefaultAsync(s => s.session_id == currentSessionId && 
+                        .Where(s => s.session_id == currentSessionId && 
                                                  s.user_email == userEmail && 
-                                                 s.session_status == "active");
+                                                 s.session_status == "active").FirstOrDefaultAsync();
 
                     if (currentSession != null)
                     {

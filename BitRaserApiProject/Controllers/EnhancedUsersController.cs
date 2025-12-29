@@ -20,15 +20,18 @@ namespace BitRaserApiProject.Controllers
         private readonly ApplicationDbContext _context;
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
+        private readonly ICacheService _cacheService;
 
         public EnhancedUsersController(
             ApplicationDbContext context,
             IRoleBasedAuthService authService,
-            IUserDataService userDataService)
+            IUserDataService userDataService,
+            ICacheService cacheService)
         {
             _context = context;
             _authService = authService;
             _userDataService = userDataService;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -165,7 +168,7 @@ namespace BitRaserApiProject.Controllers
                 .ThenInclude(ur => ur.Role)
                 .ThenInclude(r => r.RolePermissions)
                 .ThenInclude(rp => rp.Permission)
-                .FirstOrDefaultAsync(u => u.user_email == email);
+                .Where(u => u.user_email == email).FirstOrDefaultAsync();
 
             if (user == null) return NotFound($"User with email {email} not found");
 
@@ -227,7 +230,7 @@ namespace BitRaserApiProject.Controllers
                 return BadRequest("User email, name, and password are required");
 
             // Check if user already exists
-            var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.UserEmail);
+            var existingUser = await _context.Users.Where(u => u.user_email == request.UserEmail).FirstOrDefaultAsync();
             if (existingUser != null)
                 return Conflict($"User with email {request.UserEmail} already exists");
 
@@ -269,6 +272,10 @@ namespace BitRaserApiProject.Controllers
 
             _context.Users.Add(newUser);
             await _context.SaveChangesAsync();
+
+            // ✅ CACHE INVALIDATION: Clear user list cache on create
+            _cacheService.RemoveByPrefix(CacheService.CacheKeys.UserList);
+            _cacheService.RemoveByPrefix(CacheService.CacheKeys.User);
 
             // ✅ Assign role (already validated above)
             var roleAssigned = await AssignRoleToUserAsync(request.UserEmail, roleToAssign, currentUserEmail!);
@@ -313,7 +320,7 @@ namespace BitRaserApiProject.Controllers
                 return BadRequest("Password must be at least 8 characters with uppercase, lowercase, number, and special character");
 
             // Check if user already exists
-            var existingUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.UserEmail);
+            var existingUser = await _context.Users.Where(u => u.user_email == request.UserEmail).FirstOrDefaultAsync();
             if (existingUser != null)
                 return Conflict($"User with email {request.UserEmail} already exists");
 
@@ -341,6 +348,9 @@ namespace BitRaserApiProject.Controllers
 
             _context.Users.Add(newUser);
             await _context.SaveChangesAsync();
+
+            // ✅ CACHE INVALIDATION: Clear user list cache on register
+            _cacheService.RemoveByPrefix(CacheService.CacheKeys.UserList);
 
             // ✅ Auto-assign User role for public registration to rolebasedAuth system
             var roleAssigned = await AssignRoleToUserAsync(request.UserEmail, "User", "system");
@@ -407,7 +417,7 @@ namespace BitRaserApiProject.Controllers
                 return BadRequest("Email mismatch in request");
 
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await _context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
 
             if (user == null) return NotFound($"User with email {email} not found");
 
@@ -452,6 +462,10 @@ namespace BitRaserApiProject.Controllers
             _context.Entry(user).State = EntityState.Modified;
             await _context.SaveChangesAsync();
 
+            // ✅ CACHE INVALIDATION: Clear user cache on update
+            _cacheService.Remove($"{CacheService.CacheKeys.User}:{email}");
+            _cacheService.RemoveByPrefix(CacheService.CacheKeys.UserList);
+
             return Ok(new
             {
                 message = "User updated successfully",
@@ -473,7 +487,7 @@ namespace BitRaserApiProject.Controllers
                 return Unauthorized(new { message = "User not authenticated" });
             }
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await _context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null)
                 return NotFound(new { message = $"User with email {email} not found" });
 
@@ -610,7 +624,7 @@ namespace BitRaserApiProject.Controllers
                 return Unauthorized(new { message = "User not authenticated" });
             }
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await _context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null)
                 return NotFound(new { message = $"User with email {email} not found" });
 
@@ -671,7 +685,7 @@ namespace BitRaserApiProject.Controllers
                 return Unauthorized(new { message = "User not authenticated" });
             }
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await _context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null)
                 return NotFound(new { message = $"User with email {email} not found" });
 
@@ -732,7 +746,7 @@ namespace BitRaserApiProject.Controllers
             if (!await _authService.HasPermissionAsync(currentUserEmail!, "ASSIGN_ROLES"))
                 return StatusCode(403, new { error = "Insufficient permissions to assign roles" });
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await _context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null) return NotFound($"User with email {email} not found");
 
             await AssignRoleToUserAsync(email, request.RoleName, currentUserEmail!);
@@ -757,14 +771,14 @@ namespace BitRaserApiProject.Controllers
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await _context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null) return NotFound($"User with email {email} not found");
 
-            var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
+            var role = await _context.Roles.Where(r => r.RoleName == roleName).FirstOrDefaultAsync();
             if (role == null) return NotFound($"Role {roleName} not found");
 
             var userRole = await _context.UserRoles
-                .FirstOrDefaultAsync(ur => ur.UserId == user.user_id && ur.RoleId == role.RoleId);
+                .Where(ur => ur.UserId == user.user_id && ur.RoleId == role.RoleId).FirstOrDefaultAsync();
 
             if (userRole == null)
                 return NotFound($"Role {roleName} not assigned to user {email}");
@@ -791,7 +805,7 @@ namespace BitRaserApiProject.Controllers
         public async Task<IActionResult> DeleteUser(string email)
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await _context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
 
             if (user == null) return NotFound($"User with email {email} not found");
 
@@ -806,11 +820,16 @@ namespace BitRaserApiProject.Controllers
             _context.Users.Remove(user);
             await _context.SaveChangesAsync();
 
+            // ✅ CACHE INVALIDATION: Clear user cache on delete
+            _cacheService.Remove($"{CacheService.CacheKeys.User}:{email}");
+            _cacheService.RemoveByPrefix(CacheService.CacheKeys.UserList);
+            _cacheService.RemoveByPrefix($"{CacheService.CacheKeys.Subuser}:{email}");
+
             return Ok(new
             {
-                message = "User deleted successfully",
-                userEmail = email,
-                deletedAt = DateTime.UtcNow
+                message = $"User {email} deleted successfully",
+                deletedAt = DateTime.UtcNow,
+                deletedBy = currentUserEmail
             });
         }
 
@@ -830,7 +849,7 @@ namespace BitRaserApiProject.Controllers
                 return StatusCode(403, new { error = "You can only view statistics for your own account or accounts you manage" });
             }
 
-            var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await _context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null) return NotFound($"User with email {email} not found");
 
             var stats = new
@@ -890,14 +909,13 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == userEmail);
-                var role = await _context.Roles.FirstOrDefaultAsync(r => r.RoleName == roleName);
+                var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
+                var role = await _context.Roles.Where(r => r.RoleName == roleName).FirstOrDefaultAsync();
 
                 if (user != null && role != null)
                 {
-                    // Check if role already assigned
                     var existingRole = await _context.UserRoles
-                .FirstOrDefaultAsync(ur => ur.UserId == user.user_id && ur.RoleId == role.RoleId);
+                .Where(ur => ur.UserId == user.user_id && ur.RoleId == role.RoleId).FirstOrDefaultAsync();
 
                     if (existingRole == null)
                     {

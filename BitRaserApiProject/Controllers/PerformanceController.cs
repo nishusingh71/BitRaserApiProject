@@ -162,6 +162,7 @@ var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
     return StatusCode(403, new { message = "Insufficient permissions" });
        }
 
+       // Real-time stats - no caching for performance metrics
        var stats = new SystemPerformanceStatsDto
    {
   TotalMachines = await _context.Machines.CountAsync(),

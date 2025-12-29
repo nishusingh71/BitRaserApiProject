@@ -25,24 +25,27 @@ namespace BitRaserApiProject.Controllers
     [Authorize]
     public class UserActivityController : ControllerBase
     {
-        private readonly DynamicDbContextFactory _contextFactory; // ✅ CHANGED: Use factory instead of direct context
+        private readonly DynamicDbContextFactory _contextFactory;
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
         private readonly ILogger<UserActivityController> _logger;
         private readonly IHttpClientFactory _httpClientFactory;
+        private readonly ICacheService _cacheService;
 
         public UserActivityController(
-            DynamicDbContextFactory contextFactory, // ✅ CHANGED: Inject factory
+            DynamicDbContextFactory contextFactory,
             IRoleBasedAuthService authService,
             IUserDataService userDataService,
             ILogger<UserActivityController> logger,
-            IHttpClientFactory httpClientFactory)
+            IHttpClientFactory httpClientFactory,
+            ICacheService cacheService)
         {
             _contextFactory = contextFactory;
             _authService = authService;
             _userDataService = userDataService;
             _logger = logger;
             _httpClientFactory = httpClientFactory;
+            _cacheService = cacheService;
         }
 
         #region Server Time & Status Helpers
@@ -159,7 +162,7 @@ namespace BitRaserApiProject.Controllers
                 {
                     // Update subuser last_login
                     var subuser = await context.subuser
-                          .FirstOrDefaultAsync(s => s.subuser_email == targetEmail);
+                          .Where(s => s.subuser_email == targetEmail).FirstOrDefaultAsync();
 
                     if (subuser == null)
                     {
@@ -177,7 +180,7 @@ namespace BitRaserApiProject.Controllers
                 {
                     // Update user last_login
                     var user = await context.Users
-                    .FirstOrDefaultAsync(u => u.user_email == targetEmail);
+                    .Where(u => u.user_email == targetEmail).FirstOrDefaultAsync();
 
                     if (user == null)
                     {
@@ -245,7 +248,7 @@ namespace BitRaserApiProject.Controllers
                 {
                     // Update subuser last_logout
                     var subuser = await context.subuser
-                          .FirstOrDefaultAsync(s => s.subuser_email == targetEmail);
+                          .Where(s => s.subuser_email == targetEmail).FirstOrDefaultAsync();
 
                     if (subuser == null)
                     {
@@ -263,7 +266,7 @@ namespace BitRaserApiProject.Controllers
                 {
                     // Update user last_logout
                     var user = await context.Users
-                 .FirstOrDefaultAsync(u => u.user_email == targetEmail);
+                 .Where(u => u.user_email == targetEmail).FirstOrDefaultAsync();
 
                     if (user == null)
                     {
@@ -324,7 +327,7 @@ namespace BitRaserApiProject.Controllers
                 if (userType.ToLower() == "subuser")
                 {
                     var subuser = await context.subuser
-                             .FirstOrDefaultAsync(s => s.subuser_email == email);
+                             .Where(s => s.subuser_email == email).FirstOrDefaultAsync();
 
                     if (subuser == null)
                     {
@@ -350,7 +353,7 @@ namespace BitRaserApiProject.Controllers
                 else
                 {
                     var user = await context.Users
-                .FirstOrDefaultAsync(u => u.user_email == email);
+                .Where(u => u.user_email == email).FirstOrDefaultAsync();
 
                     if (user == null)
                     {
@@ -1254,10 +1257,10 @@ s.login_time <= endDate);
             // ✅ Get dynamic context for private cloud support
             using var context = await GetDbContextAsync();
 
-            var user = await context.Users.FirstOrDefaultAsync(u => u.user_email == email);
+            var user = await context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user != null) return user.user_name;
 
-            var subuser = await context.subuser.FirstOrDefaultAsync(s => s.subuser_email == email);
+            var subuser = await context.subuser.Where(s => s.subuser_email == email).FirstOrDefaultAsync();
             return subuser?.Name ?? subuser?.subuser_username ?? email;
         }
 

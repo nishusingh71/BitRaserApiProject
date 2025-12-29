@@ -6,6 +6,7 @@ using BitRaserApiProject.Models.DTOs;
 using BitRaserApiProject.Factories;
 using System.Security.Cryptography;
 using System.Text;
+using BitRaserApiProject.Services;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -22,15 +23,18 @@ namespace BitRaserApiProject.Controllers
         private readonly DynamicDbContextFactory _contextFactory;
         private readonly ILogger<LicenseController> _logger;
         private readonly IConfiguration _configuration;
+        private readonly ICacheService _cacheService;
 
         public LicenseController(
               DynamicDbContextFactory contextFactory,
            ILogger<LicenseController> logger,
-       IConfiguration configuration)
+       IConfiguration configuration,
+       ICacheService cacheService)
         {
             _contextFactory = contextFactory;
             _logger = logger;
             _configuration = configuration;
+            _cacheService = cacheService;
         }
 
         #region Public Endpoints (Client-facing)
@@ -51,7 +55,7 @@ namespace BitRaserApiProject.Controllers
                 _logger.LogInformation("🔑 License activation attempt: {Key}", request.license_key);
 
                 var license = await context.Set<LicenseActivation>()
-                        .FirstOrDefaultAsync(l => l.LicenseKey == request.license_key);
+                        .Where(l => l.LicenseKey == request.license_key).FirstOrDefaultAsync();
 
                 if (license == null)
                 {
@@ -181,7 +185,7 @@ namespace BitRaserApiProject.Controllers
                 _logger.LogInformation("🔄 License renewal attempt: {Key}", request.license_key);
 
                 var license = await context.Set<LicenseActivation>()
-                  .FirstOrDefaultAsync(l => l.LicenseKey == request.license_key);
+                  .Where(l => l.LicenseKey == request.license_key).FirstOrDefaultAsync();
 
                 if (license == null)
                 {
@@ -257,7 +261,7 @@ namespace BitRaserApiProject.Controllers
                   request.license_key, request.new_edition);
 
                 var license = await context.Set<LicenseActivation>()
-             .FirstOrDefaultAsync(l => l.LicenseKey == request.license_key);
+             .Where(l => l.LicenseKey == request.license_key).FirstOrDefaultAsync();
 
                 if (license == null)
                 {
@@ -344,7 +348,7 @@ namespace BitRaserApiProject.Controllers
                       request.license_key, request.local_revision);
 
                 var license = await context.Set<LicenseActivation>()
-                     .FirstOrDefaultAsync(l => l.LicenseKey == request.license_key);
+                     .Where(l => l.LicenseKey == request.license_key).FirstOrDefaultAsync();
 
                 if (license == null)
                 {
@@ -492,7 +496,7 @@ namespace BitRaserApiProject.Controllers
                 using var context = await _contextFactory.CreateDbContextAsync();
 
                 var license = await context.Set<LicenseActivation>()
-           .FirstOrDefaultAsync(l => l.LicenseKey == licenseKey);
+           .Where(l => l.LicenseKey == licenseKey).FirstOrDefaultAsync();
 
                 if (license == null)
                     return NotFound(new { message = "License not found" });
@@ -538,7 +542,7 @@ namespace BitRaserApiProject.Controllers
 
                 // Check for duplicate
                 var existing = await context.Set<LicenseActivation>()
-                       .FirstOrDefaultAsync(l => l.LicenseKey == request.license_key);
+                       .Where(l => l.LicenseKey == request.license_key).FirstOrDefaultAsync();
 
                 if (existing != null)
                 {
@@ -602,7 +606,7 @@ namespace BitRaserApiProject.Controllers
                 using var context = await _contextFactory.CreateDbContextAsync();
 
                 var license = await context.Set<LicenseActivation>()
-               .FirstOrDefaultAsync(l => l.LicenseKey == request.license_key);
+               .Where(l => l.LicenseKey == request.license_key).FirstOrDefaultAsync();
 
                 if (license == null)
                     return NotFound(new { message = "License not found" });
@@ -643,7 +647,7 @@ namespace BitRaserApiProject.Controllers
                 using var context = await _contextFactory.CreateDbContextAsync();
 
                 var license = await context.Set<LicenseActivation>()
-                          .FirstOrDefaultAsync(l => l.LicenseKey == licenseKey);
+                          .Where(l => l.LicenseKey == licenseKey).FirstOrDefaultAsync();
 
                 if (license == null)
                     return NotFound(new { message = "License not found" });

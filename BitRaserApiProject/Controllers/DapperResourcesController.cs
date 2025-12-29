@@ -20,17 +20,20 @@ namespace BitRaserApiProject.Controllers
         private readonly ILogger<DapperResourcesController> _logger;
      private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
+        private readonly ICacheService _cacheService;
 
         public DapperResourcesController(
           IDapperService dapperService, 
    ILogger<DapperResourcesController> logger,
             IRoleBasedAuthService authService,
-            IUserDataService userDataService)
+            IUserDataService userDataService,
+            ICacheService cacheService)
         {
          _dapperService = dapperService;
   _logger = logger;
          _authService = authService;
      _userDataService = userDataService;
+     _cacheService = cacheService;
         }
 
         /// <summary>
@@ -51,9 +54,14 @@ namespace BitRaserApiProject.Controllers
 
   _logger.LogInformation("Getting resource summary for user: {UserEmail}", userEmail);
 
-        try
+            try
      {
-         var summary = await _dapperService.GetUserResourcesSummaryAsync(userEmail);
+                // ✅ CACHE: Resource summary with short TTL
+                var cacheKey = $"dapper:summary:{userEmail}";
+                var summary = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
+                {
+                    return await _dapperService.GetUserResourcesSummaryAsync(userEmail);
+                }, CacheService.CacheTTL.Short);
    
            _logger.LogInformation("Summary retrieved: {MachineCount} machines, {SubuserCount} subusers for {UserEmail}", 
          summary.TotalMachines, summary.Subusers.Count, userEmail);

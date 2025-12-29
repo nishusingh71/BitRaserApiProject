@@ -21,24 +21,27 @@ namespace BitRaserApiProject.Controllers
     [ApiController]
     public class EnhancedLogsController : ControllerBase
     {
-        private readonly DynamicDbContextFactory _contextFactory; // ✅ CHANGED
+        private readonly DynamicDbContextFactory _contextFactory;
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
-        private readonly ITenantConnectionService _tenantService; // ✅ ADDED
-        private readonly ILogger<EnhancedLogsController> _logger; // ✅ ADDED
+        private readonly ITenantConnectionService _tenantService;
+        private readonly ILogger<EnhancedLogsController> _logger;
+        private readonly ICacheService _cacheService;
 
         public EnhancedLogsController(
-         DynamicDbContextFactory contextFactory, // ✅ CHANGED
+         DynamicDbContextFactory contextFactory,
             IRoleBasedAuthService authService,
             IUserDataService userDataService,
-        ITenantConnectionService tenantService, // ✅ ADDED
-            ILogger<EnhancedLogsController> logger) // ✅ ADDED
+        ITenantConnectionService tenantService,
+            ILogger<EnhancedLogsController> logger,
+            ICacheService cacheService)
         {
-            _contextFactory = contextFactory; // ✅ CHANGED
+            _contextFactory = contextFactory;
             _authService = authService;
             _userDataService = userDataService;
-            _tenantService = tenantService; // ✅ ADDED
-            _logger = logger; // ✅ ADDED
+            _tenantService = tenantService;
+            _logger = logger;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -399,38 +402,43 @@ namespace BitRaserApiProject.Controllers
             if (request?.DateTo.HasValue == true)
                 query = query.Where(l => l.created_at <= request.DateTo.Value);
 
-            var stats = new
+            // ✅ CACHE: Log statistics with short TTL
+            var cacheKey = $"{CacheService.CacheKeys.LogsList}:stats:{userEmail}:{request?.DateFrom?.ToString("yyyyMMdd") ?? "all"}:{request?.DateTo?.ToString("yyyyMMdd") ?? "all"}";
+            var stats = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
             {
-                TotalLogs = await query.CountAsync(),
-                LogsByLevel = new
+                return new
                 {
-                    Trace = await query.CountAsync(l => l.log_level.ToLower() == "trace"),
-                    Debug = await query.CountAsync(l => l.log_level.ToLower() == "debug"),
-                    Info = await query.CountAsync(l => l.log_level.ToLower().Contains("info")),
-                    Warning = await query.CountAsync(l => l.log_level.ToLower().Contains("warning")),
-                    Error = await query.CountAsync(l => l.log_level.ToLower().Contains("error")),
-                    Critical = await query.CountAsync(l => l.log_level.ToLower().Contains("critical") || l.log_level.ToLower().Contains("fatal"))
-                },
-                LogsToday = await query.CountAsync(l => l.created_at.Date == DateTime.UtcNow.Date),
-                LogsThisWeek = await query.CountAsync(l => l.created_at >= DateTime.UtcNow.AddDays(-7)),
-                LogsThisMonth = await query.CountAsync(l => l.created_at.Month == DateTime.UtcNow.Month),
-                ErrorRate = await CalculateErrorRateAsync(query),
-                TopUsers = request?.UserEmail == null ?
-            await query
-    .Where(l => l.user_email != null)
-     .GroupBy(l => l.user_email)
-       .Select(g => new { UserEmail = g.Key, Count = g.Count() })
-    .OrderByDescending(x => x.Count)
-          .Take(10)
-    .ToListAsync() : null,
-                RecentErrors = await query
-      .Where(l => l.log_level.ToLower().Contains("error") || l.log_level.ToLower().Contains("critical"))
-   .OrderByDescending(l => l.created_at)
-          .Take(5)
-        .Select(l => new { l.log_id, l.user_email, l.log_message, l.created_at })
-          .ToListAsync(),
-                HourlyDistribution = await GetHourlyLogDistributionAsync(query)
-            };
+                    TotalLogs = await query.CountAsync(),
+                    LogsByLevel = new
+                    {
+                        Trace = await query.CountAsync(l => l.log_level.ToLower() == "trace"),
+                        Debug = await query.CountAsync(l => l.log_level.ToLower() == "debug"),
+                        Info = await query.CountAsync(l => l.log_level.ToLower().Contains("info")),
+                        Warning = await query.CountAsync(l => l.log_level.ToLower().Contains("warning")),
+                        Error = await query.CountAsync(l => l.log_level.ToLower().Contains("error")),
+                        Critical = await query.CountAsync(l => l.log_level.ToLower().Contains("critical") || l.log_level.ToLower().Contains("fatal"))
+                    },
+                    LogsToday = await query.CountAsync(l => l.created_at.Date == DateTime.UtcNow.Date),
+                    LogsThisWeek = await query.CountAsync(l => l.created_at >= DateTime.UtcNow.AddDays(-7)),
+                    LogsThisMonth = await query.CountAsync(l => l.created_at.Month == DateTime.UtcNow.Month),
+                    ErrorRate = await CalculateErrorRateAsync(query),
+                    TopUsers = request?.UserEmail == null ?
+                        await query
+                            .Where(l => l.user_email != null)
+                            .GroupBy(l => l.user_email)
+                            .Select(g => new { UserEmail = g.Key, Count = g.Count() })
+                            .OrderByDescending(x => x.Count)
+                            .Take(10)
+                            .ToListAsync() : null,
+                    RecentErrors = await query
+                        .Where(l => l.log_level.ToLower().Contains("error") || l.log_level.ToLower().Contains("critical"))
+                        .OrderByDescending(l => l.created_at)
+                        .Take(5)
+                        .Select(l => new { l.log_id, l.user_email, l.log_message, l.created_at })
+                        .ToListAsync(),
+                    HourlyDistribution = await GetHourlyLogDistributionAsync(query)
+                };
+            }, CacheService.CacheTTL.Short);
 
             return Ok(stats);
         }

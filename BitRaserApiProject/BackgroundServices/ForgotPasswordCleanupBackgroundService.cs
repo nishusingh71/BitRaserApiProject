@@ -4,13 +4,13 @@ namespace BitRaserApiProject.BackgroundServices
 {
     /// <summary>
     /// Background service to automatically cleanup expired password reset requests
-    /// Runs every 15 minutes to delete expired and used requests
+    /// Runs every 24 hours to delete expired and used requests (optimized for TiDB RU)
     /// </summary>
     public class ForgotPasswordCleanupBackgroundService : BackgroundService
     {
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<ForgotPasswordCleanupBackgroundService> _logger;
-        private readonly TimeSpan _cleanupInterval = TimeSpan.FromMinutes(15);  // Run every 15 minutes
+        private readonly TimeSpan _cleanupInterval = TimeSpan.FromHours(24);  // ✅ Optimized: 1 day
 
         public ForgotPasswordCleanupBackgroundService(
  IServiceProvider serviceProvider,

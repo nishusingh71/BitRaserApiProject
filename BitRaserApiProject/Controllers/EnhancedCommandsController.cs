@@ -19,24 +19,27 @@ namespace BitRaserApiProject.Controllers
     [ApiController]
     public class EnhancedCommandsController : ControllerBase
     {
-        private readonly DynamicDbContextFactory _contextFactory; // ✅ CHANGED
+        private readonly DynamicDbContextFactory _contextFactory;
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
-        private readonly ITenantConnectionService _tenantService; // ✅ ADDED
-        private readonly ILogger<EnhancedCommandsController> _logger; // ✅ ADDED
+        private readonly ITenantConnectionService _tenantService;
+        private readonly ILogger<EnhancedCommandsController> _logger;
+        private readonly ICacheService _cacheService;
 
         public EnhancedCommandsController(
-            DynamicDbContextFactory contextFactory, // ✅ CHANGED
+            DynamicDbContextFactory contextFactory,
             IRoleBasedAuthService authService,
             IUserDataService userDataService,
-            ITenantConnectionService tenantService, // ✅ ADDED
-            ILogger<EnhancedCommandsController> logger) // ✅ ADDED
+            ITenantConnectionService tenantService,
+            ILogger<EnhancedCommandsController> logger,
+            ICacheService cacheService)
         {
-            _contextFactory = contextFactory; // ✅ CHANGED
+            _contextFactory = contextFactory;
             _authService = authService;
             _userDataService = userDataService;
-            _tenantService = tenantService; // ✅ ADDED
-            _logger = logger; // ✅ ADDED
+            _tenantService = tenantService;
+            _logger = logger;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -393,22 +396,27 @@ namespace BitRaserApiProject.Controllers
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
 
-            var stats = new
+            // ✅ CACHE: Command statistics with short TTL
+            var cacheKey = $"commands:stats:{userEmail}";
+            var stats = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
             {
-                TotalCommands = await _context.Commands.CountAsync(),
-                PendingCommands = await _context.Commands.CountAsync(c => c.command_status == "Pending"),
-                ProcessingCommands = await _context.Commands.CountAsync(c => c.command_status == "Processing"),
-                CompletedCommands = await _context.Commands.CountAsync(c => c.command_status == "Completed"),
-                FailedCommands = await _context.Commands.CountAsync(c => c.command_status == "Failed"),
-                CancelledCommands = await _context.Commands.CountAsync(c => c.command_status == "Cancelled"),
-                CommandsToday = await _context.Commands.CountAsync(c => c.issued_at.Date == DateTime.UtcNow.Date),
-                CommandsThisWeek = await _context.Commands.CountAsync(c => c.issued_at >= DateTime.UtcNow.AddDays(-7)),
-                CommandsThisMonth = await _context.Commands.CountAsync(c => c.issued_at.Month == DateTime.UtcNow.Month),
-                StatusBreakdown = await _context.Commands
-                    .GroupBy(c => c.command_status)
-                    .Select(g => new { Status = g.Key, Count = g.Count() })
-                    .ToListAsync()
-            };
+                return new
+                {
+                    TotalCommands = await _context.Commands.CountAsync(),
+                    PendingCommands = await _context.Commands.CountAsync(c => c.command_status == "Pending"),
+                    ProcessingCommands = await _context.Commands.CountAsync(c => c.command_status == "Processing"),
+                    CompletedCommands = await _context.Commands.CountAsync(c => c.command_status == "Completed"),
+                    FailedCommands = await _context.Commands.CountAsync(c => c.command_status == "Failed"),
+                    CancelledCommands = await _context.Commands.CountAsync(c => c.command_status == "Cancelled"),
+                    CommandsToday = await _context.Commands.CountAsync(c => c.issued_at.Date == DateTime.UtcNow.Date),
+                    CommandsThisWeek = await _context.Commands.CountAsync(c => c.issued_at >= DateTime.UtcNow.AddDays(-7)),
+                    CommandsThisMonth = await _context.Commands.CountAsync(c => c.issued_at.Month == DateTime.UtcNow.Month),
+                    StatusBreakdown = await _context.Commands
+                        .GroupBy(c => c.command_status)
+                        .Select(g => new { Status = g.Key, Count = g.Count() })
+                        .ToListAsync()
+                };
+            }, CacheService.CacheTTL.Short);
 
             return Ok(stats);
         }

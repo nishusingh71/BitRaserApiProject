@@ -20,24 +20,27 @@ namespace BitRaserApiProject.Controllers
     [ApiController]
     public class EnhancedMachinesController : ControllerBase
     {
-        private readonly DynamicDbContextFactory _contextFactory; // ✅ CHANGED
+        private readonly DynamicDbContextFactory _contextFactory;
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
-        private readonly ITenantConnectionService _tenantService; // ✅ ADDED
-        private readonly ILogger<EnhancedMachinesController> _logger; // ✅ ADDED
+        private readonly ITenantConnectionService _tenantService;
+        private readonly ILogger<EnhancedMachinesController> _logger;
+        private readonly ICacheService _cacheService;
 
         public EnhancedMachinesController(
-                DynamicDbContextFactory contextFactory, // ✅ CHANGED
+                DynamicDbContextFactory contextFactory,
                     IRoleBasedAuthService authService,
             IUserDataService userDataService,
-            ITenantConnectionService tenantService, // ✅ ADDED
-                ILogger<EnhancedMachinesController> logger) // ✅ ADDED
+            ITenantConnectionService tenantService,
+                ILogger<EnhancedMachinesController> logger,
+                ICacheService cacheService)
         {
-            _contextFactory = contextFactory; // ✅ CHANGED
+            _contextFactory = contextFactory;
             _authService = authService;
             _userDataService = userDataService;
-            _tenantService = tenantService; // ✅ ADDED
-            _logger = logger; // ✅ ADDED
+            _tenantService = tenantService;
+            _logger = logger;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -257,7 +260,9 @@ namespace BitRaserApiProject.Controllers
             {
                 using var _context = await _contextFactory.CreateDbContextAsync();
 
-                var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == macAddress);
+                var machine = await _context.Machines
+                    .Where(m => m.mac_address == macAddress)
+                    .FirstOrDefaultAsync();
 
                 if (machine == null)
                 {
@@ -345,7 +350,9 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 // Check if machine already exists
-                var existingMachine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == request.MacAddress);
+                var existingMachine = await _context.Machines
+                    .Where(m => m.mac_address == request.MacAddress)
+                    .FirstOrDefaultAsync();
                 if (existingMachine != null)
                 {
                     _logger.LogWarning("Attempted to register duplicate machine with MAC {MacAddress}", request.MacAddress);
@@ -378,6 +385,10 @@ namespace BitRaserApiProject.Controllers
 
                 _context.Machines.Add(newMachine);
                 await _context.SaveChangesAsync();
+
+                // ✅ CACHE INVALIDATION: Clear machine caches
+                _cacheService.RemoveByPrefix($"{CacheService.CacheKeys.Machine}:{userEmail}");
+                _cacheService.RemoveByPrefix(CacheService.CacheKeys.MachineList);
 
                 _logger.LogInformation("✅ Registered machine {MacAddress} for {UserEmail} in {DbType} database",
                 request.MacAddress, userEmail, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
@@ -412,7 +423,9 @@ namespace BitRaserApiProject.Controllers
 
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == macAddress);
+            var machine = await _context.Machines
+                .Where(m => m.mac_address == macAddress)
+                .FirstOrDefaultAsync();
 
             if (machine == null) return NotFound($"Machine with MAC address {macAddress} not found");
 
@@ -444,6 +457,11 @@ namespace BitRaserApiProject.Controllers
             _context.Entry(machine).State = EntityState.Modified;
             await _context.SaveChangesAsync();
 
+            // ✅ CACHE INVALIDATION: Clear machine caches
+            _cacheService.Remove($"{CacheService.CacheKeys.Machine}:{macAddress}");
+            _cacheService.RemoveByPrefix($"{CacheService.CacheKeys.Machine}:{machine.user_email}");
+            _cacheService.RemoveByPrefix(CacheService.CacheKeys.MachineList);
+
             return Ok(new
             {
                 message = "Machine updated successfully",
@@ -462,7 +480,9 @@ namespace BitRaserApiProject.Controllers
 
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == macAddress);
+            var machine = await _context.Machines
+                .Where(m => m.mac_address == macAddress)
+                .FirstOrDefaultAsync();
 
             if (machine == null) return NotFound($"Machine with MAC address {macAddress} not found");
 
@@ -509,7 +529,9 @@ namespace BitRaserApiProject.Controllers
 
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == macAddress);
+            var machine = await _context.Machines
+                .Where(m => m.mac_address == macAddress)
+                .FirstOrDefaultAsync();
 
             if (machine == null) return NotFound($"Machine with MAC address {macAddress} not found");
 
@@ -548,7 +570,9 @@ namespace BitRaserApiProject.Controllers
 
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
-            var machine = await _context.Machines.FirstOrDefaultAsync(m => m.mac_address == macAddress);
+            var machine = await _context.Machines
+                .Where(m => m.mac_address == macAddress)
+                .FirstOrDefaultAsync();
 
             if (machine == null) return NotFound($"Machine with MAC address {macAddress} not found");
 
@@ -565,6 +589,11 @@ namespace BitRaserApiProject.Controllers
             _context.Machines.Remove(machine);
             await _context.SaveChangesAsync();
 
+            // ✅ CACHE INVALIDATION: Clear machine caches
+            _cacheService.Remove($"{CacheService.CacheKeys.Machine}:{macAddress}");
+            _cacheService.RemoveByPrefix($"{CacheService.CacheKeys.Machine}:{machine.user_email}");
+            _cacheService.RemoveByPrefix(CacheService.CacheKeys.MachineList);
+
             return Ok(new
             {
                 message = "Machine deleted successfully",
@@ -572,6 +601,120 @@ namespace BitRaserApiProject.Controllers
                 userEmail = machine.user_email,
                 subuserEmail = machine.subuser_email,
                 deletedAt = DateTime.UtcNow
+            });
+        }
+
+        /// <summary>
+        /// Transfer machines to subuser
+        /// Transfers selected machines from user to their subuser using subuser email
+        /// </summary>
+        /// <param name="request">Transfer request with subuser email and machine MAC addresses</param>
+        [HttpPost("transfer-to-subuser")]
+        public async Task<IActionResult> TransferMachinesToSubuser([FromBody] TransferMachinesRequest request)
+        {
+            using var _context = await _contextFactory.CreateDbContextAsync();
+
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(currentUserEmail))
+            {
+                return Unauthorized(new { error = "User not authenticated" });
+            }
+
+            // Validate request
+            if (string.IsNullOrEmpty(request.SubuserEmail))
+            {
+                return BadRequest(new { error = "Subuser email is required" });
+            }
+
+            if (request.MacAddresses == null || !request.MacAddresses.Any())
+            {
+                return BadRequest(new { error = "At least one MAC address is required" });
+            }
+
+            // Decode subuser email if Base64 encoded
+            var decodedSubuserEmail = Base64EmailEncoder.DecodeEmailParam(request.SubuserEmail);
+
+            // Check if subuser exists and belongs to current user
+            var subuser = await _context.subuser
+                .Where(s => s.subuser_email.ToLower() == decodedSubuserEmail.ToLower() 
+                                       && s.user_email.ToLower() == currentUserEmail.ToLower()).FirstOrDefaultAsync();
+
+            if (subuser == null)
+            {
+                return NotFound(new { error = $"Subuser with email '{decodedSubuserEmail}' not found or doesn't belong to you" });
+            }
+
+            // Get machines to transfer (only user's own machines)
+            var macAddressList = request.MacAddresses.Select(m => m.ToLower()).ToList();
+            var machinesToTransfer = await _context.Machines
+                .Where(m => macAddressList.Contains(m.mac_address.ToLower()) 
+                         && m.user_email.ToLower() == currentUserEmail.ToLower())
+                .ToListAsync();
+
+            if (!machinesToTransfer.Any())
+            {
+                return NotFound(new { error = "No machines found with the provided MAC addresses that belong to you" });
+            }
+
+            // Track transfer results
+            var transferred = new List<string>();
+            var alreadyAssigned = new List<string>();
+
+            foreach (var machine in machinesToTransfer)
+            {
+                // Check if machine is already assigned to this subuser
+                if (machine.subuser_email?.ToLower() == decodedSubuserEmail.ToLower())
+                {
+                    alreadyAssigned.Add(machine.mac_address);
+                    continue;
+                }
+
+                // Transfer machine to subuser
+                machine.subuser_email = decodedSubuserEmail;
+                machine.updated_at = DateTime.UtcNow;
+                transferred.Add(machine.mac_address);
+
+                // Invalidate cache for this machine
+                _cacheService.Remove($"{CacheService.CacheKeys.Machine}:{machine.mac_address}");
+            }
+
+            // Save changes
+            if (transferred.Any())
+            {
+                await _context.SaveChangesAsync();
+                
+                // Invalidate user and subuser machine caches
+                _cacheService.RemoveByPrefix($"{CacheService.CacheKeys.Machine}:{currentUserEmail}");
+                _cacheService.RemoveByPrefix($"{CacheService.CacheKeys.Machine}:{decodedSubuserEmail}");
+                _cacheService.RemoveByPrefix(CacheService.CacheKeys.MachineList);
+            }
+
+            // Identify MAC addresses not found
+            var notFound = macAddressList
+                .Except(machinesToTransfer.Select(m => m.mac_address.ToLower()))
+                .ToList();
+
+            return Ok(new
+            {
+                message = transferred.Any() 
+                    ? $"Successfully transferred {transferred.Count} machine(s) to subuser" 
+                    : "No machines were transferred",
+                subuserEmail = decodedSubuserEmail,
+                subuserName = subuser.Name ?? subuser.subuser_email,
+                statistics = new
+                {
+                    totalRequested = request.MacAddresses.Count,
+                    transferred = transferred.Count,
+                    alreadyAssigned = alreadyAssigned.Count,
+                    notFound = notFound.Count
+                },
+                details = new
+                {
+                    transferredMachines = transferred,
+                    alreadyAssignedMachines = alreadyAssigned,
+                    notFoundMachines = notFound
+                },
+                transferredAt = DateTime.UtcNow
             });
         }
 
@@ -792,6 +935,21 @@ namespace BitRaserApiProject.Controllers
     {
         public int? DaysValid { get; set; }
         public string? LicenseDetailsJson { get; set; }
+    }
+    /// <summary>
+    /// Transfer machines to subuser request model
+    /// </summary>
+    public class TransferMachinesRequest
+    {
+        /// <summary>
+        /// Target subuser email (can be Base64 encoded)
+        /// </summary>
+        public string SubuserEmail { get; set; } = string.Empty;
+        
+        /// <summary>
+        /// List of MAC addresses to transfer
+        /// </summary>
+        public List<string> MacAddresses { get; set; } = new();
     }
 
     #endregion

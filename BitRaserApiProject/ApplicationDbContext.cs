@@ -58,6 +58,9 @@ namespace BitRaserApiProject
         // ✅ PDF Export Settings (for default report export configurations)
         public DbSet<PdfExportSettings> PdfExportSettings { get; set; }
 
+        // ✅ Orders (Polar.sh Payment Integration)
+        public DbSet<Order> Orders { get; set; }
+
         public static string HashLicenseKey(string licenseKey)
         {
             using var sha256 = SHA256.Create();
