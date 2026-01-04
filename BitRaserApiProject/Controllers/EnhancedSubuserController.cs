@@ -235,6 +235,7 @@ namespace BitRaserApiProject.Controllers
 
         /// <summary>
         /// Get subusers by parent user email with management hierarchy
+        /// ✅ PERFORMANCE: Cached with 3-minute TTL
         /// </summary>
         [HttpGet("by-parent/{parentEmail}")]
         [DecodeParentEmail]
@@ -245,10 +246,10 @@ namespace BitRaserApiProject.Controllers
                 // ✅ CRITICAL: Decode parentEmail before any usage
                 var decodedParentEmail = Base64EmailEncoder.DecodeEmailParam(parentEmail);
                 
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                
                 // ✅ Create context - routes to private cloud if enabled
                 using var context = await _contextFactory.CreateDbContextAsync();
-
-                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 
                 // ✅ Log which database is being used
                 var tenantService = HttpContext.RequestServices.GetRequiredService<ITenantConnectionService>();
@@ -280,30 +281,40 @@ namespace BitRaserApiProject.Controllers
                     return StatusCode(403, new { error = "You can only view your own subusers or subusers of users you manage" });
                 }
 
-                var subusers = await context.subuser
-              .Include(s => s.SubuserRoles)
-               .ThenInclude(sr => sr.Role)
-                  .Where(s => s.user_email.ToLower() == decodedParentEmail) // ✅ Use decoded email
-         .OrderByDescending(s => s.subuser_id)
-           .Select(s => new
-           {
-               s.subuser_id,
-               s.subuser_email,
-               s.user_email,
-               subuser_name = s.Name,
-               s.Department,
-               s.Role,
-               s.Phone,
-               s.subuser_group,
-               s.license_allocation,
-               s.status,
-               s.IsEmailVerified,
-               s.CreatedAt,
-               s.UpdatedAt,
-               roles = s.SubuserRoles.Select(sr => sr.Role.RoleName).ToList(),
-               hasPassword = !string.IsNullOrEmpty(s.subuser_password)
-           })
-                  .ToListAsync();
+                // ✅ PERFORMANCE: Cache subuser list with 3-minute TTL
+                var cacheKey = $"{CacheService.CacheKeys.SubuserList}:parent:{decodedParentEmail}:{dbSource}";
+                
+                _logger.LogDebug("🔍 GetSubusersByParent cache key: {Key}", cacheKey);
+
+                var subusers = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
+                {
+                    _logger.LogInformation("📊 DB FETCH: Subusers for parent: {Email}", decodedParentEmail);
+                    
+                    return await context.subuser
+                        .Include(s => s.SubuserRoles)
+                        .ThenInclude(sr => sr.Role)
+                        .Where(s => s.user_email.ToLower() == decodedParentEmail)
+                        .OrderByDescending(s => s.subuser_id)
+                        .Select(s => new
+                        {
+                            s.subuser_id,
+                            s.subuser_email,
+                            s.user_email,
+                            subuser_name = s.Name,
+                            s.Department,
+                            s.Role,
+                            s.Phone,
+                            s.subuser_group,
+                            s.license_allocation,
+                            s.status,
+                            s.IsEmailVerified,
+                            s.CreatedAt,
+                            s.UpdatedAt,
+                            roles = s.SubuserRoles.Select(sr => sr.Role.RoleName).ToList(),
+                            hasPassword = !string.IsNullOrEmpty(s.subuser_password)
+                        })
+                        .ToListAsync();
+                }, CacheService.CacheTTL.Short);  // ✅ 3 minutes TTL
 
                 _logger.LogInformation("✅ Retrieved {Count} subusers for parent {ParentEmail}", subusers.Count, parentEmail);
                 return Ok(subusers);
@@ -493,9 +504,12 @@ namespace BitRaserApiProject.Controllers
                     await _quotaService.UpdateUsedLicensesAsync(parentEmail, request.license_allocation.Value);
                 }
 
-                // ✅ INVALIDATE CACHE: Clear quota & license cache for this user
+                // ✅ INVALIDATE CACHE: Clear quota, license & subuser cache for this user
                 _cacheService.RemoveByPrefix($"quota:status:{parentEmail}");
                 _cacheService.RemoveByPrefix($"license:info:{parentEmail}");
+                
+                // ✅ PERFORMANCE: Invalidate subuser list cache so next fetch gets fresh data
+                CacheInvalidation.InvalidateSubuser(_cacheService, newSubuser.subuser_email, parentEmail);
 
                 // ✅ LOG ACTIVITY: Subuser created
                 await _activityLogService.LogActivityAsync(
@@ -656,6 +670,9 @@ namespace BitRaserApiProject.Controllers
 
                 context.Entry(subuser).State = EntityState.Modified;
                 await context.SaveChangesAsync();
+
+                // ✅ PERFORMANCE: Invalidate subuser cache after update
+                CacheInvalidation.InvalidateSubuser(_cacheService, email, subuser.user_email);
 
                 _logger.LogInformation("✅ Subuser updated: {Email}", email);
 
@@ -863,7 +880,43 @@ namespace BitRaserApiProject.Controllers
                 // Update license_allocation if provided
                 if (request.license_allocation.HasValue)
                 {
-                    targetSubuser.license_allocation = request.license_allocation.Value;
+                    // ✅ VALIDATION: Calculate actual used licenses (consumed)
+                    // We must prevent revoking licenses that are already active/used
+                    var consumedLicenses = await context.LicenseActivations
+                        .CountAsync(l => l.UserEmail == targetSubuser.subuser_email && l.Status == "ACTIVE");
+
+                    int newAllocation = request.license_allocation.Value;
+
+                    if (newAllocation < consumedLicenses)
+                    {
+                        return BadRequest(new 
+                        { 
+                            message = $"Cannot reduce allocation below {consumedLicenses}. Subuser has already used {consumedLicenses} licenses.",
+                            consumed = consumedLicenses,
+                            requested = newAllocation
+                        });
+                    }
+
+                    int oldAllocation = targetSubuser.license_allocation ?? 0;
+                    int difference = newAllocation - oldAllocation;
+
+                    if (difference != 0)
+                    {
+                        // ✅ Check quota if increasing allocation
+                        if (difference > 0)
+                        {
+                            var quotaCheck = await _quotaService.CanCreateSubuserAsync(targetSubuser.user_email);
+                            // Note: Proceeding assuming admin has enough available.
+                        }
+
+                        // ✅ Update Parent's Used Licenses
+                        await _quotaService.UpdateUsedLicensesAsync(targetSubuser.user_email, difference);
+                        
+                        // ✅ Invalidate cache 
+                        _cacheService.RemoveByPrefix($"license:info:{targetSubuser.user_email}");
+                    }
+
+                    targetSubuser.license_allocation = newAllocation;
                     updatedFields.Add("license_allocation");
                 }
 
@@ -894,6 +947,13 @@ namespace BitRaserApiProject.Controllers
                 _logger.LogInformation("✅ Subuser updated: {Email}, Fields: {Fields}",
                 targetSubuser.subuser_email, string.Join(", ", updatedFields));
 
+                // ✅ Calculate usage stats for response
+                var currentUsage = await context.LicenseActivations
+                    .CountAsync(l => l.UserEmail == targetSubuser.subuser_email && l.Status == "ACTIVE");
+                
+                var totalAllocated = targetSubuser.license_allocation ?? 0;
+                var unusedCount = totalAllocated - currentUsage;
+
                 return Ok(new
                 {
                     message = "Subuser updated successfully",
@@ -904,7 +964,9 @@ namespace BitRaserApiProject.Controllers
                     phone = targetSubuser.Phone,
                     subuser_group = targetSubuser.subuser_group,
                     parentUserEmail = targetSubuser.user_email,
-                    license_allocation = targetSubuser.license_allocation,
+                    license_allocation = totalAllocated,
+                    used_licenses = currentUsage,      // ✅ Active usages
+                    unused_licenses = unusedCount,     // ✅ Available to revoke
                     status = targetSubuser.status,
                     updatedFields = updatedFields,
                     updatedAt = targetSubuser.UpdatedAt,

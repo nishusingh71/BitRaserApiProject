@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using BitRaserApiProject;
@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.DataProtection;  // ✅ ADD: For DataProtection in Do
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Microsoft.AspNetCore.HttpOverrides;
 using QuestPDF.Infrastructure;
 using DotNetEnv;
 
@@ -56,13 +57,11 @@ catch (Exception ex)
     Console.WriteLine($"⚠️ QuestPDF license configuration failed: {ex.Message}");
 }
 
-// Get configuration values with enhanced fallbacks
+// Get configuration values with enhanced fallbacks - Environment variables take priority
 var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__ApplicationDbContextConnection")
     ?? builder.Configuration.GetConnectionString("ApplicationDbContextConnection")
-    ?? throw new InvalidOperationException("Database connection string is required");
+    ?? throw new InvalidOperationException("Database connection string is required. Set ConnectionStrings__ApplicationDbContextConnection environment variable.");
 
-// ✅ OPTIONAL: CloudErase connection string (if needed for specific services)
-// This is NOT required for private cloud multi-tenant - just for reference/future use
 var cloudEraseConnectionString = Environment.GetEnvironmentVariable("ConnectionStrings__CloudEraseConnection")
     ?? builder.Configuration.GetConnectionString("CloudEraseConnection");
 
@@ -79,16 +78,23 @@ if (!string.IsNullOrEmpty(cloudEraseConnectionString))
 
 var jwtKey = Environment.GetEnvironmentVariable("Jwt__Key")
     ?? builder.Configuration["Jwt:Key"]
-    ?? (builder.Environment.IsDevelopment() ? "YourSuperSecretKeyThatIsAtLeast32CharactersLong123456789!" : null)
-    ?? throw new InvalidOperationException("JWT Key is required");
+    ?? throw new InvalidOperationException("JWT Key is required. Set Jwt__Key environment variable with a strong 256-bit key.");
 
 var jwtIssuer = Environment.GetEnvironmentVariable("Jwt__Issuer")
     ?? builder.Configuration["Jwt:Issuer"]
- ?? "DSecureAPI";
+    ?? throw new InvalidOperationException("JWT Issuer is required. Set Jwt__Issuer environment variable.");
 
 var jwtAudience = Environment.GetEnvironmentVariable("Jwt__Audience")
     ?? builder.Configuration["Jwt:Audience"]
-    ?? "DSecureAPIUsers";
+    ?? throw new InvalidOperationException("JWT Audience is required. Set Jwt__Audience environment variable.");
+
+// Validate JWT key strength
+if (jwtKey.Length < 32)
+{
+    throw new InvalidOperationException($"JWT Key must be at least 32 characters (256 bits). Current length: {jwtKey.Length}");
+}
+
+Console.WriteLine($"✅ JWT configured - Issuer: {jwtIssuer}, Audience: {jwtAudience}");
 
 // ✅ Configure DataProtection for Docker/Production environments
 // This prevents FileSystemXmlRepository and XmlKeyManager warnings
@@ -111,36 +117,25 @@ builder.Services.AddCors(options =>
     options.AddPolicy("AllowVercelFrontend", policy =>
     {
         policy.WithOrigins(
- "https://dsecure-frontend.vercel.app",
-     "http://localhost:3000",
-           "http://localhost:3001",
-   "http://localhost:4200",
- "http://localhost:5173",
-   "http://localhost:5174",
-        "http://localhost:8080",
-                "http://localhost:8081",
- "http://localhost:5000",
-           "http://localhost:5001",
-    "https://localhost:3000",
-      "https://localhost:4200",
-          "https://localhost:5174",
-        "https://localhost:8080",
-       "https://dsecuretech.com",
-     "https://www.dsecuretech.com"
-   )
- .AllowAnyMethod()
-            .AllowAnyHeader()
-         .AllowCredentials()
-      .SetIsOriginAllowedToAllowWildcardSubdomains()
-  .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
+            "https://dsecure-frontend.vercel.app",
+            "http://localhost:5173",
+            "https://www.dsecuretech.com"
+        )
+        .AllowAnyMethod()
+        .AllowAnyHeader()
+        .AllowCredentials()
+        .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
     });
 
-    // Development policy - allows all origins (for testing)
+    // Development policy - allows specific origins only (NO AllowAnyOrigin)
     options.AddPolicy("DevelopmentPolicy", policy =>
     {
-        policy.AllowAnyOrigin()
-            .AllowAnyMethod()
-     .AllowAnyHeader();
+        policy.WithOrigins(
+            "http://localhost:5173"
+        )
+        .AllowAnyMethod()
+        .AllowAnyHeader()
+        .AllowCredentials();
     });
 
     // Production policy - restricted origins for security
@@ -182,10 +177,10 @@ builder.Services.AddCors(options =>
         }
 
         policy.WithOrigins(allowedOrigins.ToArray())
-     .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
-    .WithHeaders("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With")
-              .AllowCredentials()
-       .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
+            .WithMethods("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS")
+            .WithHeaders("Authorization", "Content-Type", "Accept", "Origin", "X-Requested-With", "X-No-Encryption")
+            .AllowCredentials()
+            .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
     });
 
     // Strict policy for high-security environments
@@ -248,11 +243,16 @@ builder.Services.AddDbContextPool<ApplicationDbContext>((serviceProvider, option
         options.AddInterceptors(interceptor);
     }
 
-    // Enhanced logging and performance options
+    // Enhanced logging and performance options - ONLY in Development
     if (builder.Environment.IsDevelopment())
     {
         options.EnableSensitiveDataLogging();
         options.EnableDetailedErrors();
+    }
+    else
+    {
+        // Production: No sensitive data logging
+        options.EnableDetailedErrors(false);
     }
 
     // Performance optimizations
@@ -279,6 +279,19 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
         options.Events = new JwtBearerEvents
         {
+            // ✅ CRITICAL: Skip JWT authentication for webhook endpoints
+            // Webhooks use signature verification, NOT JWT tokens
+            OnMessageReceived = context =>
+            {
+                var path = context.HttpContext.Request.Path.Value?.ToLowerInvariant();
+                if (path != null && (path.Contains("/webhook") || path.Contains("/api/webhooks")))
+                {
+                    // Skip JWT processing for webhooks
+                    context.NoResult();
+                    return Task.CompletedTask;
+                }
+                return Task.CompletedTask;
+            },
             OnAuthenticationFailed = context =>
        {
            if (builder.Environment.IsDevelopment())
@@ -340,6 +353,16 @@ builder.Services.AddScoped<PdfService>();
 builder.Services.AddScoped<IDapperService, DapperService>();  // ✅ NEW: Dapper Service for high-performance queries
 builder.Services.AddScoped<IQuotaService, QuotaService>();    // ✅ NEW: Quota & Limits Service
 builder.Services.AddScoped<IActivityLogService, ActivityLogService>(); // ✅ NEW: Activity Logging Service
+builder.Services.AddScoped<ILicenseExportService, LicenseExportService>(); // ✅ License Export (Excel/PDF)
+builder.Services.AddScoped<ICloudLicenseService, CloudLicenseService>(); // ✅ Cloud License Activation
+builder.Services.AddScoped<IOfflineLicenseService, OfflineLicenseService>(); // ✅ Offline License Activation
+builder.Services.AddSingleton<IRsaTokenService, RsaTokenService>(); // ✅ RSA Token Signing (singleton for key persistence)
+builder.Services.AddSingleton<ILicenseKeyGenerator, LicenseKeyGenerator>(); // ✅ License Key Generator
+builder.Services.AddScoped<IPurchaseDomainService, PurchaseDomainService>(); // ✅ Purchase Domain Service
+
+// ✅ PERFORMANCE: Centralized caching services
+builder.Services.AddScoped<BitRaserApiProject.Services.Abstractions.IUserContextService, BitRaserApiProject.Services.Implementations.UserContextService>();
+builder.Services.AddScoped<BitRaserApiProject.Services.Abstractions.IPrivateCloudConfigCache, BitRaserApiProject.Services.Implementations.PrivateCloudConfigCache>();
 
 // ✅ FORGOT PASSWORD SERVICES - OTP AND EMAIL (OLD - RETAINED FOR BACKWARD COMPATIBILITY)
 builder.Services.AddSingleton<IOtpService, OtpService>();
@@ -369,8 +392,25 @@ builder.Services.AddScoped<IDatabaseContextFactory, DatabaseContextFactory>();
 builder.Services.AddHttpClient("PolarApi", client =>
 {
     client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    AllowAutoRedirect = true,
+    MaxAutomaticRedirections = 5
 });
 builder.Services.AddScoped<IPolarPaymentService, PolarPaymentService>();
+
+// ✅ DODO PAYMENT SERVICE - Payment integration with Dodo Payments
+builder.Services.AddHttpClient("DodoApi", client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+})
+.ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+{
+    AllowAutoRedirect = true,
+    MaxAutomaticRedirections = 5
+});
+builder.Services.AddScoped<IDodoPaymentService, DodoPaymentService>();
 
 // ✅ HYBRID MULTI-TENANT SUPPORT - Automatic tenant routing
 builder.Services.AddHttpContextAccessor();  // Required for reading JWT claims
@@ -381,8 +421,7 @@ builder.Services.AddScoped<DynamicDbContextFactory>();
 // Singleton for cache persistence across requests
 builder.Services.AddEnterpriseCaching(options =>
 {
-    options.SizeLimit = 2048;  // Max 2048 cache entries
-    options.CompactionPercentage = 0.25;  // Remove 25% when limit reached
+    options.CompactionPercentage = 0.10; // gentle cleanup
 });
 
 // ✅ TIDB DIAGNOSTICS & OBSERVABILITY SYSTEM
@@ -391,7 +430,21 @@ builder.Services.AddSingleton<DiagnosticsMetricsStore>();
 // DB Command Interceptor for SQL query monitoring
 builder.Services.AddSingleton<DbDiagnosticsInterceptor>();
 // TiDB Health Service for cluster inspection
+// TiDB Health Service for cluster inspection
 builder.Services.AddScoped<ITiDbHealthService, TiDbHealthService>();
+
+// ✅ CONFIGURE FORWARDED HEADERS (Crucial for Ngrok/Proxies/Vercel)
+// This ensures we see the REAL Client IP, not the Proxy IP (localhost)
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders =
+        ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+        
+    // Clear known networks/proxies to trust headers from anywhere (Safe for this setup where we check the IP later)
+    // In strict production behind a specific load balancer, you would list its IP here.
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 
 // Configure Controllers with enhanced JSON options
 builder.Services.AddControllers()
@@ -513,10 +566,33 @@ var app = builder.Build();
 // CRITICAL FIX: Apply CORS BEFORE other middleware
 // This must be one of the first middleware in the pipeline
 app.UseCors("AllowVercelFrontend");
+
+// ✅ ENABLE FORWARDED HEADERS - MUST BE AT THE TOP
+// This reads X-Forwarded-For so Request.RemoteIpAddress becomes the real user IP
+app.UseForwardedHeaders();
 Console.WriteLine("🌐 CORS configured for Vercel Frontend: https://dsecure-frontend.vercel.app");
 
-// Configure Swagger for all environments
-if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
+// ✅ CRITICAL: Enable request body buffering for webhook endpoints EARLY in pipeline
+// This allows webhook controllers to read the request body even after middlewares process it
+app.Use(async (context, next) =>
+{
+    var path = context.Request.Path.Value?.ToLowerInvariant() ?? "";
+    
+    // Enable buffering for all webhook endpoints
+    if (path.Contains("/webhook") || 
+        path.Contains("/api/webhooks") || 
+        path.Contains("/api/payments/dodo") ||
+        path.Contains("/api/payments/polar"))
+    {
+        // Enable buffering BEFORE any read
+        context.Request.EnableBuffering();
+    }
+    
+    await next();
+});
+
+// Configure Swagger ONLY in Development
+if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI(options =>
@@ -610,14 +686,39 @@ if (app.Environment.IsDevelopment() || app.Environment.IsProduction())
 // Security headers middleware
 app.Use(async (context, next) =>
 {
+    // Basic security headers
     context.Response.Headers["X-Content-Type-Options"] = "nosniff";
     context.Response.Headers["X-Frame-Options"] = "DENY";
     context.Response.Headers["X-XSS-Protection"] = "1; mode=block";
     context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    
+    // Content Security Policy
+    context.Response.Headers["Content-Security-Policy"] = 
+        "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: https:; " +
+        "font-src 'self' data:; " +
+        "connect-src 'self' https://sandbox-api.polar.sh https://api.polar.sh https://test.dodopayments.com https://live.dodopayments.com; " +
+        "frame-ancestors 'none'; " +
+        "base-uri 'self'; " +
+        "form-action 'self'";
+    
+    // Permissions Policy
+    context.Response.Headers["Permissions-Policy"] = 
+        "geolocation=(), " +
+        "payment=()";
+        // "microphone=(), " +
+        // "camera=(), " +
+        // "payment=();
+        // "usb=(), " +
+        // "magnetometer=(), " +
+        // "gyroscope=(), " +
+        // "accelerometer=()";
 
     if (!app.Environment.IsDevelopment())
     {
-        context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+        context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload";
     }
 
     await next();
@@ -634,6 +735,10 @@ if (string.IsNullOrEmpty(disableHttpsRedirect) || disableHttpsRedirect.ToLower()
 }
 app.UseAuthentication();
 app.UseAuthorization();
+
+// ✅ IP BINDING - Prevent Token Theft
+// Verify that the request IP matches the token's bound IP
+app.UseMiddleware<BitRaserApiProject.Middleware.IpBindingMiddleware>();
 
 // ✅ RATE LIMITING MIDDLEWARE - Protect against abuse
 // Place AFTER Authentication so we can identify users
@@ -698,38 +803,38 @@ catch (Exception ex)
 
 // ✅ STATIC HELPER: Decrypt Private Cloud connection string for DI factory
 // This is a copy of TenantConnectionService.DecryptConnectionString for use in Program.cs
-static string? DecryptConnectionStringStatic(string encryptedConnectionString, string encryptionKey)
-{
-    try
-    {
-        if (string.IsNullOrEmpty(encryptedConnectionString))
-            return null;
+// static string? DecryptConnectionStringStatic(string encryptedConnectionString, string encryptionKey)
+// {
+//     try
+//     {
+//         if (string.IsNullOrEmpty(encryptedConnectionString))
+//             return null;
 
-        // Handle already decrypted connection strings
-        if (encryptedConnectionString.Contains("Server=") || encryptedConnectionString.Contains("server="))
-            return encryptedConnectionString;
+//         // Handle already decrypted connection strings
+//         if (encryptedConnectionString.Contains("Server=") || encryptedConnectionString.Contains("server="))
+//             return encryptedConnectionString;
 
-        var fullCipher = Convert.FromBase64String(encryptedConnectionString);
+//         var fullCipher = Convert.FromBase64String(encryptedConnectionString);
 
-        using var aes = System.Security.Cryptography.Aes.Create();
-        aes.Key = System.Text.Encoding.UTF8.GetBytes(encryptionKey.PadRight(32).Substring(0, 32));
-        aes.Mode = System.Security.Cryptography.CipherMode.CBC;
-        aes.Padding = System.Security.Cryptography.PaddingMode.PKCS7;
+//         using var aes = System.Security.Cryptography.Aes.Create();
+//         aes.Key = System.Text.Encoding.UTF8.GetBytes(encryptionKey.PadRight(32).Substring(0, 32));
+//         aes.Mode = System.Security.Cryptography.CipherMode.CBC;
+//         aes.Padding = System.Security.Cryptography.PaddingMode.PKCS7;
 
-        var iv = new byte[16];
-        var cipher = new byte[fullCipher.Length - 16];
+//         var iv = new byte[16];
+//         var cipher = new byte[fullCipher.Length - 16];
 
-        Array.Copy(fullCipher, 0, iv, 0, 16);
-        Array.Copy(fullCipher, 16, cipher, 0, cipher.Length);
+//         Array.Copy(fullCipher, 0, iv, 0, 16);
+//         Array.Copy(fullCipher, 16, cipher, 0, cipher.Length);
 
-        aes.IV = iv;
+//         aes.IV = iv;
 
-        using var decryptor = aes.CreateDecryptor();
-        var decryptedBytes = decryptor.TransformFinalBlock(cipher, 0, cipher.Length);
-        return System.Text.Encoding.UTF8.GetString(decryptedBytes);
-    }
-    catch
-    {
-        return null;
-    }
-}
+//         using var decryptor = aes.CreateDecryptor();
+//         var decryptedBytes = decryptor.TransformFinalBlock(cipher, 0, cipher.Length);
+//         return System.Text.Encoding.UTF8.GetString(decryptedBytes);
+//     }
+//     catch
+//     {
+//         return null;
+//     }
+// }

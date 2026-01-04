@@ -934,35 +934,36 @@ namespace BitRaserApiProject.Controllers
                     {
                         using var ms = new MemoryStream();
                         await request.HeaderLeftLogo.CopyToAsync(ms);
-                        existingSettings.HeaderLeftLogoBase64 = Convert.ToBase64String(ms.ToArray());
+                        // ✅ COMPRESS before saving
+                        existingSettings.HeaderLeftLogoBase64 = ImageCompressionHelper.CompressBase64Image(Convert.ToBase64String(ms.ToArray()));
                     }
 
                     if (request.HeaderRightLogo != null && request.HeaderRightLogo.Length > 0)
                     {
                         using var ms = new MemoryStream();
                         await request.HeaderRightLogo.CopyToAsync(ms);
-                        existingSettings.HeaderRightLogoBase64 = Convert.ToBase64String(ms.ToArray());
+                        existingSettings.HeaderRightLogoBase64 = ImageCompressionHelper.CompressBase64Image(Convert.ToBase64String(ms.ToArray()));
                     }
 
                     if (request.WatermarkImage != null && request.WatermarkImage.Length > 0)
                     {
                         using var ms = new MemoryStream();
                         await request.WatermarkImage.CopyToAsync(ms);
-                        existingSettings.WatermarkImageBase64 = Convert.ToBase64String(ms.ToArray());
+                        existingSettings.WatermarkImageBase64 = ImageCompressionHelper.CompressBase64Image(Convert.ToBase64String(ms.ToArray()));
                     }
 
                     if (request.TechnicianSignature != null && request.TechnicianSignature.Length > 0)
                     {
                         using var ms = new MemoryStream();
                         await request.TechnicianSignature.CopyToAsync(ms);
-                        existingSettings.TechnicianSignatureBase64 = Convert.ToBase64String(ms.ToArray());
+                        existingSettings.TechnicianSignatureBase64 = ImageCompressionHelper.CompressBase64Image(Convert.ToBase64String(ms.ToArray()));
                     }
 
                     if (request.ValidatorSignature != null && request.ValidatorSignature.Length > 0)
                     {
                         using var ms = new MemoryStream();
                         await request.ValidatorSignature.CopyToAsync(ms);
-                        existingSettings.ValidatorSignatureBase64 = Convert.ToBase64String(ms.ToArray());
+                        existingSettings.ValidatorSignatureBase64 = ImageCompressionHelper.CompressBase64Image(Convert.ToBase64String(ms.ToArray()));
                     }
 
                     await context.SaveChangesAsync();
@@ -995,35 +996,35 @@ namespace BitRaserApiProject.Controllers
                     {
                         using var ms = new MemoryStream();
                         await request.HeaderLeftLogo.CopyToAsync(ms);
-                        newSettings.HeaderLeftLogoBase64 = Convert.ToBase64String(ms.ToArray());
+                        newSettings.HeaderLeftLogoBase64 = ImageCompressionHelper.CompressBase64Image(Convert.ToBase64String(ms.ToArray()));
                     }
 
                     if (request.HeaderRightLogo != null && request.HeaderRightLogo.Length > 0)
                     {
                         using var ms = new MemoryStream();
                         await request.HeaderRightLogo.CopyToAsync(ms);
-                        newSettings.HeaderRightLogoBase64 = Convert.ToBase64String(ms.ToArray());
+                        newSettings.HeaderRightLogoBase64 = ImageCompressionHelper.CompressBase64Image(Convert.ToBase64String(ms.ToArray()));
                     }
 
                     if (request.WatermarkImage != null && request.WatermarkImage.Length > 0)
                     {
                         using var ms = new MemoryStream();
                         await request.WatermarkImage.CopyToAsync(ms);
-                        newSettings.WatermarkImageBase64 = Convert.ToBase64String(ms.ToArray());
+                        newSettings.WatermarkImageBase64 = ImageCompressionHelper.CompressBase64Image(Convert.ToBase64String(ms.ToArray()));
                     }
 
                     if (request.TechnicianSignature != null && request.TechnicianSignature.Length > 0)
                     {
                         using var ms = new MemoryStream();
                         await request.TechnicianSignature.CopyToAsync(ms);
-                        newSettings.TechnicianSignatureBase64 = Convert.ToBase64String(ms.ToArray());
+                        newSettings.TechnicianSignatureBase64 = ImageCompressionHelper.CompressBase64Image(Convert.ToBase64String(ms.ToArray()));
                     }
 
                     if (request.ValidatorSignature != null && request.ValidatorSignature.Length > 0)
                     {
                         using var ms = new MemoryStream();
                         await request.ValidatorSignature.CopyToAsync(ms);
-                        newSettings.ValidatorSignatureBase64 = Convert.ToBase64String(ms.ToArray());
+                        newSettings.ValidatorSignatureBase64 = ImageCompressionHelper.CompressBase64Image(Convert.ToBase64String(ms.ToArray()));
                     }
 
                     context.PdfExportSettings.Add(newSettings);
@@ -1072,11 +1073,11 @@ namespace BitRaserApiProject.Controllers
                     existingSettings.TechnicianDept = request.TechnicianDept ?? existingSettings.TechnicianDept;
                     existingSettings.ValidatorName = request.ValidatorName ?? existingSettings.ValidatorName;
                     existingSettings.ValidatorDept = request.ValidatorDept ?? existingSettings.ValidatorDept;
-                    existingSettings.HeaderLeftLogoBase64 = request.HeaderLeftLogoBase64 ?? existingSettings.HeaderLeftLogoBase64;
-                    existingSettings.HeaderRightLogoBase64 = request.HeaderRightLogoBase64 ?? existingSettings.HeaderRightLogoBase64;
-                    existingSettings.WatermarkImageBase64 = request.WatermarkImageBase64 ?? existingSettings.WatermarkImageBase64;
-                    existingSettings.TechnicianSignatureBase64 = request.TechnicianSignatureBase64 ?? existingSettings.TechnicianSignatureBase64;
-                    existingSettings.ValidatorSignatureBase64 = request.ValidatorSignatureBase64 ?? existingSettings.ValidatorSignatureBase64;
+                    existingSettings.HeaderLeftLogoBase64 = ImageCompressionHelper.CompressBase64Image(request.HeaderLeftLogoBase64) ?? existingSettings.HeaderLeftLogoBase64;
+                    existingSettings.HeaderRightLogoBase64 = ImageCompressionHelper.CompressBase64Image(request.HeaderRightLogoBase64) ?? existingSettings.HeaderRightLogoBase64;
+                    existingSettings.WatermarkImageBase64 = ImageCompressionHelper.CompressBase64Image(request.WatermarkImageBase64) ?? existingSettings.WatermarkImageBase64;
+                    existingSettings.TechnicianSignatureBase64 = ImageCompressionHelper.CompressBase64Image(request.TechnicianSignatureBase64) ?? existingSettings.TechnicianSignatureBase64;
+                    existingSettings.ValidatorSignatureBase64 = ImageCompressionHelper.CompressBase64Image(request.ValidatorSignatureBase64) ?? existingSettings.ValidatorSignatureBase64;
                     existingSettings.UpdatedAt = DateTime.UtcNow;
 
                     await context.SaveChangesAsync();
@@ -1100,11 +1101,11 @@ namespace BitRaserApiProject.Controllers
                         TechnicianDept = request.TechnicianDept,
                         ValidatorName = request.ValidatorName,
                         ValidatorDept = request.ValidatorDept,
-                        HeaderLeftLogoBase64 = request.HeaderLeftLogoBase64,
-                        HeaderRightLogoBase64 = request.HeaderRightLogoBase64,
-                        WatermarkImageBase64 = request.WatermarkImageBase64,
-                        TechnicianSignatureBase64 = request.TechnicianSignatureBase64,
-                        ValidatorSignatureBase64 = request.ValidatorSignatureBase64,
+                        HeaderLeftLogoBase64 = ImageCompressionHelper.CompressBase64Image(request.HeaderLeftLogoBase64),
+                        HeaderRightLogoBase64 = ImageCompressionHelper.CompressBase64Image(request.HeaderRightLogoBase64),
+                        WatermarkImageBase64 = ImageCompressionHelper.CompressBase64Image(request.WatermarkImageBase64),
+                        TechnicianSignatureBase64 = ImageCompressionHelper.CompressBase64Image(request.TechnicianSignatureBase64),
+                        ValidatorSignatureBase64 = ImageCompressionHelper.CompressBase64Image(request.ValidatorSignatureBase64),
                         IsActive = true,
                         CreatedAt = DateTime.UtcNow
                     };
@@ -1411,12 +1412,12 @@ namespace BitRaserApiProject.Controllers
                 HasWatermarkImage = !string.IsNullOrEmpty(settings.WatermarkImageBase64),
                 HasTechnicianSignature = !string.IsNullOrEmpty(settings.TechnicianSignatureBase64),
                 HasValidatorSignature = !string.IsNullOrEmpty(settings.ValidatorSignatureBase64),
-                // ✅ Return actual base64 image data
-                HeaderLeftLogoBase64 = settings.HeaderLeftLogoBase64,
-                HeaderRightLogoBase64 = settings.HeaderRightLogoBase64,
-                WatermarkImageBase64 = settings.WatermarkImageBase64,
-                TechnicianSignatureBase64 = settings.TechnicianSignatureBase64,
-                ValidatorSignatureBase64 = settings.ValidatorSignatureBase64,
+                // ✅ DECOMPRESS images before returning to frontend
+                HeaderLeftLogoBase64 = ImageCompressionHelper.DecompressBase64Image(settings.HeaderLeftLogoBase64),
+                HeaderRightLogoBase64 = ImageCompressionHelper.DecompressBase64Image(settings.HeaderRightLogoBase64),
+                WatermarkImageBase64 = ImageCompressionHelper.DecompressBase64Image(settings.WatermarkImageBase64),
+                TechnicianSignatureBase64 = ImageCompressionHelper.DecompressBase64Image(settings.TechnicianSignatureBase64),
+                ValidatorSignatureBase64 = ImageCompressionHelper.DecompressBase64Image(settings.ValidatorSignatureBase64),
                 IsActive = settings.IsActive,
                 CreatedAt = settings.CreatedAt,
                 UpdatedAt = settings.UpdatedAt

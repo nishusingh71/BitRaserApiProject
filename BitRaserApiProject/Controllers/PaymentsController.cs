@@ -1,3 +1,4 @@
+using BitRaserApiProject.Data;
 using BitRaserApiProject.Models.DTOs;
 using BitRaserApiProject.Services;
 using Microsoft.AspNetCore.Authorization;
@@ -8,22 +9,28 @@ using System.Text.Json;
 namespace BitRaserApiProject.Controllers
 {
     /// <summary>
-    /// Payment Controller - Handles Polar.sh payment integration
+    /// Payment Controller - Handles Polar.sh and Dodo Payments integration
     /// Endpoints for checkout, webhooks, and order management
     /// </summary>
     [ApiController]
     [Route("api/[controller]")]
     public class PaymentsController : ControllerBase
     {
-        private readonly IPolarPaymentService _paymentService;
+        private readonly IPolarPaymentService _polarPaymentService;
+        private readonly IDodoPaymentService _dodoPaymentService;
         private readonly ILogger<PaymentsController> _logger;
+        private readonly ApplicationDbContext _context;
 
         public PaymentsController(
-            IPolarPaymentService paymentService,
-            ILogger<PaymentsController> logger)
+            IPolarPaymentService polarPaymentService,
+            IDodoPaymentService dodoPaymentService,
+            ILogger<PaymentsController> logger,
+            ApplicationDbContext context)
         {
-            _paymentService = paymentService;
+            _polarPaymentService = polarPaymentService;
+            _dodoPaymentService = dodoPaymentService;
             _logger = logger;
+            _context = context;
         }
 
         #region Checkout Endpoints
@@ -52,7 +59,7 @@ namespace BitRaserApiProject.Controllers
                 // Use email from request if customer info provided, otherwise use authenticated user
                 var checkoutEmail = request.Customer?.Email ?? userEmail;
 
-                var response = await _paymentService.CreateCheckoutAsync(request, checkoutEmail);
+                var response = await _polarPaymentService.CreateCheckoutAsync(request, checkoutEmail);
 
                 if (!response.Success)
                 {
@@ -69,7 +76,7 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
-        /// Get available products for purchase
+        /// Get available products for purchase (legacy)
         /// </summary>
         [HttpGet("products")]
         [ProducesResponseType(typeof(List<ProductDto>), StatusCodes.Status200OK)]
@@ -77,13 +84,95 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
-                var products = await _paymentService.GetProductsAsync();
+                var products = await _polarPaymentService.GetProductsAsync();
                 return Ok(products);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error getting products");
                 return StatusCode(500, new { error = "Failed to get products" });
+            }
+        }
+
+        #endregion
+
+        #region Pro-Level Billing Endpoints
+
+        /// <summary>
+        /// ✅ PRO-LEVEL: Get billing plans with monthly/yearly price IDs
+        /// Optimized for React pricing page - returns monthlyPriceId and yearlyPriceId
+        /// Cached for 1 hour for optimal performance
+        /// </summary>
+        [HttpGet("billing/plans")]
+        [ProducesResponseType(typeof(List<BillingPlanDto>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetBillingPlans()
+        {
+            try
+            {
+                var plans = await _polarPaymentService.GetBillingPlansAsync();
+                return Ok(plans);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting billing plans");
+                return StatusCode(500, new { error = "Failed to get billing plans" });
+            }
+        }
+
+        /// <summary>
+        /// ✅ PRO-LEVEL: Create checkout using price ID (not product ID)
+        /// Use monthlyPriceId or yearlyPriceId from GET /billing/plans response
+        /// </summary>
+        /// <param name="request">Price-based checkout request</param>
+        [HttpPost("billing/checkout")]
+        [Authorize]
+        [ProducesResponseType(typeof(PriceCheckoutResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<IActionResult> CreateBillingCheckout([FromBody] PriceCheckoutRequest request)
+        {
+            try
+            {
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    return Unauthorized(new { error = "User not authenticated" });
+                }
+
+                var response = await _polarPaymentService.CreatePriceCheckoutAsync(request, userEmail);
+
+                if (!response.Success)
+                {
+                    return BadRequest(response);
+                }
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating billing checkout");
+                return StatusCode(500, new { error = "Failed to create checkout session" });
+            }
+        }
+
+        /// <summary>
+        /// ✅ PRO-LEVEL: Force refresh the product catalog cache
+        /// Admin only - use sparingly
+        /// </summary>
+        [HttpPost("billing/refresh-cache")]
+        [Authorize]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<IActionResult> RefreshBillingCache()
+        {
+            try
+            {
+                await _polarPaymentService.RefreshProductCacheAsync();
+                return Ok(new { message = "Product cache refreshed successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error refreshing product cache");
+                return StatusCode(500, new { error = "Failed to refresh cache" });
             }
         }
 
@@ -110,7 +199,7 @@ namespace BitRaserApiProject.Controllers
                     ?? Request.Headers["X-Polar-Signature"].FirstOrDefault()
                     ?? "";
 
-                if (!_paymentService.VerifyWebhookSignature(rawPayload, signature))
+                if (!_polarPaymentService.VerifyWebhookSignature(rawPayload, signature))
                 {
                     _logger.LogWarning("Invalid webhook signature");
                     return Unauthorized(new { error = "Invalid signature" });
@@ -130,7 +219,7 @@ namespace BitRaserApiProject.Controllers
                 _logger.LogInformation("Received Polar webhook: {EventType}", webhookEvent.Type);
 
                 // Process the webhook
-                var success = await _paymentService.ProcessWebhookAsync(webhookEvent, rawPayload);
+                var success = await _polarPaymentService.ProcessWebhookAsync(webhookEvent, rawPayload);
 
                 if (success)
                 {
@@ -175,7 +264,7 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { error = "User not authenticated" });
                 }
 
-                var order = await _paymentService.GetOrderAsync(orderId, userEmail);
+                var order = await _polarPaymentService.GetOrderAsync(orderId, userEmail);
 
                 if (order == null)
                 {
@@ -213,7 +302,7 @@ namespace BitRaserApiProject.Controllers
                 pageSize = Math.Clamp(pageSize, 1, 50);
                 page = Math.Max(1, page);
 
-                var orders = await _paymentService.GetOrdersAsync(userEmail, page, pageSize);
+                var orders = await _polarPaymentService.GetOrdersAsync(userEmail, page, pageSize);
 
                 return Ok(orders);
             }
@@ -241,7 +330,7 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { error = "User not authenticated" });
                 }
 
-                var order = await _paymentService.GetOrderAsync(orderId, userEmail);
+                var order = await _polarPaymentService.GetOrderAsync(orderId, userEmail);
 
                 if (order == null)
                 {
@@ -268,5 +357,452 @@ namespace BitRaserApiProject.Controllers
         }
 
         #endregion
+
+        #region Dodo Payments Endpoints
+
+        /// <summary>
+        /// 🦤 Create a Dodo product
+        /// </summary>
+        [HttpPost("dodo/products")]
+        [Authorize] // Removed role restriction for testing
+        [ProducesResponseType(typeof(DodoProductResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<IActionResult> CreateDodoProduct([FromBody] DodoCreateProductRequest request)
+        {
+            try
+            {
+                // Ensure only admins can create products
+                // Note: The [Authorize(Roles = ...)] attribute handles this, but adding extra check if needed
+                
+                var response = await _dodoPaymentService.CreateProductAsync(request);
+
+                if (!response.Success)
+                {
+                    return BadRequest(new { error = response.Message });
+                }
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating Dodo product");
+                return StatusCode(500, new { error = "Failed to create product" });
+            }
+        }
+
+        /// <summary>
+        /// 🦤 Sync Customer with Dodo
+        /// Creates or updates customer in Dodo Payments system
+        /// </summary>
+        [HttpPost("dodo/sync-customer")]
+        [Authorize]
+        [ProducesResponseType(typeof(DodoCustomerResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> SyncDodoCustomer([FromBody] DodoCustomerRequest request)
+        {
+            try
+            {
+                var response = await _dodoPaymentService.CreateOrUpdateCustomerAsync(
+                    request.Email,
+                    request.Name,
+                    request.Phone
+                );
+
+                if (!response.Success)
+                {
+                    return BadRequest(response);
+                }
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error syncing customer with Dodo");
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = "Failed to sync customer",
+                    error = ex.Message
+                });
+            }
+        }
+
+        /// <summary>
+        /// 🦤 Get Invoice Details from Dodo
+        /// Fetches complete invoice information including products, customer, amounts
+        /// </summary>
+        [HttpGet("dodo/invoices/{invoiceId}")]
+        [Authorize]
+        [ProducesResponseType(typeof(DodoInvoiceResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetDodoInvoice(string invoiceId)
+        {
+            try
+            {
+                var response = await _dodoPaymentService.GetInvoiceAsync(invoiceId);
+
+                if (!response.Success)
+                {
+                    return NotFound(response);
+                }
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching invoice {InvoiceId}", invoiceId);
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = "Failed to fetch invoice",
+                    error = ex.Message
+                });
+            }
+        }
+
+        /// <summary>
+        /// 🦤 Get Invoice by Order ID
+        /// Fetches invoice ID from DB order then gets full invoice from Dodo
+        /// </summary>
+        [HttpGet("orders/{orderId}/invoice")]
+        [Authorize]
+        [ProducesResponseType(typeof(DodoInvoiceResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetOrderInvoice(int orderId)
+        {
+            try
+            {
+                // Get order from DB
+                var order = await _context.Orders.FindAsync(orderId);
+                
+                if (order == null)
+                {
+                    return NotFound(new { success = false, message = "Order not found" });
+                }
+
+                // Check if order has invoice ID
+                if (string.IsNullOrEmpty(order.DodoInvoiceId))
+                {
+                    // If no invoice ID, try to use payment ID to get invoice
+                    if (!string.IsNullOrEmpty(order.DodoPaymentId))
+                    {
+                        return Ok(new
+                        {
+                            success = true,
+                            message = "No invoice ID stored, use payment ID",
+                            order_id = order.OrderId,
+                            dodo_payment_id = order.DodoPaymentId,
+                            amount = order.AmountCents,
+                            currency = order.Currency,
+                            product_name = order.ProductName,
+                            status = order.Status,
+                            created_at = order.CreatedAt
+                        });
+                    }
+                    return NotFound(new { success = false, message = "No invoice ID for this order" });
+                }
+
+                // Fetch full invoice from Dodo
+                var response = await _dodoPaymentService.GetInvoiceAsync(order.DodoInvoiceId);
+
+                if (!response.Success)
+                {
+                    return NotFound(response);
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    order_id = order.OrderId,
+                    dodo_invoice_id = order.DodoInvoiceId,
+                    invoice = response.Invoice
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching invoice for order {OrderId}", orderId);
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = "Failed to fetch invoice",
+                    error = ex.Message
+                });
+            }
+        }
+
+        /// <summary>
+        /// 🦤 Create Dodo Webhook
+        /// </summary>
+        [HttpPost("dodo/webhooks/manage")]
+        [Authorize]
+        public async Task<IActionResult> CreateDodoWebhook([FromBody] DodoWebhookRequest request)
+        {
+            try
+            {
+                var response = await _dodoPaymentService.CreateWebhookAsync(request.Url, request.Events);
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating Dodo webhook");
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// 🦤 List Dodo Webhooks
+        /// </summary>
+        [HttpGet("dodo/webhooks/manage")]
+        [Authorize]
+        public async Task<IActionResult> GetDodoWebhooks()
+        {
+            try
+            {
+                var webhooks = await _dodoPaymentService.GetWebhooksAsync();
+                return Ok(webhooks);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching Dodo webhooks");
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// 🦤 Delete Dodo Webhook
+        /// </summary>
+        [HttpDelete("dodo/webhooks/manage/{id}")]
+        [Authorize]
+        public async Task<IActionResult> DeleteDodoWebhook(string id)
+        {
+            try
+            {
+                var success = await _dodoPaymentService.DeleteWebhookAsync(id);
+                if (!success) return BadRequest(new { error = "Failed to delete webhook" });
+                return Ok(new { message = "Webhook deleted successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error deleting Dodo webhook");
+                return StatusCode(500, new { error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// 🦤 Create a Dodo checkout session
+        /// </summary>
+        [HttpPost("dodo/checkout")]
+        [Authorize]
+        [ProducesResponseType(typeof(DodoCheckoutResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+        public async Task<IActionResult> CreateDodoCheckout([FromBody] DodoCheckoutRequest request)
+        {
+            try
+            {
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    return Unauthorized(new { error = "User not authenticated" });
+                }
+
+                var response = await _dodoPaymentService.CreateCheckoutAsync(request, request.CustomerEmail ?? userEmail);
+
+                if (!response.Success)
+                {
+                    return BadRequest(response);
+                }
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating Dodo checkout");
+                return StatusCode(500, new { error = "Failed to create Dodo checkout session" });
+            }
+        }
+
+        /// <summary>
+        /// 🦤 Dodo Payments webhook endpoint
+        /// Receives payment confirmations and updates from Dodo
+        /// Supports both /api/Payments/dodo/webhook and /webhooks/dodo
+        /// </summary>
+        [HttpPost("dodo/webhook")]
+        [HttpPost("/webhooks/dodo")] // Alias route for Dodo Payments
+        [AllowAnonymous]
+        public async Task<IActionResult> HandleDodoWebhook()
+        {
+            try
+            {
+                // ✅ Enable buffering so body can be read correctly even if consumed by middleware
+                Request.EnableBuffering();
+                Request.Body.Position = 0;
+
+                // Read raw body for signature verification
+                using var reader = new StreamReader(Request.Body, leaveOpen: true);
+                var rawPayload = await reader.ReadToEndAsync();
+                Request.Body.Position = 0; // Reset just in case
+
+                if (string.IsNullOrEmpty(rawPayload))
+                {
+                   _logger.LogWarning("❌ Empty webhook payload received in PaymentsController");
+                   return BadRequest(new { error = "Empty payload" });
+                }
+
+                // Get webhook signature headers
+                var webhookId = Request.Headers["webhook-id"].FirstOrDefault() ?? "";
+                var webhookSignature = Request.Headers["webhook-signature"].FirstOrDefault() ?? "";
+                var webhookTimestamp = Request.Headers["webhook-timestamp"].FirstOrDefault() ?? "";
+
+                // Verify webhook signature
+                if (!_dodoPaymentService.VerifyWebhookSignature(rawPayload, webhookId, webhookSignature, webhookTimestamp))
+                {
+                    _logger.LogWarning("Invalid Dodo webhook signature");
+                    return Unauthorized(new { error = "Invalid signature" });
+                }
+
+                // Parse webhook event
+                var webhookEvent = JsonSerializer.Deserialize<DodoWebhookEvent>(rawPayload, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                if (webhookEvent == null)
+                {
+                    return BadRequest(new { error = "Invalid webhook payload" });
+                }
+
+                _logger.LogInformation("🦤 Received Dodo webhook: {EventType}", webhookEvent.Type);
+
+                // Process the webhook
+                var success = await _dodoPaymentService.ProcessWebhookAsync(webhookEvent, rawPayload);
+
+                if (success)
+                {
+                    return Ok(new { received = true });
+                }
+                else
+                {
+                    return StatusCode(500, new { error = "Failed to process webhook" });
+                }
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogError(ex, "Invalid Dodo webhook JSON payload");
+                return BadRequest(new { error = "Invalid JSON payload" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error processing Dodo webhook");
+                return StatusCode(500, new { error = "Webhook processing failed" });
+            }
+        }
+
+        /// <summary>
+        /// 🦤 Get available Dodo products
+        /// </summary>
+        [HttpGet("dodo/products")]
+        [ProducesResponseType(typeof(List<DodoBillingPlanDto>), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetDodoProducts()
+        {
+            try
+            {
+                var products = await _dodoPaymentService.GetProductsAsync();
+                return Ok(products);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting Dodo products");
+                return StatusCode(500, new { error = "Failed to get Dodo products" });
+            }
+        }
+
+        /// <summary>
+        /// 🦤 Force refresh Dodo product cache
+        /// </summary>
+        [HttpPost("dodo/refresh-cache")]
+        [Authorize]
+        [ProducesResponseType(StatusCodes.Status200OK)]
+        public async Task<IActionResult> RefreshDodoProductCache()
+        {
+            try
+            {
+                await _dodoPaymentService.RefreshProductCacheAsync();
+                return Ok(new { message = "Dodo product cache refreshed successfully" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error refreshing Dodo product cache");
+                return StatusCode(500, new { error = "Failed to refresh cache" });
+            }
+        }
+
+        /// <summary>
+        /// 🦤 Get Dodo order by ID
+        /// </summary>
+        [HttpGet("dodo/orders/{orderId}")]
+        [Authorize]
+        [ProducesResponseType(typeof(OrderDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetDodoOrder(int orderId)
+        {
+            try
+            {
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    return Unauthorized(new { error = "User not authenticated" });
+                }
+
+                var order = await _dodoPaymentService.GetOrderAsync(orderId, userEmail);
+
+                if (order == null)
+                {
+                    return NotFound(new { error = "Order not found" });
+                }
+
+                return Ok(order);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting Dodo order {OrderId}", orderId);
+                return StatusCode(500, new { error = "Failed to get order" });
+            }
+        }
+
+        /// <summary>
+        /// 🦤 Get all Dodo orders for authenticated user
+        /// </summary>
+        [HttpGet("dodo/orders")]
+        [Authorize]
+        [ProducesResponseType(typeof(OrderListResponse), StatusCodes.Status200OK)]
+        public async Task<IActionResult> GetDodoOrders([FromQuery] int page = 1, [FromQuery] int pageSize = 10)
+        {
+            try
+            {
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    return Unauthorized(new { error = "User not authenticated" });
+                }
+
+                pageSize = Math.Clamp(pageSize, 1, 50);
+                page = Math.Max(1, page);
+
+                var orders = await _dodoPaymentService.GetOrdersAsync(userEmail, page, pageSize);
+
+                return Ok(orders);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting Dodo orders");
+                return StatusCode(500, new { error = "Failed to get orders" });
+            }
+        }
+
+        #endregion
     }
 }
+

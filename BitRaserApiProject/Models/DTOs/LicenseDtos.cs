@@ -60,6 +60,18 @@ namespace BitRaserApiProject.Models.DTOs
         
         /// <summary>Total storage/disk size in GB</summary>
         public int? storage_gb { get; set; }
+        
+        /// <summary>CPU ID (unique processor identifier)</summary>
+        [MaxLength(100)]
+        public string? cpu_id { get; set; }
+        
+        /// <summary>Operating system name (e.g., "Windows", "Linux", "macOS")</summary>
+        [MaxLength(50)]
+        public string? os { get; set; }
+        
+        /// <summary>Operating system version (e.g., "11", "22H2", "14.0")</summary>
+        [MaxLength(50)]
+        public string? os_version { get; set; }
     }
 
     /// <summary>
@@ -70,11 +82,8 @@ namespace BitRaserApiProject.Models.DTOs
         public string status { get; set; } = string.Empty; // OK / INVALID_KEY / REVOKED / LICENSE_EXPIRED / HW_MISMATCH / ERROR
         public string? expiry { get; set; } // yyyy-MM-dd format
         public string? edition { get; set; } // BASIC / PRO / ENTERPRISE
-        public int? server_revision { get; set; }
         public string? license_status { get; set; } // ACTIVE / REVOKED / EXPIRED
-        
-        // ✅ MACHINE INFO (returned when activation is successful)
-        public MachineInfoResponse? machine_info { get; set; }
+        public int? server_revision { get; set; }
     }
     
     /// <summary>
@@ -92,6 +101,9 @@ namespace BitRaserApiProject.Models.DTOs
         public string? cpu_info { get; set; }
         public int? ram_gb { get; set; }
         public int? storage_gb { get; set; }
+        public string? cpu_id { get; set; }
+        public string? os { get; set; }
+        public string? os_version { get; set; }
     }
 
 

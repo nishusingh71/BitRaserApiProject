@@ -27,30 +27,31 @@ namespace BitRaserApiProject.Middleware
             // Check if encryption is enabled
             _encryptionEnabled = _configuration.GetValue<bool>("Encryption:Enabled", true);
       
-          if (!_encryptionEnabled)
+            if (!_encryptionEnabled)
             {
-      _logger.LogWarning("⚠️ Response encryption is DISABLED in configuration");
+                _logger.LogWarning("⚠️ Response encryption is DISABLED in configuration");
                 _encryptionKey = string.Empty;
                 return;
- }
+            }
 
-  // Get encryption key from configuration
-     _encryptionKey = _configuration["Encryption:ResponseKey"]
-   ?? _configuration["Encryption:Key"]
-      ?? throw new InvalidOperationException(
-      "Encryption key not found in configuration. " +
-   "Please set 'Encryption:ResponseKey' or 'Encryption:Key' in appsettings.json");
+            // Get encryption key from environment variables first, then configuration
+            _encryptionKey = Environment.GetEnvironmentVariable("Encryption__ResponseKey")
+                ?? Environment.GetEnvironmentVariable("Encryption__Key")
+                ?? _configuration["Encryption:ResponseKey"]
+                ?? _configuration["Encryption:Key"]
+                ?? throw new InvalidOperationException(
+                    "Encryption key not found. Set Encryption__ResponseKey or Encryption__Key environment variable.");
 
             // Validate key length
-       if (_encryptionKey.Length < 32)
-      {
-_logger.LogWarning(
-   "⚠️ Encryption key is shorter than 32 characters. " +
-    "It will be padded, but consider using a 32-character key for AES-256.");
-     }
+            if (_encryptionKey.Length < 32)
+            {
+                _logger.LogWarning(
+                    "⚠️ Encryption key is shorter than 32 characters. " +
+                    "It will be padded, but consider using a 32-character key for AES-256.");
+            }
   
-     _logger.LogInformation("✅ Response encryption is ENABLED");
-}
+            _logger.LogInformation("✅ Response encryption is ENABLED");
+        }
 
         public async Task InvokeAsync(HttpContext context)
 {
@@ -201,11 +202,14 @@ return true;
      "/api/auth/login",
      "/api/time/server-time",
          "/time/server-time",
-         "/api/contactformsubmissions",
-         "/api/enhancedauditreports/export-settings",
-         "/api/enhancedauditreports/export-settings-json",
-         "/api/rendermetrics",
-         "/api/diagnostics"
+        //  "/api/contactformsubmissions",
+        //  "/api/enhancedauditreports/export-settings",
+        //  "/api/enhancedauditreports/export-settings-json",
+         "/api/diagnostics",
+         "/api/webhooks/dodo",
+         "/api/payments/dodo/webhook",
+         "/api/payments/dodo/checkout",
+         "/api/payments/dodo/products",
    };
 
   if (authPaths.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase)))

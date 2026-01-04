@@ -24,17 +24,32 @@ namespace BitRaserApiProject.Controllers
         private readonly ILogger<LicenseController> _logger;
         private readonly IConfiguration _configuration;
         private readonly ICacheService _cacheService;
+        private readonly ILicenseExportService _exportService;
+        private readonly ICloudLicenseService _cloudService;
+        private readonly IOfflineLicenseService _offlineService;
+        private readonly IRsaTokenService _rsaService;
+        private readonly ILicenseKeyGenerator _keyGenerator;
 
         public LicenseController(
               DynamicDbContextFactory contextFactory,
            ILogger<LicenseController> logger,
        IConfiguration configuration,
-       ICacheService cacheService)
+       ICacheService cacheService,
+       ILicenseExportService exportService,
+       ICloudLicenseService cloudService,
+       IOfflineLicenseService offlineService,
+       IRsaTokenService rsaService,
+       ILicenseKeyGenerator keyGenerator)
         {
             _contextFactory = contextFactory;
             _logger = logger;
             _configuration = configuration;
             _cacheService = cacheService;
+            _exportService = exportService;
+            _cloudService = cloudService;
+            _offlineService = offlineService;
+            _rsaService = rsaService;
+            _keyGenerator = keyGenerator;
         }
 
         #region Public Endpoints (Client-facing)
@@ -438,6 +453,597 @@ namespace BitRaserApiProject.Controllers
 
         #endregion
 
+        #region Cloud Activation Endpoints
+
+        /// <summary>
+        /// Cloud Login - authenticate with email/password and get assigned licenses
+        /// POST /api/License/cloud/login
+        /// </summary>
+        [AllowAnonymous]
+        [HttpPost("cloud/login")]
+        [ProducesResponseType(typeof(CloudLoginResponse), 200)]
+        public async Task<ActionResult<CloudLoginResponse>> CloudLogin([FromBody] CloudLoginRequest request)
+        {
+            var response = await _cloudService.LoginAsync(request);
+            
+            if (!response.Success)
+            {
+                return Unauthorized(response);
+            }
+            
+            return Ok(response);
+        }
+
+        /// <summary>
+        /// Cloud Activate - activate license on a device (requires prior login)
+        /// POST /api/License/cloud/activate
+        /// </summary>
+        [Authorize]
+        [HttpPost("cloud/activate")]
+        [ProducesResponseType(typeof(CloudActivateResponse), 200)]
+        public async Task<ActionResult<CloudActivateResponse>> CloudActivate([FromBody] CloudActivateRequest request)
+        {
+            // Get user email from claims
+            var userEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                ?? User.FindFirst("email")?.Value
+                ?? User.Identity?.Name;
+
+            if (string.IsNullOrEmpty(userEmail))
+            {
+                return Unauthorized(new CloudActivateResponse
+                {
+                    Success = false,
+                    Message = "User not authenticated"
+                });
+            }
+
+            var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString();
+            var response = await _cloudService.ActivateDeviceAsync(userEmail, request, ipAddress);
+            
+            return Ok(response);
+        }
+
+        /// <summary>
+        /// Get user's licenses with device info
+        /// GET /api/License/cloud/licenses
+        /// </summary>
+        [Authorize]
+        [HttpGet("cloud/licenses")]
+        [ProducesResponseType(typeof(List<CloudLicenseInfo>), 200)]
+        public async Task<ActionResult<List<CloudLicenseInfo>>> GetCloudLicenses()
+        {
+            var userEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                ?? User.FindFirst("email")?.Value
+                ?? User.Identity?.Name;
+
+            if (string.IsNullOrEmpty(userEmail))
+            {
+                return Unauthorized(new { message = "User not authenticated" });
+            }
+
+            var licenses = await _cloudService.GetUserLicensesAsync(userEmail);
+            return Ok(licenses);
+        }
+
+        /// <summary>
+        /// Get all devices activated under a license
+        /// GET /api/License/cloud/devices/{licenseKey}
+        /// </summary>
+        [Authorize]
+        [HttpGet("cloud/devices/{licenseKey}")]
+        [ProducesResponseType(typeof(List<CloudDeviceInfo>), 200)]
+        public async Task<ActionResult<List<CloudDeviceInfo>>> GetLicenseDevices(string licenseKey)
+        {
+            var devices = await _cloudService.GetLicenseDevicesAsync(licenseKey);
+            return Ok(devices);
+        }
+
+        /// <summary>
+        /// Deactivate a device remotely
+        /// POST /api/License/cloud/deactivate
+        /// </summary>
+        [Authorize]
+        [HttpPost("cloud/deactivate")]
+        public async Task<IActionResult> CloudDeactivate([FromBody] CloudDeactivateRequest request)
+        {
+            var userEmail = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                ?? User.FindFirst("email")?.Value
+                ?? User.Identity?.Name;
+
+            if (string.IsNullOrEmpty(userEmail))
+            {
+                return Unauthorized(new { message = "User not authenticated" });
+            }
+
+            var success = await _cloudService.DeactivateDeviceAsync(userEmail, request.DeviceId);
+            
+            if (success)
+            {
+                return Ok(new { message = "Device deactivated successfully" });
+            }
+            
+            return BadRequest(new { message = "Failed to deactivate device" });
+        }
+
+        #endregion
+
+        #region Offline Activation Endpoints
+
+        /// <summary>
+        /// Generate offline request code (called by desktop app)
+        /// POST /api/License/offline/generate-request
+        /// </summary>
+        [AllowAnonymous]
+        [HttpPost("offline/generate-request")]
+        [ProducesResponseType(typeof(GenerateRequestCodeResponse), 200)]
+        public ActionResult<GenerateRequestCodeResponse> GenerateOfflineRequest([FromBody] GenerateRequestCodeRequest request)
+        {
+            var response = _offlineService.GenerateRequestCode(request);
+            return Ok(response);
+        }
+
+        /// <summary>
+        /// Submit offline request code and get response code (via website)
+        /// POST /api/License/offline/submit
+        /// </summary>
+        [AllowAnonymous]
+        [HttpPost("offline/submit")]
+        [ProducesResponseType(typeof(SubmitOfflineRequestResponse), 200)]
+        public async Task<ActionResult<SubmitOfflineRequestResponse>> SubmitOfflineRequest([FromBody] SubmitOfflineRequestRequest request)
+        {
+            var response = await _offlineService.SubmitRequestCodeAsync(request);
+            
+            if (!response.Success)
+            {
+                return BadRequest(response);
+            }
+            
+            return Ok(response);
+        }
+
+        /// <summary>
+        /// Validate offline response code (called by desktop app)
+        /// POST /api/License/offline/validate
+        /// </summary>
+        [AllowAnonymous]
+        [HttpPost("offline/validate")]
+        [ProducesResponseType(typeof(ValidateOfflineCodeResponse), 200)]
+        public ActionResult<ValidateOfflineCodeResponse> ValidateOfflineResponse([FromBody] ValidateOfflineCodeRequest request)
+        {
+            var response = _offlineService.ValidateResponseCode(request);
+            
+            if (!response.Success)
+            {
+                return BadRequest(response);
+            }
+            
+            return Ok(response);
+        }
+
+        /// <summary>
+        /// Decode request code to view details (admin/debug)
+        /// POST /api/License/offline/decode
+        /// </summary>
+        [Authorize(Roles = "SuperAdmin,Admin")]
+        [HttpPost("offline/decode")]
+        public ActionResult DecodeOfflineRequest([FromBody] string requestCode)
+        {
+            var data = _offlineService.DecodeRequestCode(requestCode);
+            
+            if (data == null)
+            {
+                return BadRequest(new { message = "Invalid request code" });
+            }
+            
+            return Ok(new
+            {
+                licenseKey = data.LicenseKey,
+                hwid = data.Hwid,
+                machineName = data.MachineName,
+                os = data.Os,
+                timestamp = DateTimeOffset.FromUnixTimeSeconds(data.Timestamp).UtcDateTime
+            });
+        }
+
+        #endregion
+
+        #region RSA Token Signing Endpoints
+
+        /// <summary>
+        /// Get RSA public key for client-side token verification
+        /// GET /api/License/rsa/public-key
+        /// </summary>
+        [AllowAnonymous]
+        [HttpGet("rsa/public-key")]
+        public ActionResult GetRsaPublicKey()
+        {
+            return Ok(new { publicKey = _rsaService.GetPublicKey() });
+        }
+
+        /// <summary>
+        /// Enhanced activation with detailed hardware info and RSA-signed token
+        /// POST /api/License/rsa/activate
+        /// </summary>
+        [AllowAnonymous]
+        [HttpPost("rsa/activate")]
+        [ProducesResponseType(typeof(EnhancedActivationResponse), 200)]
+        public async Task<ActionResult<EnhancedActivationResponse>> RsaActivate([FromBody] EnhancedActivationRequest request)
+        {
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
+
+                _logger.LogInformation("🔐 RSA activation request for: {Key}", request.LicenseKey);
+
+                // Find license
+                var license = await context.Set<LicenseActivation>()
+                    .FirstOrDefaultAsync(l => l.LicenseKey == request.LicenseKey);
+
+                if (license == null)
+                {
+                    return BadRequest(new EnhancedActivationResponse
+                    {
+                        Success = false,
+                        Message = "Invalid license key"
+                    });
+                }
+
+                if (license.Status == "REVOKED")
+                {
+                    return BadRequest(new EnhancedActivationResponse
+                    {
+                        Success = false,
+                        Message = "License has been revoked"
+                    });
+                }
+
+                if (license.IsExpired)
+                {
+                    license.Status = "EXPIRED";
+                    await context.SaveChangesAsync();
+                    return BadRequest(new EnhancedActivationResponse
+                    {
+                        Success = false,
+                        Message = "License has expired"
+                    });
+                }
+
+                // Generate fingerprint from hardware info
+                var fingerprint = request.Hardware.GenerateFingerprint();
+                var hwidHash = ComputeHash(request.Hardware.Hwid);
+
+                // Check existing device or create new
+                var existingDevice = await context.Set<LicenseDevice>()
+                    .FirstOrDefaultAsync(d => d.LicenseId == license.Id && d.HwidHash == hwidHash);
+
+                if (existingDevice != null)
+                {
+                    // Update existing device
+                    existingDevice.LastSeen = DateTime.UtcNow;
+                    existingDevice.CpuId = request.Hardware.CpuId;
+                    existingDevice.CpuName = request.Hardware.CpuName;
+                    existingDevice.MacAddress = request.Hardware.MacAddress;
+                    existingDevice.OsInfo = request.Hardware.OsVersion;
+                    existingDevice.GpuInfo = request.Hardware.GpuInfo;
+                    existingDevice.RamGb = request.Hardware.RamGb;
+                }
+                else
+                {
+                    // Check device limit
+                    var activeDevices = await context.Set<LicenseDevice>()
+                        .CountAsync(d => d.LicenseId == license.Id && d.IsActive);
+
+                    if (activeDevices >= license.MaxDevices)
+                    {
+                        return BadRequest(new EnhancedActivationResponse
+                        {
+                            Success = false,
+                            Message = $"Device limit reached ({license.MaxDevices})"
+                        });
+                    }
+
+                    // Add new device with enhanced hardware details
+                    var newDevice = new LicenseDevice
+                    {
+                        LicenseId = license.Id,
+                        Hwid = request.Hardware.Hwid,
+                        HwidHash = hwidHash,
+                        HardwareFingerprint = fingerprint,
+                        MachineName = request.Hardware.MachineName,
+                        OsInfo = request.Hardware.OsVersion,
+                        OsBuild = request.Hardware.OsBuild,
+                        CpuId = request.Hardware.CpuId,
+                        CpuName = request.Hardware.CpuName,
+                        MacAddress = request.Hardware.MacAddress,
+                        MotherboardSerial = request.Hardware.MotherboardSerial,
+                        DiskSerial = request.Hardware.DiskSerial,
+                        GpuInfo = request.Hardware.GpuInfo,
+                        RamGb = request.Hardware.RamGb,
+                        Timezone = request.Hardware.Timezone,
+                        IpAddress = request.Hardware.IpAddress ?? HttpContext.Connection.RemoteIpAddress?.ToString(),
+                        ActivatedAt = DateTime.UtcNow,
+                        LastSeen = DateTime.UtcNow,
+                        IsActive = true
+                    };
+
+                    context.Set<LicenseDevice>().Add(newDevice);
+                }
+
+                // Update license
+                if (string.IsNullOrEmpty(license.Hwid))
+                {
+                    license.Hwid = request.Hardware.Hwid;
+                }
+                license.LastSeen = DateTime.UtcNow;
+                license.ServerRevision++;
+
+                await context.SaveChangesAsync();
+
+                // Create RSA-signed token
+                var signedToken = _rsaService.CreateSignedToken(
+                    license.LicenseKey,
+                    fingerprint,
+                    license.Edition,
+                    license.ExpiryDate ?? DateTime.UtcNow.AddYears(1)
+                );
+
+                var tokenBase64 = RsaTokenService.EncodeToken(signedToken);
+
+                _logger.LogInformation("✅ RSA activation successful for: {Key}", license.LicenseKey);
+
+                return Ok(new EnhancedActivationResponse
+                {
+                    Success = true,
+                    Message = "Activation successful",
+                    ActivationToken = tokenBase64,
+                    PublicKey = _rsaService.GetPublicKey(),
+                    Edition = license.Edition,
+                    ExpiryDate = license.ExpiryDate?.ToString("yyyy-MM-dd")
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ RSA activation error");
+                return StatusCode(500, new EnhancedActivationResponse
+                {
+                    Success = false,
+                    Message = "Activation failed"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Verify RSA-signed activation token (can be done offline with public key)
+        /// POST /api/License/rsa/verify
+        /// </summary>
+        [AllowAnonymous]
+        [HttpPost("rsa/verify")]
+        [ProducesResponseType(typeof(VerifyTokenResponse), 200)]
+        public ActionResult<VerifyTokenResponse> RsaVerify([FromBody] VerifyTokenRequest request)
+        {
+            var isValid = _rsaService.VerifyToken(request.ActivationToken, request.CurrentHwid, out var token);
+
+            if (!isValid || token == null)
+            {
+                return BadRequest(new VerifyTokenResponse
+                {
+                    Valid = false,
+                    Message = "Invalid or expired token",
+                    Status = "INVALID"
+                });
+            }
+
+            return Ok(new VerifyTokenResponse
+            {
+                Valid = true,
+                Message = "Token is valid",
+                LicenseKey = token.LicenseKey,
+                Edition = token.Edition,
+                ExpiryDate = token.ExpiryDate,
+                Status = "ACTIVE"
+            });
+        }
+
+        /// <summary>
+        /// Helper to compute SHA-256 hash
+        /// </summary>
+        private static string ComputeHash(string data)
+        {
+            using var sha256 = System.Security.Cryptography.SHA256.Create();
+            var bytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(data));
+            return Convert.ToBase64String(bytes);
+        }
+
+        #endregion
+
+        #region License Key Generation Endpoints
+
+        /// <summary>
+        /// Generate random license keys (preview only, not saved to DB)
+        /// POST /api/License/generate/keys
+        /// </summary>
+        [Authorize(Roles = "SuperAdmin,Admin")]
+        [HttpPost("generate/keys")]
+        public ActionResult GenerateKeys([FromBody] GenerateLicenseKeyRequest request)
+        {
+            var keys = _keyGenerator.GenerateBatch(
+                request.Count > 0 ? Math.Min(request.Count, 100) : 1, 
+                request.Format, 
+                request.Edition
+            );
+
+            return Ok(new
+            {
+                success = true,
+                count = keys.Count,
+                format = request.Format.ToString(),
+                keys = keys
+            });
+        }
+
+        /// <summary>
+        /// Quick create license with auto-generated key
+        /// POST /api/License/generate/quick
+        /// No need to paste license key - it's generated automatically
+        /// </summary>
+        [Authorize(Roles = "SuperAdmin,Admin")]
+        [HttpPost("generate/quick")]
+        public async Task<ActionResult> QuickCreateLicense([FromBody] QuickCreateLicenseRequest request)
+        {
+            return await CreateAutoLicense(request);
+        }
+
+        /// <summary>
+        /// Auto-create license (for testing) - generates and stores key
+        /// POST /api/License/auto-create
+        /// </summary>
+        [AllowAnonymous]
+        [HttpPost("auto-create")]
+        public async Task<ActionResult> AutoCreateLicense([FromBody] QuickCreateLicenseRequest? request = null)
+        {
+            return await CreateAutoLicense(request ?? new QuickCreateLicenseRequest());
+        }
+
+        private async Task<ActionResult> CreateAutoLicense(QuickCreateLicenseRequest request)
+        {
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
+
+                // Auto-generate license key based on edition
+                var format = request.Edition?.ToUpperInvariant() switch
+                {
+                    "BASIC" => LicenseKeyFormat.EditionBased,
+                    "PRO" => LicenseKeyFormat.EditionBased,
+                    "ENTERPRISE" => LicenseKeyFormat.EditionBased,
+                    _ => LicenseKeyFormat.DSecure
+                };
+
+                string licenseKey;
+                int attempts = 0;
+                
+                do
+                {
+                    licenseKey = _keyGenerator.Generate(format, request.Edition);
+                    var exists = await context.Set<LicenseActivation>()
+                        .AnyAsync(l => l.LicenseKey == licenseKey);
+                    
+                    if (!exists) break;
+                    attempts++;
+                } while (attempts < 10);
+
+                // Create license
+                var license = new LicenseActivation
+                {
+                    LicenseKey = licenseKey,
+                    ExpiryDays = request.ExpiryDays > 0 ? request.ExpiryDays : 365,
+                    Edition = request.Edition ?? "PRO",
+                    Status = "ACTIVE",
+                    UserEmail = request.UserEmail,
+                    Notes = request.Notes ?? $"Auto-generated on {DateTime.UtcNow:yyyy-MM-dd}",
+                    CreatedAt = DateTime.UtcNow,
+                    ServerRevision = 1
+                };
+
+                context.Set<LicenseActivation>().Add(license);
+                await context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Quick license created: {Key}, Edition: {Edition}", 
+                    licenseKey, license.Edition);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "License created successfully",
+                    license_key = licenseKey,
+                    edition = license.Edition,
+                    expiry_days = license.ExpiryDays,
+                    expiry_date = license.ExpiryDate?.ToString("yyyy-MM-dd"),
+                    max_devices = license.MaxDevices,
+                    user_email = license.UserEmail
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error in quick license creation");
+                return StatusCode(500, new { message = "Failed to create license", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Batch create multiple licenses with auto-generated keys
+        /// POST /api/License/generate/batch
+        /// </summary>
+        [Authorize(Roles = "SuperAdmin")]
+        [HttpPost("generate/batch")]
+        public async Task<ActionResult> BatchCreateLicenses([FromBody] BatchCreateLicenseRequest request)
+        {
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
+
+                var count = Math.Min(request.Count, 100); // Max 100 at a time
+                var createdLicenses = new List<object>();
+                var format = request.Format != LicenseKeyFormat.Standard ? request.Format : LicenseKeyFormat.DSecure;
+
+                for (int i = 0; i < count; i++)
+                {
+                    string licenseKey;
+                    int attempts = 0;
+                    
+                    do
+                    {
+                        licenseKey = _keyGenerator.Generate(format, request.Edition);
+                        var exists = await context.Set<LicenseActivation>()
+                            .AnyAsync(l => l.LicenseKey == licenseKey);
+                        
+                        if (!exists) break;
+                        attempts++;
+                    } while (attempts < 10);
+
+                    var license = new LicenseActivation
+                    {
+                        LicenseKey = licenseKey,
+                        ExpiryDays = request.ExpiryDays > 0 ? request.ExpiryDays : 365,
+                        Edition = request.Edition ?? "PRO",
+                        Status = "ACTIVE",
+                        MaxDevices = request.MaxDevices > 0 ? request.MaxDevices : 1,
+                        Notes = request.Notes ?? $"Batch generated on {DateTime.UtcNow:yyyy-MM-dd}",
+                        CreatedAt = DateTime.UtcNow,
+                        ServerRevision = 1
+                    };
+
+                    context.Set<LicenseActivation>().Add(license);
+                    
+                    createdLicenses.Add(new
+                    {
+                        license_key = licenseKey,
+                        edition = license.Edition,
+                        expiry_date = license.ExpiryDate?.ToString("yyyy-MM-dd")
+                    });
+                }
+
+                await context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Batch created {Count} licenses", createdLicenses.Count);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = $"Created {createdLicenses.Count} licenses",
+                    count = createdLicenses.Count,
+                    licenses = createdLicenses
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error in batch license creation");
+                return StatusCode(500, new { message = "Failed to create licenses", error = ex.Message });
+            }
+        }
+
+        #endregion
+
         #region Admin Endpoints (Protected)
 
         /// <summary>
@@ -790,6 +1396,137 @@ namespace BitRaserApiProject.Controllers
             {
                 _logger.LogError(ex, "❌ Error bulk generating licenses");
                 return StatusCode(500, new { message = "Error generating licenses", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get license statistics summary
+        /// GET /api/License/stats
+        /// </summary>
+        [Authorize]
+        [HttpGet("stats")]
+        public async Task<IActionResult> GetLicenseStats()
+        {
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
+                
+                var stats = new
+                {
+                    total = await context.Set<LicenseActivation>().CountAsync(),
+                    active = await context.Set<LicenseActivation>().Where(l => l.Status == "ACTIVE").CountAsync(),
+                    inactive = await context.Set<LicenseActivation>().Where(l => l.Status == "INACTIVE").CountAsync(),
+                    expired = await context.Set<LicenseActivation>().Where(l => l.Status == "EXPIRED").CountAsync(),
+                    revoked = await context.Set<LicenseActivation>().Where(l => l.Status == "REVOKED").CountAsync()
+                };
+                
+                return Ok(stats);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error fetching license stats");
+                return StatusCode(500, new { message = "Error fetching stats", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Get license distribution by edition
+        /// GET /api/License/distribution
+        /// </summary>
+        [Authorize]
+        [HttpGet("distribution")]
+        public async Task<IActionResult> GetLicenseDistribution()
+        {
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
+                
+                var total = await context.Set<LicenseActivation>().CountAsync();
+                
+                if (total == 0)
+                {
+                    return Ok(new { licenseDetails = new List<object>() });
+                }
+                
+                var distribution = await context.Set<LicenseActivation>()
+                    .GroupBy(l => l.Edition)
+                    .Select(g => new
+                    {
+                        type = g.Key,
+                        count = g.Count(),
+                        percentage = (int)Math.Round((double)g.Count() / total * 100)
+                    })
+                    .ToListAsync();
+
+                return Ok(new { licenseDetails = distribution });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error fetching license distribution");
+                return StatusCode(500, new { message = "Error fetching distribution", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Export all licenses to Excel or PDF
+        /// GET /api/License/admin/export?format=excel|pdf
+        /// </summary>
+        [Authorize(Roles = "SuperAdmin")]
+        [HttpGet("admin/export")]
+        [ProducesResponseType(typeof(FileContentResult), 200)]
+        public async Task<IActionResult> ExportLicenses([FromQuery] string format = "excel")
+        {
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
+
+                _logger.LogInformation("📊 License export requested, Format: {Format}", format);
+
+                // Fetch all licenses
+                var licenses = await context.Set<LicenseActivation>()
+                    .OrderByDescending(l => l.CreatedAt)
+                    .Select(l => new LicenseExportData
+                    {
+                        Id = l.Id,
+                        LicenseKey = l.LicenseKey,
+                        Hwid = l.Hwid,
+                        ExpiryDate = l.ExpiryDate != null ? l.ExpiryDate.Value.ToString("yyyy-MM-dd") : null,
+                        Edition = l.Edition,
+                        Status = l.Status,
+                        UserEmail = l.UserEmail,
+                        CreatedAt = l.CreatedAt,
+                        LastSeen = l.LastSeen
+                    })
+                    .ToListAsync();
+
+                _logger.LogInformation("📋 Exporting {Count} licenses", licenses.Count);
+
+                byte[] fileBytes;
+                string contentType;
+                string fileName;
+
+                if (format.Equals("pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    fileBytes = _exportService.ExportToPdf(licenses);
+                    contentType = "application/pdf";
+                    fileName = $"DSecure_Licenses_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf";
+                }
+                else
+                {
+                    // Default to Excel
+                    fileBytes = _exportService.ExportToExcel(licenses);
+                    contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                    fileName = $"DSecure_Licenses_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx";
+                }
+
+                _logger.LogInformation("✅ Export complete: {FileName}, Size: {Size} bytes", fileName, fileBytes.Length);
+
+                return File(fileBytes, contentType, fileName);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error exporting licenses");
+                return StatusCode(500, new { message = "Error exporting licenses", error = ex.Message });
             }
         }
 

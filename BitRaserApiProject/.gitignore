@@ -10,4 +10,24 @@ Documentation/
 # SQL database files
 *.sql
 
+# Environment files with secrets
 .env
+.env.local
+.env.production
+.env.development
+
+# Configuration files with secrets
+appsettings.json
+appsettings.Production.json
+appsettings.Development.json
+appsettings.*.json
+
+# Key files
+*.key
+*.pem
+*.pfx
+*.p12
+
+# Backup files
+*.backup
+*.bak

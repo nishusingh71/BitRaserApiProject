@@ -355,7 +355,6 @@ namespace BitRaserApiProject.Models
     public class Group
     {
         [Key]
-
         public int group_id { get; set; }
 
         [Required, MaxLength(100)]
@@ -363,7 +362,6 @@ namespace BitRaserApiProject.Models
 
         [MaxLength(500)]
         public string? description { get; set; } // groupdescription
-
 
         public int license_allocation { get; set; } = 0; // groplicenseallocation
 
@@ -374,6 +372,48 @@ namespace BitRaserApiProject.Models
 
         [MaxLength(50)]
         public string status { get; set; } = "active";
+
+        // ✅ NEW: Admin User ID for ownership tracking
+        [MaxLength(255)]
+        public string? admin_user_id { get; set; }
+
+        // ✅ Navigation property for group members
+        public virtual ICollection<GroupMember>? GroupMembers { get; set; }
+    }
+
+    /// <summary>
+    /// GroupMember entity for tracking user membership in groups
+    /// </summary>
+    public class GroupMember
+    {
+        [Key]
+        public int Id { get; set; }
+
+        [Required]
+        public int GroupId { get; set; }
+
+        [Required]
+        [MaxLength(255)]
+        public string UserId { get; set; } = string.Empty;
+
+        [MaxLength(255)]
+        public string? UserEmail { get; set; }
+
+        [MaxLength(100)]
+        public string? UserName { get; set; }
+
+        [MaxLength(50)]
+        public string? Role { get; set; } // member, admin, viewer
+
+        [MaxLength(100)]
+        public string? Department { get; set; }
+
+        public DateTime AddedAt { get; set; } = DateTime.UtcNow;
+
+        public DateTime? UpdatedAt { get; set; }
+
+        // ✅ Navigation properties
+        public virtual Group? Group { get; set; }
     }
 
     public class User_role_profile

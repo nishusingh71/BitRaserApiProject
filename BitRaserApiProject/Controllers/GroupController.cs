@@ -35,6 +35,7 @@ namespace BitRaserApiProject.Controllers
       /// Get all groups with filtering and pagination
    /// </summary>
         [HttpGet]
+        [Authorize(Roles = "SuperAdmin,Admin,superadmin,admin")]
       public async Task<ActionResult<IEnumerable<GroupResponseDto>>> GetGroups(
             [FromQuery] string? search = null,
    [FromQuery] string? status = null,
@@ -103,6 +104,7 @@ _logger.LogError(ex, "Error fetching groups");
         /// Get single group details
  /// </summary>
         [HttpGet("{id}")]
+        [Authorize(Roles = "SuperAdmin,Admin,superadmin,admin")]
    public async Task<ActionResult<GroupResponseDto>> GetGroup(int id)
         {
             try
@@ -148,7 +150,7 @@ _logger.LogError(ex, "Error fetching groups");
         /// Create new group
         /// </summary>
         [HttpPost]
-        [Authorize(Roles = "superadmin,admin")]
+        [Authorize(Roles = "SuperAdmin,Admin,superadmin,admin")] // ✅ Allow both casings
    public async Task<ActionResult<GroupResponseDto>> CreateGroup([FromBody] CreateGroupRequestDto dto)
       {
      try
@@ -208,7 +210,7 @@ _logger.LogError(ex, "Error fetching groups");
         /// Update entire group (full update)
    /// </summary>
  [HttpPut("{id}")]
-        [Authorize(Roles = "superadmin,admin")]
+        [Authorize(Roles = "SuperAdmin,Admin,superadmin,admin")]
    public async Task<IActionResult> UpdateGroup(int id, [FromBody] UpdateGroupRequestDto dto)
         {
             try
@@ -265,7 +267,7 @@ _logger.LogError(ex, "Error fetching groups");
         /// Partially update group (supports partial updates)
   /// </summary>
         [HttpPatch("{id}")]
-        [Authorize(Roles = "superadmin,admin")]
+        [Authorize(Roles = "SuperAdmin,Admin,superadmin,admin")]
    public async Task<IActionResult> PatchGroup(int id, [FromBody] UpdateGroupRequestDto dto)
   {
         try
@@ -322,7 +324,7 @@ groupId = group.group_id,
         /// Delete group
         /// </summary>
      [HttpDelete("{id}")]
-        [Authorize(Roles = "superadmin,admin")]
+        [Authorize(Roles = "SuperAdmin,Admin,superadmin,admin")]
   public async Task<IActionResult> DeleteGroup(int id)
       {
       try
@@ -462,7 +464,7 @@ Name = s.Name ?? s.subuser_email,
         /// Add member to group by email
         /// </summary>
         [HttpPost("{id}/members/by-email")]
-        [Authorize(Roles = "superadmin,admin")]
+        [Authorize(Roles = "SuperAdmin,Admin,superadmin,admin")]
   public async Task<IActionResult> AddMemberByEmail(int id, [FromBody] AddMemberByEmailDto dto)
   {
         try
@@ -511,7 +513,7 @@ Name = s.Name ?? s.subuser_email,
         /// Remove member from group by email
         /// </summary>
      [HttpDelete("{id}/members/by-email/{email}")]
-        [Authorize(Roles = "superadmin,admin")]
+        [Authorize(Roles = "SuperAdmin,Admin,superadmin,admin")]
         public async Task<IActionResult> RemoveMemberByEmail(int id, string email)
   {
             try
@@ -605,7 +607,7 @@ GroupLicenseAllocation = group.license_allocation,
         /// Get group statistics
   /// </summary>
      [HttpGet("statistics")]
- [Authorize(Roles = "superadmin,admin")]
+ [Authorize(Roles = "SuperAdmin,Admin,superadmin,admin")]
     public async Task<ActionResult<GroupStatisticsResponseDto>> GetStatistics()
         {
      try

@@ -24,6 +24,7 @@ namespace BitRaserApiProject
         public DbSet<logs> logs { get; set; }
         public DbSet<subuser> subuser { get; set; }
         public DbSet<Group> Groups { get; set; }
+        public DbSet<GroupMember> GroupMembers { get; set; } // ✅ NEW: Group Members table
 
         // New DbSets for role-based system
         public DbSet<Role> Roles { get; set; }
@@ -61,6 +62,9 @@ namespace BitRaserApiProject
         // ✅ Orders (Polar.sh Payment Integration)
         public DbSet<Order> Orders { get; set; }
 
+        // ✅ Downloads (Software download tracking)
+        public DbSet<Download> Downloads { get; set; }
+
         public static string HashLicenseKey(string licenseKey)
         {
             using var sha256 = SHA256.Create();
@@ -71,6 +75,18 @@ namespace BitRaserApiProject
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            // Fix is_domain_admin type mismatch (database VARCHAR -> C# bool?)
+            // Handles "0", "1", "true", "false", 0, 1 from database
+            modelBuilder.Entity<users>()
+                .Property(u => u.is_domain_admin)
+                .HasConversion(
+                    // C# bool? -> Database string
+                    v => v.HasValue && v.Value ? "1" : "0",
+                    // Database string/int -> C# bool?
+                    v => v == "1" || v == "true" || v == "True"
+                )
+                .HasColumnType("varchar(10)"); // Explicitly set column type
 
             // Machines Table
             modelBuilder.Entity<machines>()
@@ -418,6 +434,59 @@ namespace BitRaserApiProject
             modelBuilder.Entity<Group>()
                 .Property(g => g.status)
                 .HasMaxLength(50);
+
+            // ✅ NEW: admin_user_id configuration
+            modelBuilder.Entity<Group>()
+                .Property(g => g.admin_user_id)
+                .HasMaxLength(255);
+
+            // ✅ NEW: GroupMember table configuration
+            modelBuilder.Entity<GroupMember>()
+                .HasKey(gm => gm.Id);
+
+            modelBuilder.Entity<GroupMember>()
+                .Property(gm => gm.UserId)
+                .HasMaxLength(255)
+                .IsRequired();
+
+            modelBuilder.Entity<GroupMember>()
+                .Property(gm => gm.UserEmail)
+                .HasMaxLength(255);
+
+            modelBuilder.Entity<GroupMember>()
+                .Property(gm => gm.UserName)
+                .HasMaxLength(100);
+
+            modelBuilder.Entity<GroupMember>()
+                .Property(gm => gm.Role)
+                .HasMaxLength(50);
+
+            modelBuilder.Entity<GroupMember>()
+                .Property(gm => gm.Department)
+                .HasMaxLength(100);
+
+            // ✅ GroupMember → Group relationship (cascade delete)
+            modelBuilder.Entity<GroupMember>()
+                .HasOne(gm => gm.Group)
+                .WithMany(g => g.GroupMembers)
+                .HasForeignKey(gm => gm.GroupId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            // ✅ INDEX: GroupMember.GroupId for fast group member lookups
+            modelBuilder.Entity<GroupMember>()
+                .HasIndex(gm => gm.GroupId)
+                .HasDatabaseName("IX_group_members_group_id");
+
+            // ✅ INDEX: GroupMember.UserId for fast user membership lookups
+            modelBuilder.Entity<GroupMember>()
+                .HasIndex(gm => gm.UserId)
+                .HasDatabaseName("IX_group_members_user_id");
+
+            // ✅ UNIQUE CONSTRAINT: One user per group
+            modelBuilder.Entity<GroupMember>()
+                .HasIndex(gm => new { gm.GroupId, gm.UserId })
+                .IsUnique()
+                .HasDatabaseName("IX_group_members_group_user_unique");
 
             // Role-based system configurations
 

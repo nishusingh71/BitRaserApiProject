@@ -10,17 +10,20 @@ namespace BitRaserApiProject.Services
         private readonly ILogger<RoleBasedAuthService> _logger;
         private readonly ITenantConnectionService _tenantService;
         private readonly DynamicDbContextFactory _contextFactory;
+        private readonly ICacheService _cacheService;
 
         public RoleBasedAuthService(
             ApplicationDbContext context,
             ILogger<RoleBasedAuthService> logger,
             ITenantConnectionService tenantService,
-            DynamicDbContextFactory contextFactory)
+            DynamicDbContextFactory contextFactory,
+            ICacheService cacheService)
         {
             _context = context;
             _logger = logger;
             _tenantService = tenantService;
             _contextFactory = contextFactory;
+            _cacheService = cacheService;
         }
 
         /// <summary>
@@ -52,13 +55,18 @@ namespace BitRaserApiProject.Services
         {
             try
             {
-                // ✅ Use GetUserPermissionsAsync which handles private cloud context correctly
-                var permissions = await GetUserPermissionsAsync(email, isSubuser, parentUserEmail);
+                // ✅ PERFORMANCE: Cache permissions for 10 minutes
+                // This is called multiple times per request - critical to cache!
+                var cacheKey = $"{CacheService.CacheKeys.Permission}:{email.ToLower()}:{isSubuser}:{parentUserEmail?.ToLower() ?? "main"}";
+                
+                var permissions = await _cacheService.GetOrCreateAsync(cacheKey, 
+                    async () => (await GetUserPermissionsFromDbAsync(email, isSubuser, parentUserEmail)).ToList(),
+                    CacheService.CacheTTL.Medium);  // 10 minutes
                 
                 var hasPermission = permissions.Contains(permissionName) || permissions.Contains("FullAccess");
                 
-                _logger.LogDebug("🔐 HasPermissionAsync for {Email} (subuser:{IsSub}, parent:{Parent}): {Perm}={HasIt}",
-                    email, isSubuser, parentUserEmail ?? "none", permissionName, hasPermission);
+                _logger.LogDebug("🔐 HasPermissionAsync for {Email} (cached): {Perm}={HasIt}",
+                    email, permissionName, hasPermission);
                 
                 return hasPermission;
             }
@@ -67,6 +75,15 @@ namespace BitRaserApiProject.Services
                 _logger.LogError(ex, "Error checking permission {Permission} for user {Email}", permissionName, email);
                 return false;
             }
+        }
+
+        /// <summary>
+        /// Internal method that actually fetches permissions from DB (called by cache)
+        /// </summary>
+        private async Task<IEnumerable<string>> GetUserPermissionsFromDbAsync(string email, bool isSubuser, string? parentUserEmail)
+        {
+            // Delegate to existing GetUserPermissionsAsync logic but rename parameters
+            return await GetUserPermissionsAsync(email, isSubuser, parentUserEmail);
         }
 
         public async Task<bool> CanAccessRouteAsync(string email, string routePath, string httpMethod, bool isSubuser = false)
@@ -199,6 +216,18 @@ else
 
 
         public async Task<IEnumerable<string>> GetUserRolesAsync(string email, bool isSubuser = false, string? parentUserEmail = null)
+        {
+            // ✅ PERFORMANCE: Cache roles for 15 minutes
+            var normalizedEmail = email.ToLower();
+            var cacheKey = $"roles:{normalizedEmail}:{isSubuser}:{parentUserEmail?.ToLower() ?? "main"}";
+            
+            return await _cacheService.GetOrCreateAsync(cacheKey, async () =>
+            {
+                return (await GetUserRolesFromDbAsync(email, isSubuser, parentUserEmail)).ToList();
+            }, TimeSpan.FromMinutes(15));
+        }
+
+        private async Task<IEnumerable<string>> GetUserRolesFromDbAsync(string email, bool isSubuser, string? parentUserEmail)
         {
  try
         {

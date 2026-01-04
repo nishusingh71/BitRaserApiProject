@@ -46,6 +46,7 @@ namespace BitRaserApiProject.Controllers
         /// <summary>
         /// Get machines by user email with role-based filtering
         /// Supports both users and subusers
+        /// ✅ PERFORMANCE: Cached with 1-minute TTL
         /// </summary>
         [HttpGet("by-email/{userEmail}")]
         [DecodeEmail]
@@ -56,10 +57,6 @@ namespace BitRaserApiProject.Controllers
                 // ✅ CRITICAL: Decode email before any usage
                 var decodedEmail = Base64EmailEncoder.DecodeEmailParam(userEmail);
                 
-                using var _context = await _contextFactory.CreateDbContextAsync();
-
-                _logger.LogInformation("🔍 Fetching machines for user: {Email} (decoded)", decodedEmail);
-
                 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
@@ -68,61 +65,76 @@ namespace BitRaserApiProject.Controllers
                 // 2. User has permission to view other machines
                 // 3. Manager can view managed user machines
                 bool canAccess = decodedEmail == currentUserEmail?.ToLower() ||
-           await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser) ||
-             await CanManageUserAsync(currentUserEmail!, decodedEmail);
+                    await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser) ||
+                    await CanManageUserAsync(currentUserEmail!, decodedEmail);
 
                 if (!canAccess)
                 {
                     return StatusCode(403, new { error = "You can only view your own machines or machines of users you manage" });
                 }
 
-                IQueryable<machines> query = _context.Machines.Where(m => m.user_email.ToLower() == decodedEmail); // ✅ Use decoded email
+                // ✅ PERFORMANCE: Build cache key with filter hash for uniqueness
+                var filterHash = filter != null 
+                    ? $"{filter.MacAddress}:{filter.LicenseActivated}:{filter.VmStatus}:{filter.RegisteredFrom}:{filter.RegisteredTo}:{filter.Page}:{filter.PageSize}".GetHashCode().ToString("X")
+                    : "nofilter";
+                var cacheKey = $"{CacheService.CacheKeys.Machine}:byemail:{decodedEmail}:{filterHash}";
+                
+                _logger.LogDebug("🔍 GetMachinesByUserEmail cache key: {Key}", cacheKey);
 
-                // Apply additional filters if provided
-                if (filter != null)
+                var machines = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
                 {
-                    if (!string.IsNullOrEmpty(filter.MacAddress))
-                        query = query.Where(m => m.mac_address.Contains(filter.MacAddress));
+                    using var _context = await _contextFactory.CreateDbContextAsync();
+                    
+                    _logger.LogInformation("📊 DB FETCH: Machines for user: {Email}", decodedEmail);
 
-                    if (filter.LicenseActivated.HasValue)
-                        query = query.Where(m => m.license_activated == filter.LicenseActivated.Value);
+                    IQueryable<machines> query = _context.Machines.Where(m => m.user_email.ToLower() == decodedEmail);
 
-                    if (!string.IsNullOrEmpty(filter.VmStatus))
-                        query = query.Where(m => m.vm_status.Contains(filter.VmStatus));
-
-                    if (filter.RegisteredFrom.HasValue)
-                        query = query.Where(m => m.created_at >= filter.RegisteredFrom.Value);
-
-                    if (filter.RegisteredTo.HasValue)
-                        query = query.Where(m => m.created_at <= filter.RegisteredTo.Value);
-
-                    if (filter.LicenseExpiringInDays.HasValue)
+                    // Apply additional filters if provided
+                    if (filter != null)
                     {
-                        var expiryDate = DateTime.UtcNow.AddDays(filter.LicenseExpiringInDays.Value);
-                        query = query.Where(m => m.license_activation_date.HasValue &&
-                               m.license_activation_date.Value.AddDays(m.license_days_valid) <= expiryDate);
-                    }
-                }
+                        if (!string.IsNullOrEmpty(filter.MacAddress))
+                            query = query.Where(m => m.mac_address.Contains(filter.MacAddress));
 
-                var machines = await query
-                     .OrderByDescending(m => m.created_at)
-                       .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-                   .Take(filter?.PageSize ?? 100)
-                     .Select(m => new
-                     {
-                         fingerprintHash = m.fingerprint_hash,
-                         userEmail = m.user_email,
-                         subuserEmail = m.subuser_email,
-                         macAddress = m.mac_address,
-                         osVersion = m.os_version,
-                         licenseActivated = m.license_activated,
-                         licenseActivationDate = m.license_activation_date,
-                         licenseDaysValid = m.license_days_valid,
-                         vmStatus = m.vm_status,
-                         createdAt = m.created_at,
-                         hasLicenseDetails = !string.IsNullOrEmpty(m.license_details_json) && m.license_details_json != "{}"
-                     })
-                            .ToListAsync();
+                        if (filter.LicenseActivated.HasValue)
+                            query = query.Where(m => m.license_activated == filter.LicenseActivated.Value);
+
+                        if (!string.IsNullOrEmpty(filter.VmStatus))
+                            query = query.Where(m => m.vm_status.Contains(filter.VmStatus));
+
+                        if (filter.RegisteredFrom.HasValue)
+                            query = query.Where(m => m.created_at >= filter.RegisteredFrom.Value);
+
+                        if (filter.RegisteredTo.HasValue)
+                            query = query.Where(m => m.created_at <= filter.RegisteredTo.Value);
+
+                        if (filter.LicenseExpiringInDays.HasValue)
+                        {
+                            var expiryDate = DateTime.UtcNow.AddDays(filter.LicenseExpiringInDays.Value);
+                            query = query.Where(m => m.license_activation_date.HasValue &&
+                                   m.license_activation_date.Value.AddDays(m.license_days_valid) <= expiryDate);
+                        }
+                    }
+
+                    return await query
+                        .OrderByDescending(m => m.created_at)
+                        .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+                        .Take(filter?.PageSize ?? 100)
+                        .Select(m => new
+                        {
+                            fingerprintHash = m.fingerprint_hash,
+                            userEmail = m.user_email,
+                            subuserEmail = m.subuser_email,
+                            macAddress = m.mac_address,
+                            osVersion = m.os_version,
+                            licenseActivated = m.license_activated,
+                            licenseActivationDate = m.license_activation_date,
+                            licenseDaysValid = m.license_days_valid,
+                            vmStatus = m.vm_status,
+                            createdAt = m.created_at,
+                            hasLicenseDetails = !string.IsNullOrEmpty(m.license_details_json) && m.license_details_json != "{}"
+                        })
+                        .ToListAsync();
+                }, CacheService.CacheTTL.VeryShort);  // ✅ 1 minute TTL for real-time feel
 
                 _logger.LogInformation("✅ Found {Count} machines for user: {Email}", machines.Count, decodedEmail);
 
@@ -386,9 +398,8 @@ namespace BitRaserApiProject.Controllers
                 _context.Machines.Add(newMachine);
                 await _context.SaveChangesAsync();
 
-                // ✅ CACHE INVALIDATION: Clear machine caches
-                _cacheService.RemoveByPrefix($"{CacheService.CacheKeys.Machine}:{userEmail}");
-                _cacheService.RemoveByPrefix(CacheService.CacheKeys.MachineList);
+                // ✅ PERFORMANCE: Comprehensive cache invalidation using helper
+                CacheInvalidation.InvalidateMachine(_cacheService, newMachine.user_email, newMachine.subuser_email, request.MacAddress);
 
                 _logger.LogInformation("✅ Registered machine {MacAddress} for {UserEmail} in {DbType} database",
                 request.MacAddress, userEmail, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");

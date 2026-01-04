@@ -33,6 +33,27 @@ namespace BitRaserApiProject.Models
         public string? PolarCheckoutId { get; set; }
 
         /// <summary>
+        /// Dodo Payments Payment ID (external reference)
+        /// </summary>
+        [Column("dodo_payment_id")]
+        [StringLength(100)]
+        public string? DodoPaymentId { get; set; }
+
+        /// <summary>
+        /// Dodo Payments Invoice ID (for fetching invoice details)
+        /// </summary>
+        [Column("dodo_invoice_id")]
+        [StringLength(100)]
+        public string? DodoInvoiceId { get; set; }
+
+        /// <summary>
+        /// Payment provider: polar, dodo
+        /// </summary>
+        [Column("payment_provider")]
+        [StringLength(50)]
+        public string? PaymentProvider { get; set; }
+
+        /// <summary>
         /// User email who made the purchase
         /// </summary>
         [Required]
@@ -184,5 +205,36 @@ namespace BitRaserApiProject.Models
         /// </summary>
         [Column("notes", TypeName = "TEXT")]
         public string? Notes { get; set; }
+
+        /// <summary>
+        /// Plan ID from payment provider
+        /// </summary>
+        [Column("plan_id")]
+        [StringLength(100)]
+        public string? PlanId { get; set; }
+
+        /// <summary>
+        /// User ID linked to this order (after account creation)
+        /// </summary>
+        [Column("user_id")]
+        public int? UserId { get; set; }
+
+        /// <summary>
+        /// Timestamp when webhook was processed (for idempotency)
+        /// </summary>
+        [Column("webhook_processed_at")]
+        public DateTime? WebhookProcessedAt { get; set; }
+
+        /// <summary>
+        /// Whether user account was created for this order
+        /// </summary>
+        [Column("user_created")]
+        public bool UserCreated { get; set; } = false;
+
+        /// <summary>
+        /// Whether credentials email was sent
+        /// </summary>
+        [Column("credentials_email_sent")]
+        public bool CredentialsEmailSent { get; set; } = false;
     }
 }

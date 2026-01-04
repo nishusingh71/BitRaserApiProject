@@ -130,7 +130,6 @@ namespace BitRaserApiProject.Models
         public string? ComplianceRequirements { get; set; }
 
         [Required(ErrorMessage = "Message is required")]
-        [MinLength(10, ErrorMessage = "Message must be at least 10 characters")]
         [JsonPropertyName("message")]
         public string Message { get; set; } = string.Empty;
 

@@ -37,7 +37,8 @@ namespace BitRaserApiProject.Controllers
                 return Unauthorized(new { message = "Invalid credentials" });
 
             // Generate JWT token here (your existing token generation code)
-            var token = GenerateJwtToken(login.Email);
+            var ipAddress = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var token = GenerateJwtToken(login.Email, ipAddress);
 
             return Ok(new { token });
         }
@@ -52,7 +53,7 @@ namespace BitRaserApiProject.Controllers
             return !string.IsNullOrEmpty(user.hash_password) && BCrypt.Net.BCrypt.Verify(password, user.hash_password);
         }
 
-        private string GenerateJwtToken(string username)
+        private string GenerateJwtToken(string username, string ipAddress)
         {
             var jwtSettings = _configuration.GetSection("Jwt");
             var secretKey = jwtSettings["Key"];
@@ -68,7 +69,8 @@ namespace BitRaserApiProject.Controllers
             var claims = new[]
             {
                 new Claim(JwtRegisteredClaimNames.Sub, username),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new Claim("ip_address", ipAddress)
             };
 
             var token = new JwtSecurityToken(

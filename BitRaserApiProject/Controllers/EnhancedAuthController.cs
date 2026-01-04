@@ -6,6 +6,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
+using System.ComponentModel.DataAnnotations;
 using BitRaserApiProject.Services;
 using BitRaserApiProject.Models;
 
@@ -37,7 +38,13 @@ namespace BitRaserApiProject.Controllers
 
         public class LoginRequest
         {
+            [Required(ErrorMessage = "Email is required")]
+            [EmailAddress(ErrorMessage = "Invalid email format")]
+            [StringLength(254, ErrorMessage = "Email too long")]
             public string Email { get; set; } = string.Empty;
+            
+            [Required(ErrorMessage = "Password is required")]
+            [StringLength(128, MinimumLength = 1, ErrorMessage = "Password length invalid")]
             public string Password { get; set; } = string.Empty;
         }
 
@@ -59,6 +66,16 @@ namespace BitRaserApiProject.Controllers
         {
             try
             {
+                // Validate model state
+                if (!ModelState.IsValid)
+                {
+                    var errors = ModelState.Values
+                        .SelectMany(v => v.Errors)
+                        .Select(e => e.ErrorMessage)
+                        .ToList();
+                    return BadRequest(new { message = "Validation failed", errors });
+                }
+
                 if (string.IsNullOrEmpty(request.Email) || string.IsNullOrEmpty(request.Password))
                 {
                     return BadRequest(new { message = "Email and password are required" });
@@ -87,10 +104,13 @@ namespace BitRaserApiProject.Controllers
 
                 if (userEmail == null)
                 {
-                    return Unauthorized(new { message = "Invalid credentials" });
+                    // Generic error message to prevent email enumeration
+                    await Task.Delay(Random.Shared.Next(100, 300)); // Timing attack mitigation
+                    return Unauthorized(new { message = "Invalid email or password" });
                 }
 
-                // Create session entry
+                // Create session entry with secure session token
+                var sessionToken = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
                 var session = new Sessions
                 {
                     user_email = userEmail,
@@ -103,12 +123,12 @@ namespace BitRaserApiProject.Controllers
                 _context.Sessions.Add(session);
                 await _context.SaveChangesAsync();
 
-                var token = GenerateJwtToken(userEmail, isSubuser, session.session_id);
+                var token = GenerateJwtToken(userEmail, isSubuser, session.session_id, session.ip_address);
 
-                _logger.LogInformation("Successful login for {UserType}: {Email} with session ID: {SessionId}", 
-                    isSubuser ? "subuser" : "user", userEmail, session.session_id);
+                _logger.LogInformation("Successful login for {UserType} with session ID: {SessionId}", 
+                    isSubuser ? "subuser" : "user", session.session_id);
 
-                // Log the login event
+                // Log the login event (sanitized)
                 var logEntry = new logs
                 {
                     user_email = userEmail,
@@ -119,8 +139,7 @@ namespace BitRaserApiProject.Controllers
                         user_type = isSubuser ? "subuser" : "user",
                         session_id = session.session_id,
                         login_time = session.login_time,
-                        ip_address = session.ip_address,
-                        user_agent = session.device_info
+                        ip_address_hash = HashSensitiveData(session.ip_address ?? "unknown")
                     }),
                     created_at = DateTime.UtcNow
                 };
@@ -174,7 +193,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 var isSubuser = userType == "subuser";
-                var newToken = GenerateJwtToken(userEmail, isSubuser, sessionId);
+                var newToken = GenerateJwtToken(userEmail, isSubuser, sessionId, session.ip_address ?? "unknown");
 
                 // Update session login time to extend it
                 session.login_time = DateTime.UtcNow;
@@ -235,7 +254,7 @@ namespace BitRaserApiProject.Controllers
             }
         }
 
-        private string GenerateJwtToken(string email, bool isSubuser, int sessionId)
+        private string GenerateJwtToken(string email, bool isSubuser, int sessionId, string ipAddress)
         {
             var jwtSettings = _configuration.GetSection("Jwt");
             var secretKey = jwtSettings["Key"];
@@ -254,7 +273,8 @@ namespace BitRaserApiProject.Controllers
                 new Claim(JwtRegisteredClaimNames.Sub, email),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
                 new Claim("user_type", isSubuser ? "subuser" : "user"),
-                new Claim("session_id", sessionId.ToString())
+                new Claim("session_id", sessionId.ToString()),
+                new Claim("ip_address", ipAddress)
             };
 
             var token = new JwtSecurityToken(
@@ -266,6 +286,19 @@ namespace BitRaserApiProject.Controllers
             );
 
             return new JwtSecurityTokenHandler().WriteToken(token);
+        }
+
+        /// <summary>
+        /// Hash sensitive data for logging (one-way hash)
+        /// </summary>
+        private static string HashSensitiveData(string data)
+        {
+            if (string.IsNullOrEmpty(data))
+                return "unknown";
+
+            using var sha256 = System.Security.Cryptography.SHA256.Create();
+            var hashBytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(data));
+            return Convert.ToBase64String(hashBytes).Substring(0, 16);
         }
     }
 }

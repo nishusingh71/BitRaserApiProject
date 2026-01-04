@@ -8,7 +8,6 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using BCrypt.Net;
-using BitRaserApiProject.Services;
 
 namespace BitRaserApiProject.Controllers    
 {

@@ -34,8 +34,29 @@ namespace BitRaserApiProject.Services
         bool VerifyWebhookSignature(string payload, string signature);
 
         /// <summary>
-        /// Get available products
+        /// Get available products (legacy)
         /// </summary>
         Task<List<ProductDto>> GetProductsAsync();
+
+        #region Pro-Level Methods
+
+        /// <summary>
+        /// ✅ PRO-LEVEL: Get billing plans with monthly/yearly price IDs
+        /// Fetches products dynamically from Polar API and caches for 1 hour
+        /// </summary>
+        Task<List<BillingPlanDto>> GetBillingPlansAsync();
+
+        /// <summary>
+        /// ✅ PRO-LEVEL: Create checkout using price ID (not product ID)
+        /// This is the recommended way for subscription-based checkout
+        /// </summary>
+        Task<PriceCheckoutResponse> CreatePriceCheckoutAsync(PriceCheckoutRequest request, string userEmail);
+
+        /// <summary>
+        /// ✅ PRO-LEVEL: Force refresh the product catalog cache
+        /// </summary>
+        Task RefreshProductCacheAsync();
+
+        #endregion
     }
 }

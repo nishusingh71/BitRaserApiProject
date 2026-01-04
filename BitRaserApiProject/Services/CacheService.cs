@@ -188,13 +188,10 @@ namespace BitRaserApiProject.Services
                 Priority = CacheItemPriority.Normal
             };
 
-            // Register callback for automatic key cleanup on eviction
             options.RegisterPostEvictionCallback(OnCacheItemEvicted);
-
             _cache.Set(key, value, options);
             _cacheKeys.TryAdd(key, DateTime.UtcNow);
             Interlocked.Increment(ref _sets);
-
             _logger.LogDebug("📦 Cache SET: {Key} (TTL: {TTL})", key, expiry ?? CacheTTL.Default);
         }
 
@@ -207,11 +204,9 @@ namespace BitRaserApiProject.Services
             };
 
             options.RegisterPostEvictionCallback(OnCacheItemEvicted);
-
             _cache.Set(key, value, options);
             _cacheKeys.TryAdd(key, DateTime.UtcNow);
             Interlocked.Increment(ref _sets);
-
             _logger.LogDebug("📦 Cache SET (Sliding): {Key} (TTL: {TTL})", key, slidingExpiry);
         }
 
@@ -225,11 +220,9 @@ namespace BitRaserApiProject.Services
             };
 
             options.RegisterPostEvictionCallback(OnCacheItemEvicted);
-
             _cache.Set(key, value, options);
             _cacheKeys.TryAdd(key, DateTime.UtcNow);
             Interlocked.Increment(ref _sets);
-
             _logger.LogDebug("📦 Cache SET (Dual): {Key} (Sliding: {Sliding}, Absolute: {Absolute})", 
                 key, slidingExpiry, absoluteExpiry);
         }
@@ -388,6 +381,76 @@ namespace BitRaserApiProject.Services
     }
 
     /// <summary>
+    /// Static helper class for entity-specific cache invalidation
+    /// Use these methods when modifying data to ensure cache consistency
+    /// </summary>
+    public static class CacheInvalidation
+    {
+        /// <summary>
+        /// Invalidate cache when a subuser is created, updated, or deleted
+        /// </summary>
+        public static void InvalidateSubuser(ICacheService cache, string subuserEmail, string parentEmail)
+        {
+            cache.RemoveByPrefix($"subuser:{subuserEmail.ToLower()}");
+            cache.RemoveByPrefix($"subusers:list:parent:{parentEmail.ToLower()}");
+            cache.RemoveByPrefix($"subuser:exists:{subuserEmail.ToLower()}");
+            cache.RemoveByPrefix($"permission:{subuserEmail.ToLower()}");
+            cache.RemoveByPrefix($"user:issubuser:{subuserEmail.ToLower()}");
+        }
+
+        /// <summary>
+        /// Invalidate cache when a machine is created, updated, or deleted
+        /// </summary>
+        public static void InvalidateMachine(ICacheService cache, string userEmail, string? subuserEmail, string macAddress)
+        {
+            cache.Remove($"machine:{macAddress}");
+            cache.RemoveByPrefix($"machine:byemail:{userEmail.ToLower()}");
+            if (!string.IsNullOrEmpty(subuserEmail))
+                cache.RemoveByPrefix($"machine:byemail:{subuserEmail.ToLower()}");
+            cache.RemoveByPrefix("machines:list");
+        }
+
+        /// <summary>
+        /// Invalidate cache when a user profile is updated
+        /// </summary>
+        public static void InvalidateUser(ICacheService cache, string userEmail)
+        {
+            cache.RemoveByPrefix($"user:{userEmail.ToLower()}");
+            cache.RemoveByPrefix($"user:profile:{userEmail.ToLower()}");
+            cache.RemoveByPrefix($"user:exists:{userEmail.ToLower()}");
+            cache.RemoveByPrefix($"permission:{userEmail.ToLower()}");
+            cache.RemoveByPrefix($"subuser:exists:{userEmail.ToLower()}");
+        }
+
+        /// <summary>
+        /// Invalidate cache when reports are generated or modified
+        /// </summary>
+        public static void InvalidateReports(ICacheService cache, string userEmail)
+        {
+            cache.RemoveByPrefix($"reports:list:{userEmail.ToLower()}");
+            cache.RemoveByPrefix($"reports:export:{userEmail.ToLower()}");
+            cache.RemoveByPrefix($"report:{userEmail.ToLower()}");
+        }
+
+        /// <summary>
+        /// Invalidate cache when user roles or permissions change
+        /// </summary>
+        public static void InvalidatePermissions(ICacheService cache, string userEmail)
+        {
+            cache.RemoveByPrefix($"permission:{userEmail.ToLower()}");
+            cache.RemoveByPrefix($"role:{userEmail.ToLower()}");
+        }
+
+        /// <summary>
+        /// Invalidate all caches for a user (use sparingly - high impact)
+        /// </summary>
+        public static void InvalidateAllUserData(ICacheService cache, string userEmail)
+        {
+            cache.RemoveByPrefix(userEmail.ToLower());
+        }
+    }
+
+    /// <summary>
     /// Extension methods for cache service registration
     /// </summary>
     public static class CacheServiceExtensions
@@ -397,21 +460,14 @@ namespace BitRaserApiProject.Services
         /// </summary>
         public static IServiceCollection AddEnterpriseCaching(this IServiceCollection services, Action<MemoryCacheOptions>? configureOptions = null)
         {
-            // Configure memory cache with size limit
             services.AddMemoryCache(options =>
             {
-                // Default configuration for enterprise use
-                options.SizeLimit = 1024; // Maximum 1024 items
-                options.CompactionPercentage = 0.25; // Remove 25% when limit reached
-                options.ExpirationScanFrequency = TimeSpan.FromMinutes(1);
-
-                // Apply custom configuration if provided
+                options.CompactionPercentage = 0.20;
+                options.ExpirationScanFrequency = TimeSpan.FromSeconds(30);
                 configureOptions?.Invoke(options);
             });
 
-            // Register cache service as Singleton (cache must persist across requests)
             services.AddSingleton<ICacheService, CacheService>();
-
             return services;
         }
     }

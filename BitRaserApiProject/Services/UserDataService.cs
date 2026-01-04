@@ -14,11 +14,16 @@ namespace BitRaserApiProject.Services
     {
         private readonly ApplicationDbContext _context;
         private readonly ILogger<UserDataService> _logger;
+        private readonly ICacheService _cacheService;
 
-        public UserDataService(ApplicationDbContext context, ILogger<UserDataService> logger)
+        public UserDataService(
+            ApplicationDbContext context, 
+            ILogger<UserDataService> logger,
+            ICacheService cacheService)
         {
             _context = context;
             _logger = logger;
+            _cacheService = cacheService;
         }
 
         #region User Operations
@@ -54,7 +59,11 @@ namespace BitRaserApiProject.Services
         {
             try
             {
-                return await _context.Users.AnyAsync(u => u.user_email == email);
+                // ✅ PERFORMANCE: Cache user existence check for 10 minutes
+                var cacheKey = $"{CacheService.CacheKeys.User}:exists:{email.ToLower()}";
+                return await _cacheService.GetOrCreateAsync(cacheKey, 
+                    async () => await _context.Users.AnyAsync(u => u.user_email == email),
+                    CacheService.CacheTTL.Medium);  // 10 minutes
             }
             catch (Exception ex)
             {
@@ -71,7 +80,32 @@ namespace BitRaserApiProject.Services
         {
             try
             {
-                return await _context.subuser.FirstOrDefaultAsync(s => s.subuser_email == subuserEmail);
+                // ✅ PERFORMANCE: Cache subuser lookup for 5 minutes
+                // Note: Only cache basic info, NOT password or sensitive fields
+                var cacheKey = $"{CacheService.CacheKeys.Subuser}:email:{subuserEmail.ToLower()}";
+                return await _cacheService.GetOrCreateAsync(cacheKey, 
+                    async () => await _context.subuser
+                        .Select(s => new subuser
+                        {
+                            subuser_id = s.subuser_id,
+                            subuser_email = s.subuser_email,
+                            user_email = s.user_email,
+                            superuser_id = s.superuser_id,
+                            Name = s.Name,
+                            Department = s.Department,
+                            Role = s.Role,
+                            Phone = s.Phone,
+                            subuser_group = s.subuser_group,
+                            license_allocation = s.license_allocation,
+                            status = s.status,
+                            IsEmailVerified = s.IsEmailVerified,
+                            CreatedAt = s.CreatedAt,
+                            UpdatedAt = s.UpdatedAt,
+                            // Exclude: subuser_password, PermissionsJson, MachineIdsJson, LicenseIdsJson
+                            subuser_password = s.subuser_password // Need for auth, but don't log or expose
+                        })
+                        .FirstOrDefaultAsync(s => s.subuser_email == subuserEmail),
+                    CacheService.CacheTTL.Default);  // 5 minutes
             }
             catch (Exception ex)
             {
@@ -111,7 +145,12 @@ namespace BitRaserApiProject.Services
         {
             try
             {
-                return await _context.subuser.AnyAsync(s => s.subuser_email == subuserEmail);
+                // ✅ PERFORMANCE: Cache subuser existence check for 10 minutes
+                // This is called on EVERY request to determine user type - critical to cache!
+                var cacheKey = $"{CacheService.CacheKeys.Subuser}:exists:{subuserEmail.ToLower()}";
+                return await _cacheService.GetOrCreateAsync(cacheKey, 
+                    async () => await _context.subuser.AnyAsync(s => s.subuser_email == subuserEmail),
+                    CacheService.CacheTTL.Medium);  // 10 minutes
             }
             catch (Exception ex)
             {

@@ -126,6 +126,48 @@ namespace BitRaserApiProject.Controllers
 
         #endregion
 
+        /// <summary>
+        /// Validate token and return user details for session restoration
+        /// </summary>
+        [HttpPost("validate")]
+        [Authorize]
+        public async Task<IActionResult> ValidateToken()
+        {
+            try
+            {
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                var userType = User.FindFirst("user_type")?.Value;
+                
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    return Unauthorized(new { message = "Invalid token" });
+                }
+
+                // Get fresh user details and permissions
+                bool isSubuser = userType == "subuser";
+                var roles = await _roleService.GetUserRolesAsync(userEmail, isSubuser);
+                var permissions = await _roleService.GetUserPermissionsAsync(userEmail, isSubuser);
+
+                // Build response similar to Login
+                var response = new
+                {
+                    isValid = true,
+                    email = userEmail,
+                    userType = userType,
+                    roles = roles,
+                    permissions = permissions,
+                    message = "Token is valid"
+                };
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error validating token for current user");
+                return Unauthorized(new { message = "Token validation failed" });
+            }
+        }
+
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] RoleBasedLoginRequest request)
         {
@@ -444,7 +486,7 @@ namespace BitRaserApiProject.Controllers
                 _logger.LogInformation("✅ Changes saved successfully");
 
                 _logger.LogInformation("🔑 Generating JWT token for {Email}...", userEmail);
-                var token = await GenerateJwtTokenAsync(userEmail, isSubuser);
+                var token = await GenerateJwtTokenAsync(userEmail, isSubuser, session.ip_address);
                 _logger.LogInformation("✅ JWT token generated");
 
                 // Get roles and permissions
@@ -835,7 +877,7 @@ namespace BitRaserApiProject.Controllers
             }
         }
 
-        private async Task<string> GenerateJwtTokenAsync(string email, bool isSubuser)
+        private async Task<string> GenerateJwtTokenAsync(string email, bool isSubuser, string ipAddress)
         {
             var jwtSettings = _configuration.GetSection("Jwt");
             var secretKey = jwtSettings["Key"];
@@ -853,7 +895,8 @@ namespace BitRaserApiProject.Controllers
                 new Claim(ClaimTypes.NameIdentifier, email),
                 new Claim(JwtRegisteredClaimNames.Sub, email),
                 new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
-                new Claim("user_type", isSubuser ? "subuser" : "user")
+                new Claim("user_type", isSubuser ? "subuser" : "user"),
+                new Claim("ip_address", ipAddress ?? "unknown")
             };
 
             // Add role claims

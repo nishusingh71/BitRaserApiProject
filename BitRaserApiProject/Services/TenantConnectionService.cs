@@ -353,7 +353,8 @@ namespace BitRaserApiProject.Services
  /// </summary>
         private string GetDefaultConnectionString()
         {
-      var connectionString = _configuration.GetConnectionString("ApplicationDbContextConnection")
+      var connectionString = Environment.GetEnvironmentVariable("ConnectionStrings__ApplicationDbContextConnection")
+          ?? _configuration.GetConnectionString("ApplicationDbContextConnection")
      ?? _configuration.GetConnectionString("DefaultConnection");
 
         if (string.IsNullOrEmpty(connectionString))

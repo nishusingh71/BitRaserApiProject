@@ -424,12 +424,17 @@ namespace BitRaserApiProject.Middleware
             var skipPaths = new[]
             {
                 "/swagger",
-     "/health",
-      "/favicon.ico",
-        "/.well-known"
-     };
+                "/health",
+                "/favicon.ico",
+                "/.well-known",
+                // ✅ WEBHOOKS: Skip rate limiting for external payment provider callbacks
+                "/api/webhooks/dodo",
+                "/api/webhooks/polar",
+                "/api/payments/dodo/webhook",
+                "/api/payments/polar/webhook"
+            };
 
-            return skipPaths.Any(p => path.StartsWith(p));
+            return skipPaths.Any(p => path.StartsWith(p, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>

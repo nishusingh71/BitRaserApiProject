@@ -85,6 +85,115 @@ namespace BitRaserApiProject.Models
                 return remaining > 0 ? remaining : 0;
             }
         }
+
+        /// <summary>
+        /// Maximum devices allowed for cloud activation (enterprise feature)
+        /// Note: Add column to DB: ALTER TABLE licenses ADD COLUMN max_devices INT DEFAULT 1;
+        /// </summary>
+        [NotMapped] // Temporarily disabled until DB column exists
+        public int MaxDevices { get; set; } = 1;
+
+        /// <summary>
+        /// Navigation property for associated devices (cloud activation)
+        /// </summary>
+        [NotMapped] // Temporarily disabled until license_devices table exists
+        public virtual ICollection<LicenseDevice>? Devices { get; set; }
+    }
+
+    /// <summary>
+    /// License Device entity for multi-device cloud activation
+    /// Tracks all devices activated under a license with enhanced hardware details
+    /// </summary>
+    [Table("license_devices")]
+    public class LicenseDevice
+    {
+        [Key]
+        [Column("id")]
+        public int Id { get; set; }
+
+        [Required]
+        [Column("license_id")]
+        public int LicenseId { get; set; }
+
+        [Required]
+        [MaxLength(255)]
+        [Column("hwid")]
+        public string Hwid { get; set; } = string.Empty;
+
+        [MaxLength(255)]
+        [Column("hwid_hash")]
+        public string? HwidHash { get; set; } // SHA-256 hash for security
+
+        [MaxLength(255)]
+        [Column("hardware_fingerprint")]
+        public string? HardwareFingerprint { get; set; } // Combined hardware hash
+
+        [MaxLength(255)]
+        [Column("machine_name")]
+        public string? MachineName { get; set; }
+
+        [MaxLength(255)]
+        [Column("os_info")]
+        public string? OsInfo { get; set; }
+
+        [MaxLength(100)]
+        [Column("os_build")]
+        public string? OsBuild { get; set; }
+
+        // Enhanced Hardware Details
+        [MaxLength(255)]
+        [Column("cpu_id")]
+        public string? CpuId { get; set; }
+
+        [MaxLength(255)]
+        [Column("cpu_name")]
+        public string? CpuName { get; set; }
+
+        [MaxLength(50)]
+        [Column("mac_address")]
+        public string? MacAddress { get; set; }
+
+        [MaxLength(255)]
+        [Column("motherboard_serial")]
+        public string? MotherboardSerial { get; set; }
+
+        [MaxLength(255)]
+        [Column("disk_serial")]
+        public string? DiskSerial { get; set; }
+
+        [MaxLength(255)]
+        [Column("gpu_info")]
+        public string? GpuInfo { get; set; }
+
+        [Column("ram_gb")]
+        public int? RamGb { get; set; }
+
+        [MaxLength(100)]
+        [Column("timezone")]
+        public string? Timezone { get; set; }
+
+        [MaxLength(45)]
+        [Column("ip_address")]
+        public string? IpAddress { get; set; }
+
+        [Column("activated_at")]
+        public DateTime ActivatedAt { get; set; } = DateTime.UtcNow;
+
+        [Column("last_seen")]
+        public DateTime? LastSeen { get; set; }
+
+        [Column("is_active")]
+        public bool IsActive { get; set; } = true;
+
+        // RSA Token
+        [Column("activation_token")]
+        public string? ActivationToken { get; set; }
+
+        /// <summary>
+        /// Navigation property to parent license
+        /// </summary>
+        [ForeignKey("LicenseId")]
+        public virtual LicenseActivation? License { get; set; }
     }
 
     /// <summary>

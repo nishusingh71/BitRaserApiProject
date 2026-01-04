@@ -68,8 +68,50 @@ CREATE TABLE IF NOT EXISTS `groups` (
     `status` VARCHAR(50) DEFAULT 'active',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `admin_user_id` VARCHAR(255) NULL,
   INDEX idx_name (`name`),
     INDEX idx_status (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+            ["group_members"] = @"
+CREATE TABLE IF NOT EXISTS `group_members` (
+  `Id` INT NOT NULL AUTO_INCREMENT,
+  `GroupId` INT NOT NULL,
+  `UserId` VARCHAR(255) NOT NULL,
+  `UserEmail` VARCHAR(255) NULL,
+  `UserName` VARCHAR(100) NULL,
+  `Role` VARCHAR(50) NULL,
+  `Department` VARCHAR(100) NULL,
+  `AddedAt` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `UpdatedAt` DATETIME NULL,
+  PRIMARY KEY (`Id`),
+  INDEX `IX_group_members_group_id` (`GroupId`),
+  INDEX `IX_group_members_user_id` (`UserId`),
+  UNIQUE INDEX `IX_group_members_group_user_unique` (`GroupId`, `UserId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+
+            ["downloads"] = @"
+CREATE TABLE IF NOT EXISTS `downloads` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `product_name` VARCHAR(100) NOT NULL,
+  `version` VARCHAR(50) NULL,
+  `platform` VARCHAR(50) NOT NULL,
+  `architecture` VARCHAR(50) NULL,
+  `user_id` VARCHAR(255) NULL,
+  `user_email` VARCHAR(255) NULL,
+  `ip_address` VARCHAR(50) NULL,
+  `user_agent` VARCHAR(500) NULL,
+  `downloaded_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `file_size` BIGINT NOT NULL DEFAULT 0,
+  `download_completed` BOOLEAN NOT NULL DEFAULT TRUE,
+  `country` VARCHAR(100) NULL,
+  `city` VARCHAR(100) NULL,
+  `referrer` VARCHAR(100) NULL,
+  `download_source` VARCHAR(50) NULL,
+  PRIMARY KEY (`id`),
+  INDEX `IX_downloads_product_name` (`product_name`),
+  INDEX `IX_downloads_platform` (`platform`),
+  INDEX `IX_downloads_downloaded_at` (`downloaded_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
 
 ["subuser"] = @"
