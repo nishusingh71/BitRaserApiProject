@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Private Cloud Setup - With Table Selection</title>
+    <style>
+        * {
+            margin: 0;
+         padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+            padding: 20px;
+            display: flex;
+      justify-content: center;
+          align-items: center;
+        }
+
+        .container {
+            background: white;
+ border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+     max-width: 800px;
+   width: 100%;
+      padding: 40px;
+        }
+
+        h1 {
+        text-align: center;
+      color: #667eea;
+    margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+text-align: center;
+  color: #666;
+     margin-bottom: 30px;
+            font-size: 14px;
+      }
+
+    .form-group {
+        margin-bottom: 20px;
+  }
+
+        label {
+     display: block;
+          margin-bottom: 8px;
+         color: #333;
+       font-weight: 600;
+            font-size: 14px;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="number"],
+        select,
+        textarea {
+  width: 100%;
+            padding: 12px 15px;
+        border: 2px solid #e0e0e0;
+     border-radius: 8px;
+      font-size: 14px;
+            transition: all 0.3s ease;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus,
+        input[type="number"]:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+        border-color: #667eea;
+       box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        /* ✅ NEW: Table Selection Section */
+        .table-selection-section {
+        background: #f8f9fa;
+         border: 2px solid #e0e0e0;
+  border-radius: 12px;
+            padding: 20px;
+   margin: 25px 0;
+        }
+
+    .table-selection-header {
+            display: flex;
+        align-items: center;
+   margin-bottom: 15px;
+   }
+
+        .table-selection-header h3 {
+         color: #667eea;
+      font-size: 18px;
+            margin: 0;
+            flex: 1;
+      }
+
+        .select-all-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+         padding: 8px 16px;
+            border-radius: 6px;
+     cursor: pointer;
+       font-size: 13px;
+            transition: all 0.3s ease;
+        }
+
+        .select-all-btn:hover {
+            background: #5568d3;
+ transform: translateY(-2px);
+    }
+
+      .table-selection-info {
+       background: #e3f2fd;
+    border-left: 4px solid #2196f3;
+        padding: 12px;
+          margin-bottom: 15px;
+    border-radius: 6px;
+    font-size: 13px;
+     color: #0d47a1;
+        }
+
+   .table-checkbox-grid {
+            display: grid;
+   grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
+     }
+
+        .table-checkbox-item {
+       background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+    padding: 12px;
+            transition: all 0.3s ease;
+         cursor: pointer;
+        }
+
+        .table-checkbox-item:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+        }
+
+        .table-checkbox-item.required {
+            background: #fff3e0;
+         border-color: #ff9800;
+        }
+
+        .table-checkbox-item.selected {
+    background: #e8f5e9;
+         border-color: #4caf50;
+        }
+
+        .table-checkbox-item label {
+            display: flex;
+   align-items: center;
+ margin: 0;
+            cursor: pointer;
+        font-weight: 500;
+        }
+
+        .table-checkbox-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            margin-right: 10px;
+      cursor: pointer;
+        }
+
+        .table-info {
+            margin-top: 8px;
+            padding-left: 28px;
+ font-size: 12px;
+   color: #666;
+        }
+
+    .table-badge {
+ display: inline-block;
+            padding: 2px 8px;
+      border-radius: 12px;
+            font-size: 11px;
+  font-weight: 600;
+        margin-left: 8px;
+}
+
+   .badge-required {
+          background: #ffeb3b;
+            color: #f57c00;
+        }
+
+    .badge-optional {
+       background: #e0e0e0;
+            color: #666;
+        }
+
+.badge-dependency {
+            background: #bbdefb;
+            color: #1976d2;
+        }
+
+        button[type="submit"] {
+       width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+  border: none;
+   border-radius: 8px;
+            font-size: 16px;
+       font-weight: 600;
+   cursor: pointer;
+ transition: all 0.3s ease;
+      margin-top: 20px;
+        }
+
+     button[type="submit"]:hover {
+            transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(102, 126, 234, 0.4);
+        }
+
+    button[type="submit"]:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+  }
+
+        .status-message {
+         padding: 15px;
+            border-radius: 8px;
+         margin-top: 20px;
+            display: none;
+        }
+
+        .status-message.success {
+            background: #d4edda;
+         border: 1px solid #c3e6cb;
+ color: #155724;
+        }
+
+        .status-message.error {
+background: #f8d7da;
+border: 1px solid #f5c6cb;
+  color: #721c24;
+     }
+
+        .status-message.info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+     }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+   }
+
+        @media (max-width: 768px) {
+   .grid-2 {
+    grid-template-columns: 1fr;
+            }
+
+        .table-checkbox-grid {
+  grid-template-columns: 1fr;
+  }
+        }
+
+        .loading-spinner {
+ border: 3px solid #f3f3f3;
+        border-top: 3px solid #667eea;
+         border-radius: 50%;
+        width: 20px;
+      height: 20px;
+  animation: spin 1s linear infinite;
+  display: inline-block;
+     margin-left: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+  }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗄️ Private Cloud Database Setup</h1>
+        <p class="subtitle">Configure your private TiDB database with custom table selection</p>
+
+ <form id="privateCloudForm">
+  <!-- Database Type -->
+            <div class="form-group">
+      <label for="databaseType">Database Type *</label>
+         <select id="databaseType" name="databaseType" required>
+    <option value="mysql">MySQL / TiDB / MariaDB</option>
+        <option value="postgresql">PostgreSQL</option>
+     <option value="sqlserver">SQL Server</option>
+      </select>
+            </div>
+
+ <!-- Server Details -->
+ <div class="grid-2">
+   <div class="form-group">
+          <label for="serverHost">Server Host *</label>
+          <input type="text" id="serverHost" name="serverHost" 
+   placeholder="gateway01.eu-central-1.prod.aws.tidbcloud.com" required>
+                </div>
+
+     <div class="form-group">
+           <label for="serverPort">Server Port *</label>
+      <input type="number" id="serverPort" name="serverPort" 
+              value="4000" required>
+         </div>
+            </div>
+
+            <!-- Database Credentials -->
+         <div class="form-group">
+  <label for="databaseName">Database Name *</label>
+  <input type="text" id="databaseName" name="databaseName" 
+       placeholder="test" required>
+            </div>
+
+         <div class="grid-2">
+       <div class="form-group">
+     <label for="databaseUsername">Username *</label>
+       <input type="text" id="databaseUsername" name="databaseUsername" 
+          placeholder="2tdeFNZMcsWKkDR.root" required>
+      </div>
+
+  <div class="form-group">
+          <label for="databasePassword">Password *</label>
+            <input type="password" id="databasePassword" name="databasePassword" 
+      placeholder="Enter your password" required>
+                </div>
+ </div>
+
+  <!-- ✅ NEW: Table Selection Section -->
+         <div class="table-selection-section">
+              <div class="table-selection-header">
+  <h3>📋 Select Tables to Create</h3>
+  <button type="button" class="select-all-btn" onclick="toggleSelectAll()">
+          Select All
+ </button>
+     </div>
+
+          <div class="table-selection-info">
+   💡 <strong>Tip:</strong> Select only the tables you need. Required tables are pre-selected and cannot be deselected.
+       </div>
+
+   <div class="table-checkbox-grid" id="tableCheckboxes">
+       <!-- Required Tables (Cannot be unchecked) -->
+            <div class="table-checkbox-item required selected">
+          <label>
+           <input type="checkbox" name="table_AuditReports" value="AuditReports" 
+        checked disabled>
+          <span>Audit Reports <span class="table-badge badge-required">REQUIRED</span></span>
+    </label>
+ <div class="table-info">
+    Stores erasure reports and audit trails
+        </div>
+          </div>
+
+         <div class="table-checkbox-item required selected">
+   <label>
+              <input type="checkbox" name="table_subuser" value="subuser" 
+ checked disabled>
+       <span>Subusers <span class="table-badge badge-required">REQUIRED</span></span>
+     </label>
+     <div class="table-info">
+           Manages subuser accounts and permissions
+</div>
+       </div>
+
+         <div class="table-checkbox-item required selected">
+            <label>
+   <input type="checkbox" name="table_Roles" value="Roles" 
+           checked disabled>
+      <span>Roles <span class="table-badge badge-required">REQUIRED</span></span>
+     </label>
+            <div class="table-info">
+    Role definitions for access control
+        </div>
+       </div>
+
+<div class="table-checkbox-item required selected">
+      <label>
+<input type="checkbox" name="table_SubuserRoles" value="SubuserRoles" 
+      checked disabled>
+        <span>Subuser Roles <span class="table-badge badge-required">REQUIRED</span></span>
+    </label>
+             <div class="table-info">
+      Maps subusers to their assigned roles
+     </div>
+    </div>
+
+       <!-- Optional Tables -->
+      <div class="table-checkbox-item" onclick="toggleCheckbox(this)">
+ <label>
+       <input type="checkbox" name="table_machines" value="machines">
+     <span>Machines <span class="table-badge badge-optional">Optional</span></span>
+         </label>
+     <div class="table-info">
+   Device registration and management
+  </div>
+     </div>
+
+   <div class="table-checkbox-item" onclick="toggleCheckbox(this)">
+  <label>
+               <input type="checkbox" name="table_sessions" value="sessions">
+   <span>Sessions <span class="table-badge badge-optional">Optional</span></span>
+       </label>
+                <div class="table-info">
+ User login/logout session tracking
+    </div>
+           </div>
+
+      <div class="table-checkbox-item" onclick="toggleCheckbox(this)">
+  <label>
+           <input type="checkbox" name="table_logs" value="logs">
+     <span>Logs <span class="table-badge badge-optional">Optional</span></span>
+    </label>
+               <div class="table-info">
+        System activity and audit logs
+      </div>
+    </div>
+
+        <div class="table-checkbox-item" onclick="toggleCheckbox(this)">
+   <label>
+        <input type="checkbox" name="table_commands" value="commands">
+        <span>Commands <span class="table-badge badge-optional">Optional</span></span>
+    </label>
+    <div class="table-info">
+               Remote command execution tracking
+   </div>
+     </div>
+
+         <div class="table-checkbox-item" onclick="toggleCheckbox(this)">
+            <label>
+      <input type="checkbox" name="table_groups" value="groups">
+           <span>Groups <span class="table-badge badge-optional">Optional</span></span>
+       </label>
+         <div class="table-info">
+      User group organization
+    </div>
+                    </div>
+   </div>
+    </div>
+
+ <!-- Notes -->
+            <div class="form-group">
+   <label for="notes">Notes (Optional)</label>
+         <textarea id="notes" name="notes" rows="3" 
+         placeholder="Add any notes about this configuration..."></textarea>
+         </div>
+
+            <!-- Submit Button -->
+            <button type="submit" id="submitBtn">
+          🚀 Setup Private Cloud
+            </button>
+        </form>
+
+        <!-- Status Messages -->
+        <div id="statusMessage" class="status-message"></div>
+    </div>
+
+    <script>
+   // ✅ Get JWT token from localStorage
+    const token = localStorage.getItem('authToken') || 'YOUR_JWT_TOKEN_HERE';
+
+        // ✅ Toggle checkbox selection
+     function toggleCheckbox(element) {
+      const checkbox = element.querySelector('input[type="checkbox"]');
+            if (!checkbox.disabled) {
+                checkbox.checked = !checkbox.checked;
+          element.classList.toggle('selected', checkbox.checked);
+     }
+     }
+
+        // ✅ Select/Deselect all optional tables
+   function toggleSelectAll() {
+  const optionalCheckboxes = document.querySelectorAll('.table-checkbox-item:not(.required) input[type="checkbox"]');
+     const allChecked = Array.from(optionalCheckboxes).every(cb => cb.checked);
+            
+   optionalCheckboxes.forEach(checkbox => {
+      checkbox.checked = !allChecked;
+          checkbox.closest('.table-checkbox-item').classList.toggle('selected', !allChecked);
+            });
+
+ // Update button text
+     const btn = document.querySelector('.select-all-btn');
+  btn.textContent = allChecked ? 'Select All' : 'Deselect All';
+        }
+
+        // ✅ Initialize checkbox states
+        document.querySelectorAll('.table-checkbox-item input[type="checkbox"]').forEach(checkbox => {
+     checkbox.addEventListener('change', function() {
+             this.closest('.table-checkbox-item').classList.toggle('selected', this.checked);
+   });
+        });
+
+ // ✅ Form submission
+        document.getElementById('privateCloudForm').addEventListener('submit', async function(e) {
+     e.preventDefault();
+
+            const submitBtn = document.getElementById('submitBtn');
+      const statusMessage = document.getElementById('statusMessage');
+
+          // Show loading state
+    submitBtn.disabled = true;
+            submitBtn.innerHTML = '⏳ Setting up... <span class="loading-spinner"></span>';
+            statusMessage.style.display = 'none';
+
+   // ✅ Collect selected tables
+            const selectedTables = {};
+          document.querySelectorAll('input[type="checkbox"][name^="table_"]').forEach(checkbox => {
+                const tableName = checkbox.value;
+   selectedTables[tableName] = checkbox.checked;
+            });
+
+ // Build request payload
+      const requestData = {
+     userEmail: "user@example.com", // ✅ Replace with actual logged-in user email
+    databaseType: document.getElementById('databaseType').value,
+         serverHost: document.getElementById('serverHost').value,
+     serverPort: parseInt(document.getElementById('serverPort').value),
+                databaseName: document.getElementById('databaseName').value,
+   databaseUsername: document.getElementById('databaseUsername').value,
+           databasePassword: document.getElementById('databasePassword').value,
+          selectedTables: JSON.stringify(selectedTables), // ✅ Send as JSON string
+        notes: document.getElementById('notes').value
+  };
+
+       try {
+       console.log('📤 Sending request:', requestData);
+
+          // ✅ API Call
+                const response = await fetch('https://localhost:7147/api/PrivateCloud/setup', {
+        method: 'POST',
+      headers: {
+      'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+       },
+              body: JSON.stringify(requestData)
+        });
+
+                const result = await response.json();
+         console.log('📥 Response:', result);
+
+   if (response.ok) {
+     // Success
+statusMessage.className = 'status-message success';
+    statusMessage.style.display = 'block';
+            statusMessage.innerHTML = `
+  ✅ <strong>Success!</strong><br>
+             ${result.message || 'Private cloud configured successfully!'}<br>
+             <strong>Next:</strong> ${result.nextStep || 'Test the connection'}
+            `;
+
+         // Reset form after 3 seconds
+         setTimeout(() => {
+       this.reset();
+      document.querySelectorAll('.table-checkbox-item.selected:not(.required)').forEach(item => {
+ item.classList.remove('selected');
+       });
+   }, 3000);
+    } else {
+           // Error
+          throw new Error(result.message || result.detail || 'Setup failed');
+       }
+
+  } catch (error) {
+    console.error('❌ Error:', error);
+     statusMessage.className = 'status-message error';
+     statusMessage.style.display = 'block';
+       statusMessage.innerHTML = `
+         ❌ <strong>Error!</strong><br>
+     ${error.message}
+   `;
+     } finally {
+       // Reset button
+    submitBtn.disabled = false;
+     submitBtn.innerHTML = '🚀 Setup Private Cloud';
+            }
+        });
+
+      // ✅ Show info message on load
+        window.addEventListener('load', function() {
+      const statusMessage = document.getElementById('statusMessage');
+            statusMessage.className = 'status-message info';
+            statusMessage.style.display = 'block';
+            statusMessage.innerHTML = `
+        ℹ️ <strong>Info:</strong> 4 tables are required and will be created automatically. 
+      You can select additional optional tables as needed.
+            `;
+
+     // Hide after 5 seconds
+   setTimeout(() => {
+      statusMessage.style.display = 'none';
+       }, 5000);
+        });
+    </script>
+</body>
+</html>

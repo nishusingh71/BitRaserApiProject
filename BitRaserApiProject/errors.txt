@@ -1,0 +1,15 @@
+﻿C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\Controllers\DashboardController.cs(11,7): warning CS0105: The using directive for 'BitRaserApiProject.Services' appeared previously in this namespace [C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject.csproj]
+C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\Program.cs(699,16): warning CS8321: The local function 'DecryptConnectionStringStatic' is declared but never used [C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject.csproj]
+C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\Services\PolarPaymentService.cs(260,87): error CS8072: An expression tree lambda may not contain a null propagating operator. [C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject.csproj]
+C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\Services\PolarPaymentService.cs(328,93): error CS8072: An expression tree lambda may not contain a null propagating operator. [C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject.csproj]
+
+Build FAILED.
+
+C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\Controllers\DashboardController.cs(11,7): warning CS0105: The using directive for 'BitRaserApiProject.Services' appeared previously in this namespace [C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject.csproj]
+C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\Program.cs(699,16): warning CS8321: The local function 'DecryptConnectionStringStatic' is declared but never used [C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject.csproj]
+C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\Services\PolarPaymentService.cs(260,87): error CS8072: An expression tree lambda may not contain a null propagating operator. [C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject.csproj]
+C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\Services\PolarPaymentService.cs(328,93): error CS8072: An expression tree lambda may not contain a null propagating operator. [C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject.csproj]
+    2 Warning(s)
+    2 Error(s)
+
+Time Elapsed 00:00:07.96

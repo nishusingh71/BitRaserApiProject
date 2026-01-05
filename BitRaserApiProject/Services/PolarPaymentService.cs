@@ -45,9 +45,10 @@ namespace BitRaserApiProject.Services
             _cache = cache;
 
             // Load configuration - Environment variables take priority
+            // ✅ Made optional - won't crash if Polar not configured (Dodo-only mode)
             _polarAccessToken = Environment.GetEnvironmentVariable("Polar__AccessToken")
                 ?? configuration["Polar:AccessToken"] 
-                ?? throw new InvalidOperationException("Polar access token not configured. Set Polar__AccessToken environment variable.");
+                ?? ""; // Empty string = Polar not configured
             
             _polarWebhookSecret = Environment.GetEnvironmentVariable("Polar__WebhookSecret")
                 ?? configuration["Polar:WebhookSecret"] 
@@ -61,21 +62,25 @@ namespace BitRaserApiProject.Services
                 ? "https://sandbox-api.polar.sh/api/v1" 
                 : "https://api.polar.sh/api/v1";
 
-            // Configure HttpClient
-            _httpClient.DefaultRequestHeaders.Clear();
-            _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_polarAccessToken}");
-            _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
-            
-            // ✅ DEBUG: Log loaded configuration (mask token for security)
-            var tokenPreview = _polarAccessToken.Length > 20 
-                ? $"{_polarAccessToken.Substring(0, 20)}..." 
-                : "[SHORT TOKEN]";
-            _logger.LogWarning("� Polar Config Loaded:");
-            _logger.LogWarning("   - Token: {TokenPreview}", tokenPreview);
-            _logger.LogWarning("   - Sandbox: {IsSandbox}", _isSandbox);
-            _logger.LogWarning("   - Base URL: {BaseUrl}", _polarBaseUrl);
-            _logger.LogWarning("   - From ENV: POLAR_ACCESS_TOKEN={HasEnv}", 
-                !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("POLAR_ACCESS_TOKEN")) ? "YES" : "NO");
+            // Only configure HttpClient if Polar is enabled
+            if (!string.IsNullOrEmpty(_polarAccessToken))
+            {
+                _httpClient.DefaultRequestHeaders.Clear();
+                _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_polarAccessToken}");
+                _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
+                
+                var tokenPreview = _polarAccessToken.Length > 20 
+                    ? $"{_polarAccessToken.Substring(0, 20)}..." 
+                    : "[SHORT TOKEN]";
+                _logger.LogWarning("🐻 Polar Config Loaded:");
+                _logger.LogWarning("   - Token: {TokenPreview}", tokenPreview);
+                _logger.LogWarning("   - Sandbox: {IsSandbox}", _isSandbox);
+                _logger.LogWarning("   - Base URL: {BaseUrl}", _polarBaseUrl);
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ Polar NOT configured - running in Dodo-only mode");
+            }
         }
 
         /// <summary>
@@ -83,6 +88,16 @@ namespace BitRaserApiProject.Services
         /// </summary>
         public async Task<CreateCheckoutResponse> CreateCheckoutAsync(CreateCheckoutRequest request, string userEmail)
         {
+            // ✅ Guard: Return error if Polar not configured
+            if (string.IsNullOrEmpty(_polarAccessToken))
+            {
+                return new CreateCheckoutResponse
+                {
+                    Success = false,
+                    Message = "Polar payments not configured. Please use Dodo Payments instead."
+                };
+            }
+
             try
             {
                 _logger.LogInformation("Creating checkout for user {Email}, product {ProductId}", 
@@ -512,6 +527,13 @@ namespace BitRaserApiProject.Services
         /// </summary>
         public async Task<List<BillingPlanDto>> GetBillingPlansAsync()
         {
+            // ✅ Guard: Return fallback if Polar not configured
+            if (string.IsNullOrEmpty(_polarAccessToken))
+            {
+                _logger.LogWarning("⚠️ Polar not configured - returning empty billing plans");
+                return GetFallbackBillingPlans();
+            }
+
             // ✅ Check cache first
             if (_cache.TryGetValue(CACHE_KEY_BILLING_PLANS, out List<BillingPlanDto>? cachedPlans) && cachedPlans != null)
             {
@@ -618,6 +640,16 @@ namespace BitRaserApiProject.Services
         /// </summary>
         public async Task<PriceCheckoutResponse> CreatePriceCheckoutAsync(PriceCheckoutRequest request, string userEmail)
         {
+            // ✅ Guard: Return error if Polar not configured
+            if (string.IsNullOrEmpty(_polarAccessToken))
+            {
+                return new PriceCheckoutResponse
+                {
+                    Success = false,
+                    Message = "Polar payments not configured. Please use Dodo Payments instead."
+                };
+            }
+
             try
             {
                 _logger.LogInformation("🛒 Creating price-based checkout for {Email}, priceId: {PriceId}", 

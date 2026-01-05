@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Private Cloud Database Setup</title>
+    <style>
+   * {
+         margin: 0;
+            padding: 0;
+        box-sizing: border-box;
+     }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+     display: flex;
+    justify-content: center;
+align-items: center;
+            padding: 20px;
+        }
+
+  .container {
+            background: white;
+    border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+         max-width: 600px;
+    width: 100%;
+            padding: 40px;
+        }
+
+        .header {
+    text-align: center;
+     margin-bottom: 30px;
+  }
+
+     .header h1 {
+            color: #333;
+            font-size: 28px;
+    margin-bottom: 10px;
+        }
+
+        .header p {
+      color: #666;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+  display: block;
+            color: #333;
+            font-weight: 600;
+margin-bottom: 8px;
+  font-size: 14px;
+        }
+
+        .form-group input,
+        .form-group select,
+     .form-group textarea {
+          width: 100%;
+    padding: 12px 15px;
+    border: 2px solid #e1e1e1;
+            border-radius: 8px;
+            font-size: 14px;
+       transition: all 0.3s;
+        }
+
+        .form-group input:focus,
+    .form-group select:focus,
+      .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+       box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+  }
+
+        .form-row {
+   display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 15px;
+        }
+
+        .btn {
+     width: 100%;
+    padding: 15px;
+  border: none;
+            border-radius: 8px;
+            font-size: 16px;
+ font-weight: 600;
+  cursor: pointer;
+       transition: all 0.3s;
+  margin-top: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+
+      .btn-primary:hover {
+            transform: translateY(-2px);
+          box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+   color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .alert {
+   padding: 15px;
+    border-radius: 8px;
+            margin-bottom: 20px;
+        display: none;
+        }
+
+        .alert-success {
+            background: #d4edda;
+        color: #155724;
+        border: 1px solid #c3e6cb;
+  }
+
+  .alert-error {
+            background: #f8d7da;
+          color: #721c24;
+            border: 1px solid #f5c6cb;
+  }
+
+        .alert-info {
+     background: #d1ecf1;
+   color: #0c5460;
+            border: 1px solid #bee5eb;
+    }
+
+        .loading {
+            display: none;
+      text-align: center;
+  padding: 20px;
+}
+
+        .loading .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+        border-radius: 50%;
+    width: 40px;
+            height: 40px;
+      animation: spin 1s linear infinite;
+  margin: 0 auto 10px;
+        }
+
+    @keyframes spin {
+         0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+        }
+
+     .info-box {
+        background: #f8f9fa;
+ border-left: 4px solid #667eea;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+
+        .info-box h3 {
+            color: #333;
+  font-size: 16px;
+         margin-bottom: 10px;
+        }
+
+        .info-box ul {
+  margin-left: 20px;
+       color: #666;
+font-size: 14px;
+        }
+
+        .info-box ul li {
+    margin-bottom: 5px;
+      }
+
+        pre {
+    background: #2d2d2d;
+        color: #f8f8f2;
+    padding: 15px;
+            border-radius: 5px;
+ overflow-x: auto;
+            font-size: 12px;
+        }
+</style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+     <h1>🔐 Private Cloud Database Setup</h1>
+            <p>Configure your private TiDB Cloud database connection</p>
+  </div>
+
+        <div id="alert" class="alert"></div>
+        
+    <div class="info-box">
+    <h3>📋 Prerequisites:</h3>
+      <ul>
+     <li>User must have <code>is_private_cloud = TRUE</code> in database</li>
+  <li>Valid JWT token from login</li>
+     <li>TiDB Cloud database credentials</li>
+          </ul>
+        </div>
+
+        <form id="setupForm">
+ <!-- Login Section -->
+          <div class="form-group">
+           <label for="email">Email *</label>
+             <input type="email" id="email" name="email" value="devste@gmail.com" required>
+    </div>
+
+            <div class="form-group">
+                <label for="password">Password *</label>
+     <input type="password" id="password" name="password" placeholder="Enter your password" required>
+            </div>
+
+            <button type="button" class="btn btn-secondary" onclick="login()">1️⃣ Login & Get Token</button>
+
+         <hr style="margin: 30px 0; border: none; border-top: 2px solid #f0f0f0;">
+
+    <!-- Database Connection Section -->
+            <div class="form-group">
+                <label for="databaseType">Database Type *</label>
+              <select id="databaseType" name="databaseType" required>
+            <option value="mysql" selected>MySQL (TiDB)</option>
+     <option value="postgresql">PostgreSQL</option>
+     <option value="sqlserver">SQL Server</option>
+              </select>
+         </div>
+
+            <div class="form-group">
+        <label for="serverHost">Server Host *</label>
+       <input type="text" id="serverHost" name="serverHost" 
+       value="gateway01.ap-southeast-1.prod.aws.tidbcloud.com" 
+      placeholder="e.g., gateway01.ap-southeast-1.prod.aws.tidbcloud.com" required>
+         </div>
+
+            <div class="form-row">
+  <div class="form-group">
+         <label for="databaseName">Database Name *</label>
+   <input type="text" id="databaseName" name="databaseName" 
+  value="Cloud_Erase" 
+  placeholder="e.g., my_database" required>
+    </div>
+        <div class="form-group">
+          <label for="serverPort">Port *</label>
+       <input type="number" id="serverPort" name="serverPort" 
+                  value="4000" 
+     placeholder="3306" required>
+           </div>
+       </div>
+
+  <div class="form-group">
+   <label for="databaseUsername">Username *</label>
+       <input type="text" id="databaseUsername" name="databaseUsername" 
+     value="2tdeFNZMcsWKkDR.root" 
+            placeholder="e.g., user.root" required>
+          </div>
+
+   <div class="form-group">
+           <label for="databasePassword">Database Password *</label>
+         <input type="password" id="databasePassword" name="databasePassword" 
+        value="76wtaj1GZkg7Qhek" 
+   placeholder="Enter database password" required>
+     </div>
+
+            <div class="form-group">
+                <label for="storageLimitMb">Storage Limit (MB)</label>
+    <input type="number" id="storageLimitMb" name="storageLimitMb" 
+  value="1024" 
+           placeholder="e.g., 1024">
+            </div>
+
+       <div class="form-group">
+          <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" rows="2" 
+    placeholder="Optional notes about this database">TiDB Production Database</textarea>
+            </div>
+
+        <button type="submit" class="btn btn-primary">2️⃣ Setup Private Database</button>
+        </form>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+   <p>Processing...</p>
+   </div>
+
+        <div id="response" style="margin-top: 20px; display: none;">
+       <h3 style="margin-bottom: 10px;">Response:</h3>
+            <pre id="responseContent"></pre>
+  </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5000/api';
+        let jwtToken = localStorage.getItem('jwt_token') || '';
+
+        // Auto-fill token if exists
+  if (jwtToken) {
+     showAlert('Token found in localStorage', 'info');
+   }
+
+        // Login function
+        async function login() {
+   const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+ if (!email || !password) {
+  showAlert('Please enter email and password', 'error');
+           return;
+            }
+
+          showLoading(true);
+   hideAlert();
+
+   try {
+     const response = await fetch(`${API_URL}/RoleBasedAuth/login`, {
+    method: 'POST',
+     headers: {
+          'Content-Type': 'application/json'
+     },
+        body: JSON.stringify({ email, password })
+       });
+
+ const data = await response.json();
+
+            if (response.ok && data.token) {
+ jwtToken = data.token;
+             localStorage.setItem('jwt_token', jwtToken);
+     localStorage.setItem('user_email', data.email);
+ 
+   showAlert(`✅ Login successful!<br>Email: ${data.email}<br>Type: ${data.userType}`, 'success');
+      showResponse(data);
+  } else {
+   showAlert('❌ Login failed: ' + (data.message || 'Invalid credentials'), 'error');
+   showResponse(data);
+ }
+            } catch (error) {
+     showAlert('❌ Error: ' + error.message, 'error');
+    console.error('Login error:', error);
+   } finally {
+   showLoading(false);
+            }
+        }
+
+        // Form submit handler
+        document.getElementById('setupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            if (!jwtToken) {
+         showAlert('❌ Please login first to get JWT token', 'error');
+   return;
+    }
+
+            const formData = {
+     databaseType: document.getElementById('databaseType').value,
+  serverHost: document.getElementById('serverHost').value,
+       serverPort: parseInt(document.getElementById('serverPort').value),
+     databaseName: document.getElementById('databaseName').value,
+    databaseUsername: document.getElementById('databaseUsername').value,
+      databasePassword: document.getElementById('databasePassword').value,
+         storageLimitMb: parseInt(document.getElementById('storageLimitMb').value) || null,
+         notes: document.getElementById('notes').value || null
+       };
+
+            console.log('Sending setup request:', formData);
+
+   showLoading(true);
+            hideAlert();
+
+            try {
+      const response = await fetch(`${API_URL}/PrivateCloud/setup`, {
+         method: 'POST',
+  headers: {
+            'Content-Type': 'application/json',
+        'Authorization': `Bearer ${jwtToken}`
+      },
+                  body: JSON.stringify(formData)
+    });
+
+    const data = await response.json();
+
+         if (response.ok) {
+             showAlert(`✅ ${data.message}<br>Next: ${data.nextStep}`, 'success');
+   showResponse(data);
+      } else {
+      let errorMsg = `❌ Setup Failed (${response.status})<br>`;
+   errorMsg += `Message: ${data.message || 'Unknown error'}<br>`;
+ if (data.detail) errorMsg += `Detail: ${data.detail}<br>`;
+if (data.error) errorMsg += `Error: ${data.error}<br>`;
+      if (data.hint) errorMsg += `Hint: ${data.hint}`;
+        
+             showAlert(errorMsg, 'error');
+ showResponse(data);
+   }
+       } catch (error) {
+ showAlert('❌ Network Error: ' + error.message, 'error');
+        console.error('Setup error:', error);
+  } finally {
+          showLoading(false);
+            }
+        });
+
+        function showAlert(message, type) {
+       const alert = document.getElementById('alert');
+    alert.className = `alert alert-${type}`;
+            alert.innerHTML = message;
+    alert.style.display = 'block';
+    }
+
+        function hideAlert() {
+            document.getElementById('alert').style.display = 'none';
+        }
+
+        function showLoading(show) {
+         document.getElementById('loading').style.display = show ? 'block' : 'none';
+   document.getElementById('setupForm').style.display = show ? 'none' : 'block';
+        }
+
+      function showResponse(data) {
+   const responseDiv = document.getElementById('response');
+            const responseContent = document.getElementById('responseContent');
+            responseContent.textContent = JSON.stringify(data, null, 2);
+   responseDiv.style.display = 'block';
+     }
+    </script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+﻿  Determining projects to restore...
+  All projects are up-to-date for restore.
+  BitRaserApiProject -> C:\Users\nishu\Downloads\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\BitRaserApiProject\bin\Debug\net8.0\BitRaserApiProject.dll
+
+Build succeeded.
+    0 Warning(s)
+    0 Error(s)
+
+Time Elapsed 00:00:03.28
