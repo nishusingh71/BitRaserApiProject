@@ -119,10 +119,12 @@ namespace BitRaserApiProject.Services
                     }
                 };
 
-                // Add success URL if provided
+                // Add success/return URL if provided - Dodo uses return_url for redirects
                 if (!string.IsNullOrEmpty(request.SuccessUrl))
                 {
-                    dodoRequest["success_url"] = request.SuccessUrl;
+                    dodoRequest["return_url"] = request.SuccessUrl;  // Primary redirect URL
+                    dodoRequest["success_url"] = request.SuccessUrl; // Fallback
+                    dodoRequest["redirect_url"] = request.SuccessUrl; // Alternative format
                 }
 
                 // Add cancel URL if provided (for failed/cancelled payments)
@@ -280,6 +282,7 @@ namespace BitRaserApiProject.Services
             if (data?.PaymentId == null) return;
 
             _logger.LogInformation("💳 Processing payment.succeeded for PaymentId: {PaymentId}", data.PaymentId);
+            _logger.LogInformation("🔍 DEBUG: Webhook InvoiceId = '{InvoiceId}'", data.InvoiceId ?? "NULL");
 
             // Find the order
             var order = await _context.Orders
@@ -315,8 +318,29 @@ namespace BitRaserApiProject.Services
                     ProductId = data.ProductCart?.FirstOrDefault()?.ProductId,
                     LicenseCount = data.ProductCart?.Sum(p => p.Quantity) ?? 1,
                     LicenseYears = 1, 
-                    ProductName = "Dodo Purchase"
+                    ProductName = "Dodo Purchase" // Default, will be updated below
                 };
+                
+                // ✅ Fetch actual product name from Dodo API
+                var productId = data.ProductCart?.FirstOrDefault()?.ProductId;
+                if (!string.IsNullOrEmpty(productId))
+                {
+                    try
+                    {
+                        var products = await GetProductsAsync();
+                        var product = products.FirstOrDefault(p => p.ProductId == productId);
+                        if (product != null)
+                        {
+                            order.ProductName = product.Name;
+                            _logger.LogInformation("📦 Product name fetched: {ProductName} for ProductId: {ProductId}", 
+                                product.Name, productId);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "⚠️ Failed to fetch product name for ProductId: {ProductId}", productId);
+                    }
+                }
                 
                 _context.Orders.Add(order);
                 await _context.SaveChangesAsync();
@@ -335,6 +359,29 @@ namespace BitRaserApiProject.Services
             var customerName = data.Customer?.Name ?? customerEmail.Split('@')[0];
 
             _logger.LogInformation("👤 Customer: {Email}, Name: {Name}", customerEmail, customerName);
+
+            // ✅ Update product name if still default
+            if (string.IsNullOrEmpty(order.ProductName) || order.ProductName == "Dodo Purchase" || order.ProductName == "Product")
+            {
+                var productId = data.ProductCart?.FirstOrDefault()?.ProductId ?? order.ProductId;
+                if (!string.IsNullOrEmpty(productId))
+                {
+                    try
+                    {
+                        var products = await GetProductsAsync();
+                        var product = products.FirstOrDefault(p => p.ProductId == productId);
+                        if (product != null)
+                        {
+                            order.ProductName = product.Name;
+                            _logger.LogInformation("📦 Updated product name: {ProductName}", product.Name);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "⚠️ Failed to update product name for ProductId: {ProductId}", productId);
+                    }
+                }
+            }
 
             // Check if user already exists
             var existingUser = await _context.Users
@@ -486,6 +533,13 @@ namespace BitRaserApiProject.Services
             order.WebhookProcessedAt = DateTime.UtcNow;
             order.UserCreated = userCreated;
 
+            // ✅ Update DodoInvoiceId from webhook data (important for existing orders)
+            if (!string.IsNullOrEmpty(data.InvoiceId))
+            {
+                order.DodoInvoiceId = data.InvoiceId;
+                _logger.LogInformation("📄 Invoice ID captured from webhook: {InvoiceId}", data.InvoiceId);
+            }
+
             if (data.Amount.HasValue)
             {
                 order.AmountCents = data.Amount.Value;
@@ -493,6 +547,67 @@ namespace BitRaserApiProject.Services
             if (!string.IsNullOrEmpty(data.Currency))
             {
                 order.Currency = data.Currency;
+            }
+
+            // ✅ NEW: Save card payment details
+            if (!string.IsNullOrEmpty(data.CardLastFour))
+            {
+                order.CardLastFour = data.CardLastFour;
+            }
+            if (!string.IsNullOrEmpty(data.CardNetwork))
+            {
+                order.CardNetwork = data.CardNetwork;
+            }
+            if (!string.IsNullOrEmpty(data.CardType))
+            {
+                order.CardType = data.CardType;
+            }
+            if (!string.IsNullOrEmpty(data.PaymentLink))
+            {
+                order.PaymentLink = data.PaymentLink;
+            }
+            if (!string.IsNullOrEmpty(data.PaymentMethod))
+            {
+                order.PaymentMethod = data.PaymentMethod;
+            }
+
+            // ✅ NEW: Save tax amount
+            if (data.Tax.HasValue)
+            {
+                order.TaxAmountCents = data.Tax.Value;
+            }
+
+            // ✅ NEW: Save customer ID
+            if (data.Customer != null && !string.IsNullOrEmpty(data.Customer.CustomerId))
+            {
+                order.DodoCustomerId = data.Customer.CustomerId;
+            }
+
+            // ✅ NEW: Save customer name and phone
+            if (data.Customer != null)
+            {
+                if (!string.IsNullOrEmpty(data.Customer.Name))
+                {
+                    // Split name into first and last
+                    var nameParts = data.Customer.Name.Split(' ', 2);
+                    order.FirstName = nameParts[0];
+                    order.LastName = nameParts.Length > 1 ? nameParts[1] : "";
+                }
+                if (!string.IsNullOrEmpty(data.Customer.PhoneNumber))
+                {
+                    order.PhoneNumber = data.Customer.PhoneNumber;
+                }
+            }
+
+            // ✅ NEW: Save billing address from webhook
+            if (data.Billing != null)
+            {
+                order.BillingAddress = data.Billing.Street;
+                order.BillingCity = data.Billing.City;
+                order.BillingState = data.Billing.State;
+                order.BillingCountry = data.Billing.Country;
+                order.BillingZip = data.Billing.Zipcode;
+                _logger.LogInformation("📍 Billing address saved: {City}, {Country}", data.Billing.City, data.Billing.Country);
             }
 
             // Calculate license expiry
@@ -510,6 +625,45 @@ namespace BitRaserApiProject.Services
             _logger.LogInformation("✅ Order updated: OrderId={OrderId}, Status={Status}",
                 order.OrderId, order.Status);
 
+            // ✅ FETCH INVOICE FOR EMAIL - Using payment_id (more reliable than invoice_id)
+            string? invoiceUrl = null;
+            
+            if (!string.IsNullOrEmpty(data.PaymentId))
+            {
+                try
+                {
+                    _logger.LogInformation("📄 Fetching invoice using PaymentId: {PaymentId}", data.PaymentId);
+                    var invoiceResponse = await GetInvoiceByPaymentIdAsync(data.PaymentId);
+                    
+                    if (invoiceResponse.Success && invoiceResponse.Invoice != null)
+                    {
+                        // Prefer PDF URL, fallback to Invoice URL (HTML)
+                        invoiceUrl = invoiceResponse.Invoice.PdfUrl ?? invoiceResponse.Invoice.InvoiceUrl;
+                        
+                        if (string.IsNullOrEmpty(invoiceUrl))
+                        {
+                            _logger.LogWarning("⚠️ Invoice fetched but both PdfUrl and InvoiceUrl are null for PaymentId: {PaymentId}", data.PaymentId);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("✅ Invoice URL fetched successfully: {InvoiceUrl}", invoiceUrl);
+                        }
+                    }
+                    else
+                    {
+                         _logger.LogWarning("⚠️ Failed to fetch invoice by PaymentId: {Message}", invoiceResponse.Message);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "⚠️ Exception while fetching invoice for PaymentId: {PaymentId}", data.PaymentId);
+                }
+            }
+            else
+            {
+                 _logger.LogWarning("⚠️ PaymentId is null, cannot fetch invoice.");
+            }
+
             // ✅ SEND CREDENTIALS EMAIL (only for new users)
             if (userCreated && !string.IsNullOrEmpty(tempPassword))
             {
@@ -517,7 +671,7 @@ namespace BitRaserApiProject.Services
                 {
                     var loginUrl = Environment.GetEnvironmentVariable("FRONTEND_URL")
                         ?? _configuration["FrontendUrl"]
-                        ?? "https://dashboard.dsecure.com/login";
+                        ?? "https://dsecuretech.com/login";
 
                     // ⚠️ SECURITY: tempPassword is ONLY passed to email, NEVER logged
                     var emailSent = await _emailService.SendAccountCreatedEmailAsync(
@@ -528,7 +682,8 @@ namespace BitRaserApiProject.Services
                         order.ProductName,
                         order.LicenseCount,
                         order.AmountCents > 0 ? order.AmountCents / 100m : (decimal?)null,
-                        licenseKeys
+                        licenseKeys,
+                        invoiceUrl // ✅ Pass invoice URL
                     );
 
                     order.CredentialsEmailSent = emailSent;
@@ -559,7 +714,9 @@ namespace BitRaserApiProject.Services
                         order.ProductName ?? "Product",
                         order.AmountCents > 0 ? order.AmountCents / 100m : 0m,
                         order.LicenseCount,
-                        licenseKeys
+                        licenseKeys,
+                        "Paid",
+                        invoiceUrl // ✅ Pass invoice URL
                     );
 
                     if (emailSent)
@@ -1144,6 +1301,114 @@ namespace BitRaserApiProject.Services
                     Message = $"Error fetching invoice: {ex.Message}"
                 };
             }
+        }
+
+        /// <summary>
+        /// Get invoice by Payment ID from Dodo Payments API
+        /// GET /invoices/payments/{payment_id}
+        /// This is more reliable than invoice_id as payment_id is always available
+        /// Includes retry logic for timing issues (invoice may not be immediately available)
+        /// </summary>
+        public async Task<DodoInvoiceResponse> GetInvoiceByPaymentIdAsync(string paymentId)
+        {
+            const int maxRetries = 3;
+            int[] delaysMs = { 0, 2000, 4000 }; // First attempt immediately, then 2s, 4s delays
+            
+            for (int attempt = 0; attempt < maxRetries; attempt++)
+            {
+                try
+                {
+                    if (delaysMs[attempt] > 0)
+                    {
+                        _logger.LogInformation("⏳ Waiting {Delay}ms before retry attempt {Attempt}/{Max}...", 
+                            delaysMs[attempt], attempt + 1, maxRetries);
+                        await Task.Delay(delaysMs[attempt]);
+                    }
+                    
+                    _logger.LogInformation("📄 Fetching invoice by PaymentId: {PaymentId} (Attempt {Attempt}/{Max})", 
+                        paymentId, attempt + 1, maxRetries);
+
+                    var requestUrl = $"{_dodoBaseUrl}/invoices/payments/{paymentId}";
+                    _logger.LogInformation("🌐 Request URL: {Url}", requestUrl);
+                    
+                    var response = await _httpClient.GetAsync(requestUrl);
+                    var responseContent = await response.Content.ReadAsStringAsync();
+
+                    _logger.LogInformation("📥 Dodo Invoice API Response: {Status} - {Content}",
+                        response.StatusCode, responseContent.Length > 200 ? responseContent.Substring(0, 200) + "..." : responseContent);
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        // ✅ Check if response is actually JSON before parsing
+                        if (string.IsNullOrEmpty(responseContent) || 
+                            responseContent.TrimStart().StartsWith('<') || 
+                            responseContent.TrimStart().StartsWith('%'))
+                        {
+                            _logger.LogError("❌ Dodo API returned non-JSON response: {Content}", 
+                                responseContent.Length > 100 ? responseContent.Substring(0, 100) : responseContent);
+                            return new DodoInvoiceResponse
+                            {
+                                Success = false,
+                                Message = "Dodo API returned non-JSON response (possibly HTML error page)"
+                            };
+                        }
+
+                        var invoice = JsonSerializer.Deserialize<DodoInvoice>(responseContent, new JsonSerializerOptions
+                        {
+                            PropertyNameCaseInsensitive = true
+                        });
+
+                        _logger.LogInformation("✅ Invoice fetched successfully: InvoiceId={InvoiceId}, PdfUrl={PdfUrl}",
+                            invoice?.InvoiceId, invoice?.PdfUrl ?? "NULL");
+
+                        return new DodoInvoiceResponse
+                        {
+                            Success = true,
+                            Message = "Invoice fetched successfully",
+                            Invoice = invoice
+                        };
+                    }
+                    
+                    // Check if it's a NOT_FOUND error (retry-able)
+                    if (response.StatusCode == System.Net.HttpStatusCode.NotFound && attempt < maxRetries - 1)
+                    {
+                        _logger.LogWarning("⚠️ Invoice not found (attempt {Attempt}), will retry - Dodo may still be generating...", attempt + 1);
+                        continue; // Retry
+                    }
+                    
+                    // Non-retryable error or last attempt
+                    _logger.LogError("❌ Invoice fetch failed after {Attempt} attempts: {Status} - {Response}",
+                        attempt + 1, response.StatusCode, responseContent);
+
+                    return new DodoInvoiceResponse
+                    {
+                        Success = false,
+                        Message = $"Failed to fetch invoice: {responseContent}"
+                    };
+                }
+                catch (Exception ex)
+                {
+                    if (attempt < maxRetries - 1)
+                    {
+                        _logger.LogWarning(ex, "⚠️ Exception on attempt {Attempt}, will retry...", attempt + 1);
+                        continue;
+                    }
+                    
+                    _logger.LogError(ex, "❌ Error fetching invoice by PaymentId {PaymentId} after all retries", paymentId);
+                    return new DodoInvoiceResponse
+                    {
+                        Success = false,
+                        Message = $"Error fetching invoice: {ex.Message}"
+                    };
+                }
+            }
+            
+            // Should not reach here, but safety fallback
+            return new DodoInvoiceResponse
+            {
+                Success = false,
+                Message = "Invoice fetch failed after all retry attempts"
+            };
         }
 
         /// <summary>

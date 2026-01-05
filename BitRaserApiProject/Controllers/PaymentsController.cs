@@ -802,6 +802,239 @@ namespace BitRaserApiProject.Controllers
             }
         }
 
+        /// <summary>
+        /// 🦤 TEST: Get Invoice by Payment ID (for debugging)
+        /// Calls Dodo API: GET /invoices/payments/{payment_id}
+        /// </summary>
+        [HttpGet("dodo/invoices/by-payment/{paymentId}")]
+        [AllowAnonymous] // Allow testing without auth
+        [ProducesResponseType(typeof(DodoInvoiceResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetInvoiceByPaymentId(string paymentId)
+        {
+            try
+            {
+                _logger.LogInformation("🧪 TEST: Fetching invoice by PaymentId: {PaymentId}", paymentId);
+                
+                var response = await _dodoPaymentService.GetInvoiceByPaymentIdAsync(paymentId);
+
+                if (!response.Success)
+                {
+                    return NotFound(response);
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Invoice fetched successfully",
+                    payment_id = paymentId,
+                    invoice = response.Invoice,
+                    pdf_url = response.Invoice?.PdfUrl,
+                    invoice_url = response.Invoice?.InvoiceUrl
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching invoice by payment ID {PaymentId}", paymentId);
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = "Failed to fetch invoice",
+                    error = ex.Message
+                });
+            }
+        }
+
+
+        /// <summary>
+        /// 🔍 Get Comprehensive Order Details
+        /// Returns consolidated Order, Payment, Product, Customer, and Invoice details
+        /// Robustly handles invoice fetching via Payment ID fallback
+        /// </summary>
+        /// <param name="orderId">Internal Order ID</param>
+        [HttpGet("orders/{orderId}/details")]
+        [AllowAnonymous] // Temporarily allow anonymous for testing
+        [ProducesResponseType(typeof(ComprehensiveOrderDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetFullOrderDetails(int orderId)
+        {
+            try
+            {
+                _logger.LogInformation("🔍 Fetching comprehensive details for Order {OrderId}", orderId);
+
+                // 1. Fetch Order from DB
+                var order = await _context.Orders.FindAsync(orderId);
+                
+                if (order == null)
+                {
+                    _logger.LogWarning("❌ Order {OrderId} not found", orderId);
+                    return NotFound(new { error = "Order not found" });
+                }
+
+                // NOTE: Security check skipped for testing (AllowAnonymous)
+
+                // 2. Prepare Invoice Information
+                InvoiceInformation invoiceInfo = new InvoiceInformation
+                {
+                    Status = "Not Generated"
+                };
+
+                // Log order details for debugging
+                _logger.LogInformation("📋 Order Details: PaymentProvider={Provider}, Status={Status}, DodoPaymentId={PaymentId}, DodoInvoiceId={InvoiceId}",
+                    order.PaymentProvider, order.Status, order.DodoPaymentId, order.DodoInvoiceId);
+
+                // Only attempt invoice fetch if order is paid Dodo order
+                if (order.PaymentProvider == "dodo" && 
+                   (order.Status == "paid" || order.Status == "completed"))
+                {
+                    DodoInvoiceResponse? invoiceResponse = null;
+
+                    // Strategy A: Try fetching by Payment ID (Most Reliable)
+                    if (!string.IsNullOrEmpty(order.DodoPaymentId))
+                    {
+                        _logger.LogInformation("🔍 Attempting invoice fetch by PaymentId: {PaymentId}", order.DodoPaymentId);
+                        invoiceResponse = await _dodoPaymentService.GetInvoiceByPaymentIdAsync(order.DodoPaymentId);
+                        _logger.LogInformation("📄 Invoice fetch result: Success={Success}, Message={Message}", 
+                            invoiceResponse?.Success, invoiceResponse?.Message);
+                    }
+                    
+                    // Strategy B: Fallback to Invoice ID from DB if Payment ID failed or missing
+                    if ((invoiceResponse == null || !invoiceResponse.Success) && !string.IsNullOrEmpty(order.DodoInvoiceId))
+                    {
+                        _logger.LogInformation("🔍 Fallback: Attempting invoice fetch by InvoiceId: {InvoiceId}", order.DodoInvoiceId);
+                        invoiceResponse = await _dodoPaymentService.GetInvoiceAsync(order.DodoInvoiceId);
+                    }
+
+                    if (invoiceResponse != null && invoiceResponse.Success && invoiceResponse.Invoice != null)
+                    {
+                        var inv = invoiceResponse.Invoice;
+                        invoiceInfo = new InvoiceInformation
+                        {
+                            InvoiceId = inv.InvoiceId,
+                            InvoiceNumber = inv.InvoiceNumber,
+                            Date = inv.CreatedAt,
+                            Status = inv.Status,
+                            PdfUrl = inv.PdfUrl ?? inv.InvoiceUrl, // Prefer PDF, fallback to HTML
+                            Currency = inv.Currency,
+                            TotalAmount = inv.TotalAmountDecimal,
+                            TaxAmount = inv.TaxDecimal
+                        };
+                    }
+                    else
+                    {
+                        // ✅ Fallback: Use DB-stored invoice info if API call fails
+                        invoiceInfo = new InvoiceInformation
+                        {
+                            InvoiceId = order.DodoInvoiceId,
+                            InvoiceNumber = order.DodoInvoiceId, // In Dodo, this is often the invoice number
+                            Date = order.PaidAt,
+                            Status = "Paid (API Unavailable)",
+                            Currency = order.Currency,
+                            TotalAmount = order.AmountCents / 100m,
+                            TaxAmount = order.TaxAmountCents / 100m
+                        };
+                        _logger.LogWarning("⚠️ Invoice API failed for Order {OrderId}, using DB fallback data", orderId);
+                    }
+                }
+
+                // 3. Parse license keys from JSON
+                List<string>? licenseKeysList = null;
+                if (!string.IsNullOrEmpty(order.LicenseKeys))
+                {
+                    try
+                    {
+                        licenseKeysList = System.Text.Json.JsonSerializer.Deserialize<List<string>>(order.LicenseKeys);
+                    }
+                    catch
+                    {
+                        // If it's not JSON, treat as comma-separated
+                        licenseKeysList = order.LicenseKeys.Split(',').Select(k => k.Trim()).ToList();
+                    }
+                }
+
+                // 4. Construct Consolidated Response
+                var response = new ComprehensiveOrderDto
+                {
+                    OrderDetails = new OrderSummaryDetails
+                    {
+                        OrderId = order.OrderId,
+                        OrderDate = order.CreatedAt,
+                        Status = order.Status,
+                        DodoPaymentId = order.DodoPaymentId,
+                        DodoInvoiceId = order.DodoInvoiceId
+                    },
+                    PaymentInfo = new PaymentInformation
+                    {
+                        Status = order.Status,
+                        Method = order.PaymentMethod ?? "Unknown",
+                        Amount = order.AmountCents / 100m,
+                        TaxAmount = order.TaxAmountCents / 100m,
+                        Currency = order.Currency,
+                        TransactionId = order.DodoPaymentId,
+                        Provider = order.PaymentProvider ?? "Manual",
+                        PaymentDate = order.PaidAt,
+                        PaymentLink = order.PaymentLink,
+                        CardLastFour = order.CardLastFour,
+                        CardNetwork = order.CardNetwork,
+                        CardType = order.CardType
+                    },
+                    ProductDetails = new ProductDetails
+                    {
+                        ProductId = order.ProductId,
+                        Name = order.ProductName ?? "Standard License",
+                        Summary = $"{order.LicenseYears} Year License for {order.LicenseCount} Machine(s)",
+                        Quantity = order.LicenseCount,
+                        DurationYears = order.LicenseYears
+                    },
+                    CustomerInfo = new CustomerInformation
+                    {
+                        CustomerId = order.DodoCustomerId,
+                        Name = $"{order.FirstName} {order.LastName}".Trim(),
+                        Email = order.UserEmail,
+                        Phone = order.PhoneNumber,
+                        CompanyName = order.CompanyName,
+                        BillingAddress = new BillingAddressDetails
+                        {
+                            Street = order.BillingAddress,
+                            City = order.BillingCity,
+                            State = order.BillingState,
+                            Country = order.BillingCountry,
+                            Zipcode = order.BillingZip,
+                            Formatted = BuildBillingAddressString(order)
+                        }
+                    },
+                    InvoiceInfo = invoiceInfo,
+                    LicenseInfo = new LicenseInformation
+                    {
+                        LicenseKeys = licenseKeysList,
+                        LicenseCount = order.LicenseCount,
+                        LicenseYears = order.LicenseYears,
+                        ExpiresAt = order.LicenseExpiresAt
+                    }
+                };
+
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching comprehensive details for Order {OrderId}", orderId);
+                return StatusCode(500, new { error = "Failed to fetch order details" });
+            }
+        }
+
+        private string BuildBillingAddressString(BitRaserApiProject.Models.Order order)
+        {
+            var parts = new List<string?> 
+            { 
+                order.BillingAddress, 
+                order.BillingCity, 
+                order.BillingState, 
+                order.BillingZip, 
+                order.BillingCountry 
+            };
+            return string.Join(", ", parts.Where(p => !string.IsNullOrEmpty(p)));
+        }
+
         #endregion
     }
 }
