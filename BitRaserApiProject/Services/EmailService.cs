@@ -15,9 +15,9 @@ namespace BitRaserApiProject.Services
         System.Threading.Tasks.Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName);
         System.Threading.Tasks.Task<bool> SendPasswordResetSuccessEmailAsync(string toEmail, string userName);
         System.Threading.Tasks.Task<bool> SendGenericEmailAsync(string toEmail, string subject, string htmlBody);
-        System.Threading.Tasks.Task<bool> SendAccountCreatedEmailAsync(string toEmail, string userName, string tempPassword, string loginUrl, string? productName = null, int? quantity = null, decimal? price = null, List<string>? licenseKeys = null);
+        System.Threading.Tasks.Task<bool> SendAccountCreatedEmailAsync(string toEmail, string userName, string tempPassword, string loginUrl, string? productName = null, int? quantity = null, decimal? price = null, List<string>? licenseKeys = null, string? invoiceUrl = null);
         System.Threading.Tasks.Task<bool> SendPaymentFailedEmailAsync(string toEmail, string userName, string productName, decimal? amount = null);
-        System.Threading.Tasks.Task<bool> SendPaymentSuccessEmailAsync(string toEmail, string userName, string productName, decimal amount, int quantity = 1, List<string>? licenseKeys = null);
+        System.Threading.Tasks.Task<bool> SendPaymentSuccessEmailAsync(string toEmail, string userName, string productName, decimal amount, int quantity = 1, List<string>? licenseKeys = null, string status = "Paid", string? invoiceUrl = null);
     }
 
     public class EmailService : IEmailService
@@ -61,12 +61,13 @@ namespace BitRaserApiProject.Services
         /// Send account created email with temporary password
         /// ⚠️ SECURITY: tempPassword is ONLY used in email, NEVER logged
         /// </summary>
-        public async System.Threading.Tasks.Task<bool> SendAccountCreatedEmailAsync(string toEmail, string userName, string tempPassword, string loginUrl, string? productName = null, int? quantity = null, decimal? price = null, List<string>? licenseKeys = null)
+        public async System.Threading.Tasks.Task<bool> SendAccountCreatedEmailAsync(string toEmail, string userName, string tempPassword, string loginUrl, string? productName = null, int? quantity = null, decimal? price = null, List<string>? licenseKeys = null, string? invoiceUrl = null)
         {
             var subject = "Your Account is Ready - DSecure";
-            var htmlBody = GetAccountCreatedEmailBody(userName ?? "User", toEmail, tempPassword, loginUrl, productName, quantity, price, licenseKeys);
+            var htmlBody = GetAccountCreatedEmailBody(userName ?? "User", toEmail, tempPassword, loginUrl, productName, quantity, price, licenseKeys, invoiceUrl);
             
-            return await SendEmailAsync(toEmail, userName ?? toEmail, subject, htmlBody, true);
+            // Pass invoiceUrl as attachmentUrl if present
+            return await SendEmailAsync(toEmail, userName ?? toEmail, subject, htmlBody, true, invoiceUrl);
         }
 
         public async System.Threading.Tasks.Task<bool> SendPaymentFailedEmailAsync(string toEmail, string userName, string productName, decimal? amount = null)
@@ -77,26 +78,59 @@ namespace BitRaserApiProject.Services
             return await SendEmailAsync(toEmail, userName ?? toEmail, subject, htmlBody, true);
         }
 
-        public async System.Threading.Tasks.Task<bool> SendPaymentSuccessEmailAsync(string toEmail, string userName, string productName, decimal amount, int quantity = 1, List<string>? licenseKeys = null)
+        public async System.Threading.Tasks.Task<bool> SendPaymentSuccessEmailAsync(string toEmail, string userName, string productName, decimal amount, int quantity = 1, List<string>? licenseKeys = null, string status = "Paid", string? invoiceUrl = null)
         {
             var subject = "Payment Successful - DSecure";
-            var htmlBody = GetPaymentSuccessEmailBody(userName ?? "Customer", toEmail, productName, amount, quantity, licenseKeys);
+            var htmlBody = GetPaymentSuccessEmailBody(userName ?? "Customer", toEmail, productName, amount, quantity, licenseKeys, status, invoiceUrl);
             
-            return await SendEmailAsync(toEmail, userName ?? toEmail, subject, htmlBody, true);
+            // Pass invoiceUrl as attachmentUrl if present
+            return await SendEmailAsync(toEmail, userName ?? toEmail, subject, htmlBody, true, invoiceUrl);
         }
 
         /// <summary>
    /// Main email sending method - auto-detects provider
         /// Priority: SendGrid API (Render-friendly) > Brevo API > FormSubmit > SMTP fallbacks
   /// </summary>
-    private async System.Threading.Tasks.Task<bool> SendEmailAsync(string toEmail, string toName, string subject, string htmlBody, bool withRetry)
+    private async System.Threading.Tasks.Task<bool> SendEmailAsync(string toEmail, string toName, string subject, string htmlBody, bool withRetry = true, string? attachmentUrl = null)
       {
+            // Download attachment if URL provided
+            byte[]? attachmentData = null;
+            string? attachmentName = null;
+
+            if (!string.IsNullOrEmpty(attachmentUrl))
+            {
+                try
+                {
+                    _logger.LogInformation("📎 Downloading attachment from: {Url}", attachmentUrl);
+                    using var httpClient = new HttpClient();
+                    // Add User-Agent to avoid 403 Forbidden from some servers
+                    httpClient.DefaultRequestHeaders.Add("User-Agent", "BitRaserApiProject/1.0");
+                    attachmentData = await httpClient.GetByteArrayAsync(attachmentUrl);
+                    
+                    try 
+                    {
+                        var uri = new Uri(attachmentUrl);
+                        attachmentName = System.IO.Path.GetFileName(uri.LocalPath);
+                    } 
+                    catch {}
+                    
+                    if (string.IsNullOrEmpty(attachmentName)) attachmentName = "Invoice.pdf";
+                    if (!attachmentName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)) attachmentName += ".pdf";
+
+                    _logger.LogInformation("✅ Attachment downloaded: {Name} ({Size} bytes)", attachmentName, attachmentData.Length);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ Failed to download attachment from {Url}", attachmentUrl);
+                }
+            }
+
             // 🚀 PRIORITY 1: SendGrid API (professional, 100 emails/day free, works on Render)
             var sendGridKey = GetSendGridKey();
             if (!string.IsNullOrEmpty(sendGridKey))
             {
                 _logger.LogInformation("📧 Attempting to send email via SendGrid API to {Email}", toEmail);
-                var sendGridResult = await SendViaSendGridAsync(toEmail, toName, subject, htmlBody);
+                var sendGridResult = await SendViaSendGridAsync(toEmail, toName, subject, htmlBody, null, null, attachmentData, attachmentName);
                 if (sendGridResult)
                 {
                     _logger.LogInformation("✅ Email sent successfully via SendGrid");
@@ -134,7 +168,7 @@ namespace BitRaserApiProject.Services
 
           // Fallback to Gmail SMTP
             _logger.LogInformation("📧 Using Gmail SMTP to send email to {Email}", toEmail);
-            return await SendViaGmailSmtpAsync(toEmail, toName, subject, htmlBody, withRetry);
+            return await SendViaGmailSmtpAsync(toEmail, toName, subject, htmlBody, withRetry, attachmentData, attachmentName);
         }
 
         #region Configuration Getters
@@ -247,7 +281,7 @@ namespace BitRaserApiProject.Services
         /// Login: Your Brevo account email OR your sender email
      /// Password: Your SMTP key (xsmtpsib-...)
         /// </summary>
-        private async System.Threading.Tasks.Task<bool> SendViaBrevoSmtpAsync(string toEmail, string toName, string subject, string htmlBody, bool withRetry)
+        private async System.Threading.Tasks.Task<bool> SendViaBrevoSmtpAsync(string toEmail, string toName, string subject, string htmlBody, bool withRetry, byte[]? attachmentData = null, string? attachmentName = null)
    {
             try
             {
@@ -287,6 +321,12 @@ namespace BitRaserApiProject.Services
         message.Subject = subject;
 
            var bodyBuilder = new BodyBuilder { HtmlBody = htmlBody };
+           
+           if (attachmentData != null && !string.IsNullOrEmpty(attachmentName))
+           {
+               bodyBuilder.Attachments.Add(attachmentName, attachmentData);
+           }
+
 message.Body = bodyBuilder.ToMessageBody();
 
   int maxRetries = withRetry ? 3 : 1;
@@ -366,10 +406,10 @@ return true;
 
         #region Gmail SMTP (Fallback)
 
-  /// <summary>
+        /// <summary>
         /// Send email via Gmail SMTP (fallback)
         /// </summary>
-        private async System.Threading.Tasks.Task<bool> SendViaGmailSmtpAsync(string toEmail, string toName, string subject, string htmlBody, bool withRetry)
+        private async System.Threading.Tasks.Task<bool> SendViaGmailSmtpAsync(string toEmail, string toName, string subject, string htmlBody, bool withRetry, byte[]? attachmentData = null, string? attachmentName = null)
     {
         try
             {
@@ -412,6 +452,12 @@ return true;
       message.Subject = subject;
 
      var bodyBuilder = new BodyBuilder { HtmlBody = htmlBody };
+
+     if (attachmentData != null && !string.IsNullOrEmpty(attachmentName))
+     {
+         bodyBuilder.Attachments.Add(attachmentName, attachmentData);
+     }
+
      message.Body = bodyBuilder.ToMessageBody();
 
            int maxRetries = withRetry ? 3 : 1;
@@ -485,7 +531,9 @@ return true;
             string subject, 
             string htmlBody,
             List<string>? ccEmails = null,
-            List<string>? bccEmails = null)
+            List<string>? bccEmails = null,
+            byte[]? attachmentData = null, 
+            string? attachmentName = null)
         {
             try
             {
@@ -545,6 +593,15 @@ return true;
                     _logger.LogInformation("🔒 BCC added (hidden): {Count} recipients", bccEmails.Count);
                 }
                 
+                // Add attachment if present
+                if (attachmentData != null && !string.IsNullOrEmpty(attachmentName))
+                {
+                    msg.AddAttachment(attachmentName, Convert.ToBase64String(attachmentData));
+                    _logger.LogInformation("📎 Added attachment to SendGrid: {Name}", attachmentName);
+                }
+
+
+
                 _logger.LogInformation("🚀 Sending via SendGrid to {Email}", toEmail);
                 
                 var response = await client.SendEmailAsync(msg);
@@ -687,7 +744,7 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Ari
 <body>
 <div class='email-container'>
 <div class='header'>
-<div class='header-icon'>🔐</div>
+
 <h1>Password Reset Request</h1>
 </div>
 <div class='content'>
@@ -696,16 +753,16 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Ari
 <div class='otp-box'>
 <div class='otp-label'>Your One-Time Password</div>
 <div class='otp-code'>{otp}</div>
-<div class='timer-badge'>⏱️ Valid for 10 minutes</div>
+<div class='timer-badge'>Valid for 10 minutes</div>
 </div>
 <div class='security-notice'>
-<p><strong>🛡️ Security Notice:</strong> Never share this OTP with anyone, including our support team. We will never ask for your OTP via email, phone, or chat.</p>
+<p><strong>Security Notice:</strong> Never share this OTP with anyone, including our support team. We will never ask for your OTP via email, phone, or chat.</p>
 </div>
 <p class='message'>If you didn't request this password reset, please ignore this email. Your password will remain unchanged.</p>
 </div>
 <div class='footer'>
 <p><strong>Need Help?</strong> Contact us at support@dsecuretech.com</p>
-<p>© {DateTime.Now.Year} DSecure. All rights reserved.</p>
+<p>© {DateTime.Now.Year} D-Secure Technologies Pvt Ltd. All rights reserved.</p>
 </div>
 </div>
 </body>
@@ -753,18 +810,18 @@ body {{ font-family: 'Inter', sans-serif; background: #f8fafc; margin: 0; paddin
 <body>
 <div class='email-container'>
 <div class='header'>
-<div class='header-icon'>✅</div>
+
 <h1>Password Reset Successful!</h1>
 </div>
 <div class='content'>
 <p class='greeting'>Hello {userName},</p>
 <div class='success-card'>
-<h2>🎉 All Set!</h2>
+<h2>All Set!</h2>
 <p>Your password has been successfully reset. You can now access your account with your new credentials.</p>
 </div>
-<p class='message'>Your account security is our top priority. You can now log in with your new password and continue using DSecure.</p>
+<p class='message'>Your account security is our top priority. You can now log in with your new password and continue using D-Secure.</p>
 <div style='text-align: center;'>
-<a href='https://dsecuretech.com/login' class='cta-button'>Go to Dashboard</a>
+<a href='https://dsecuretech.com/login' class='cta-button' style='color: #ffffff;'>Go to Dashboard</a>
 </div>
 <div class='security-tips'>
 <h3>Security Best Practices</h3>
@@ -779,7 +836,7 @@ body {{ font-family: 'Inter', sans-serif; background: #f8fafc; margin: 0; paddin
 </div>
 <div class='footer'>
 <p><strong>Need Help?</strong> We're here for you 24/7</p>
-<p>© {DateTime.Now.Year} DSecure. All rights reserved.</p>
+<p>© {DateTime.Now.Year} D-Secure Technologies Pvt Ltd. All rights reserved.</p>
 </div>
 </div>
 </body>
@@ -790,7 +847,7 @@ body {{ font-family: 'Inter', sans-serif; background: #f8fafc; margin: 0; paddin
 
         #region Account Created Email Template
 
-        private string GetAccountCreatedEmailBody(string userName, string email, string tempPassword, string loginUrl, string? productName = null, int? quantity = null, decimal? price = null, List<string>? licenseKeys = null)
+        private string GetAccountCreatedEmailBody(string userName, string email, string tempPassword, string loginUrl, string? productName = null, int? quantity = null, decimal? price = null, List<string>? licenseKeys = null, string? invoiceUrl = null)
         {
             var licenseKeysHtml = "";
             if (licenseKeys != null && licenseKeys.Any())
@@ -798,10 +855,23 @@ body {{ font-family: 'Inter', sans-serif; background: #f8fafc; margin: 0; paddin
                 var keysListHtml = string.Join("", licenseKeys.Select(k => $"<div style='background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border: 2px solid #10b981; border-radius: 8px; padding: 12px 16px; margin: 8px 0; font-family: \"Courier New\", monospace; font-size: 15px; font-weight: 600; color: #047857; text-align: center; box-shadow: 0 2px 8px rgba(16,185,129,0.1);'>{k}</div>"));
                 licenseKeysHtml = $@"
 <div style='background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border: 2px solid #10b981; border-radius: 12px; padding: 24px; margin: 30px 0;'>
-<h3 style='margin: 0 0 16px 0; color: #047857; font-size: 20px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 8px;'><span style='font-size: 24px;'>🔑</span> Your License Keys</h3>
+<h3 style='margin: 0 0 16px 0; color: #047857; font-size: 20px; text-align: center;'>Your License Keys</h3>
 <p style='text-align: center; color: #065f46; margin-bottom: 16px; font-size: 14px;'>Generated {licenseKeys.Count} premium license key(s)</p>
 {keysListHtml}
-<p style='text-align: center; font-size: 13px; color: #059669; margin: 16px 0 0 0; font-weight: 500;'>💾 Save these keys securely - you'll need them to activate your software!</p>
+<p style='text-align: center; font-size: 13px; color: #059669; margin: 16px 0 0 0; font-weight: 500;'>Save these keys securely - you'll need them to activate your software!</p>
+</div>";
+            }
+
+            // Invoice download section
+            var invoiceHtml = "";
+            if (!string.IsNullOrEmpty(invoiceUrl))
+            {
+                invoiceHtml = $@"
+<div style='background: #1a1a2e; border-radius: 12px; padding: 24px; margin: 30px 0; text-align: center;'>
+<a href='{invoiceUrl}' target='_blank' style='display: inline-flex; align-items: center; justify-content: center; gap: 10px; background: #2d2d44; color: #ffffff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px; border: 1px solid #3d3d5c; transition: all 0.3s ease;'>
+<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='vertical-align: middle;'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='7 10 12 15 17 10'/><line x1='12' y1='15' x2='12' y2='3'/></svg>
+Download Invoice
+</a>
 </div>";
             }
 
@@ -831,8 +901,8 @@ body {{ font-family: 'Inter', sans-serif; background: #f8fafc; margin: 0; paddin
 .cred-item {{ margin: 12px 0; }}
 .cred-label {{ font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }}
 .cred-value {{ font-family: 'Courier New', monospace; font-size: 16px; font-weight: 600; color: #1a1a2e; background: #fff; padding: 10px 14px; border-radius: 6px; display: inline-block; box-shadow: 0 2px 4px rgba(0,0,0,0.05); user-select: all; }}
-.cta-button {{ display: inline-block; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: #fff; padding: 16px 40px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px; margin: 20px 0; }}
-.cta-button:hover {{ box-shadow: 0 6px 16px rgba(102,126,234,0.4); }}
+.cta-button {{ display: inline-block; background: linear-gradient(135deg, #059669 0%, #047857 100%); color: #ffffff; padding: 16px 40px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px; margin: 20px 0; }}
+.cta-button:hover {{ box-shadow: 0 6px 16px rgba(5,150,105,0.4); }}
 .checklist {{ background: #f8f9fa; border-radius: 12px; padding: 24px; margin: 24px 0; }}
 .checklist h3 {{ color: #1a1a2e; font-size: 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }}
 .checklist h3::before {{ content: '✓'; background: #10b981; color: #fff; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; }}
@@ -859,27 +929,28 @@ body {{ font-family: 'Inter', sans-serif; background: #f8fafc; margin: 0; paddin
 </div>
 <div class='content'>
 <div style='text-align: center;'>
-<div class='welcome-badge'>✅ Account Successfully Created</div>
+<div class='welcome-badge'>Account Successfully Created</div>
 </div>
 <p class='greeting'>Hello <strong>{userName}</strong>,</p>
 <p class='message'>Welcome aboard! Your payment was successful and your account is now active. We're excited to have you join the DSecure family.</p>
 <div class='credentials-card'>
-<h3>🔐 Your Login Credentials</h3>
+<h3>Your Login Credentials</h3>
 <div class='cred-item'>
-<div class='cred-label'>📧 Email Address</div>
+<div class='cred-label'>Email Address</div>
 <div class='cred-value'>{email}</div>
 </div>
 <div class='cred-item'>
-<div class='cred-label'>🔑 Temporary Password</div>
+<div class='cred-label'>Temporary Password</div>
 <div class='cred-value'>{tempPassword}</div>
 </div>
 </div>
 <div style='text-align: center;'>
-<a href='{loginUrl}' class='cta-button'>Access Your Dashboard</a>
+<a href='{loginUrl}' class='cta-button' style='color: #ffffff;'>Access Your Dashboard</a>
 </div>
 {licenseKeysHtml}
+{invoiceHtml}
 <div class='warning-box'>
-<p><strong>⚠️ Security First:</strong> Please change your temporary password immediately after logging in. This ensures your account remains secure.</p>
+<p><strong>Security First:</strong> Please change your temporary password immediately after logging in. This ensures your account remains secure.</p>
 </div>
 <div class='checklist'>
 <h3>Quick Start Guide</h3>
@@ -894,7 +965,7 @@ body {{ font-family: 'Inter', sans-serif; background: #f8fafc; margin: 0; paddin
 </div>
 <div class='footer'>
 <p><strong>Questions?</strong> We're here to help!</p>
-<p>© {DateTime.Now.Year} DSecure. All rights reserved.</p>
+<p>© {DateTime.Now.Year} D-Secure Technologies Pvt Ltd. All rights reserved.</p>
 </div>
 </div>
 </body>
@@ -924,7 +995,7 @@ body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
 <body>
 <div class='container'>
 <div class='header'>
-<h1 style='margin: 0;'>❌ Payment Failed</h1>
+<h1 style='margin: 0;'>Payment Failed</h1>
 </div>
 <div class='content'>
 <p>Hello <strong>{userName}</strong>,</p>
@@ -939,7 +1010,7 @@ body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
 </div>
 
 <div class='info'>
-<strong>⚠️ Common Reasons for Payment Failure:</strong>
+<strong>Common Reasons for Payment Failure:</strong>
 <ul style='margin: 10px 0;'>
 <li>Insufficient funds</li>
 <li>Incorrect card details</li>
@@ -950,7 +1021,7 @@ body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
 </div>
 
 <div class='support-box'>
-<strong>💡 What to do next:</strong>
+<strong>What to do next:</strong>
 <ol style='margin: 10px 0;'>
 <li>Verify your payment method details</li>
 <li>Ensure sufficient balance in your account</li>
@@ -968,8 +1039,8 @@ body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
 </div>
 
 <div class='footer'>
-<p><strong>Need Help?</strong> Contact us at support@dsecure.com</p>
-<p>© {DateTime.Now.Year} DSecure. All rights reserved.</p>
+<p><strong>Need Help?</strong> Contact us at support@dsecuretech.com</p>
+<p>© {DateTime.Now.Year} D-Secure Technologies Pvt Ltd. All rights reserved.</p>
 </div>
 </div>
 </body>
@@ -977,7 +1048,7 @@ body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
         }
 
 
-        private string GetPaymentSuccessEmailBody(string userName, string email, string productName, decimal amount, int quantity, List<string>? licenseKeys = null)
+        private string GetPaymentSuccessEmailBody(string userName, string email, string productName, decimal amount, int quantity, List<string>? licenseKeys = null, string status = "Paid", string? invoiceUrl = null)
         {
             var licenseKeysHtml = "";
             if (licenseKeys != null && licenseKeys.Any())
@@ -985,10 +1056,23 @@ body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
                 var keysListHtml = string.Join("", licenseKeys.Select(k => $"<div style='background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border: 2px solid #10b981; border-radius: 8px; padding: 12px 16px; margin: 8px 0; font-family: \"Courier New\", monospace; font-size: 15px; font-weight: 600; color: #047857; text-align: center; box-shadow: 0 2px 8px rgba(16,185,129,0.1);'>{k}</div>"));
                 licenseKeysHtml = $@"
 <div style='background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%); border: 2px solid #10b981; border-radius: 12px; padding: 24px; margin: 30px 0;'>
-<h3 style='margin: 0 0 16px 0; color: #047857; font-size: 20px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 8px;'><span style='font-size: 24px;'>🔑</span> Your License Keys</h3>
+<h3 style='margin: 0 0 16px 0; color: #047857; font-size: 20px; text-align: center;'>Your License Keys</h3>
 <p style='text-align: center; color: #065f46; margin-bottom: 16px; font-size: 14px;'>Generated {licenseKeys.Count} premium license key(s)</p>
 {keysListHtml}
-<p style='text-align: center; font-size: 13px; color: #059669; margin: 16px 0 0 0; font-weight: 500;'>💾 Save these keys securely - you'll need them to activate your software!</p>
+<p style='text-align: center; font-size: 13px; color: #059669; margin: 16px 0 0 0; font-weight: 500;'>Save these keys securely - you'll need them to activate your software!</p>
+</div>";
+            }
+
+            // Invoice download section - Dodo style dark button
+            var invoiceHtml = "";
+            if (!string.IsNullOrEmpty(invoiceUrl))
+            {
+                invoiceHtml = $@"
+<div style='background: #1a1a2e; border-radius: 12px; padding: 24px; margin: 30px 0; text-align: center;'>
+<a href='{invoiceUrl}' target='_blank' style='display: inline-flex; align-items: center; justify-content: center; gap: 10px; background: #2d2d44; color: #ffffff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px; border: 1px solid #3d3d5c; transition: all 0.3s ease;'>
+<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='vertical-align: middle;'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='7 10 12 15 17 10'/><line x1='12' y1='15' x2='12' y2='3'/></svg>
+Download Invoice
+</a>
 </div>";
             }
 
@@ -1005,7 +1089,6 @@ body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
 body {{ font-family: 'Inter', sans-serif; background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 40px 20px; }}
 .email-wrapper {{ max-width: 600px; margin: 0 auto; background: #fff; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.15); }}
 .header {{ background: linear-gradient(135deg, #10b981 0%, #059669 100%); padding: 50px 30px; text-align: center; }}
-.header::before {{ content: '🎉'; font-size: 72px; display: block; margin-bottom: 16px; animation: confetti 1.5s ease; }}
 @keyframes confetti {{ 0% {{ transform: scale(0) rotate(-45deg); opacity: 0; }} 50% {{ transform: scale(1.2) rotate(10deg); }} 100% {{ transform: scale(1) rotate(0deg); opacity: 1; }} }}
 .header h1 {{ color: #fff; font-size: 28px; font-weight: 700; margin: 0; text-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
 .content {{ padding: 40px 30px; }}
@@ -1014,15 +1097,14 @@ body {{ font-family: 'Inter', sans-serif; background: linear-gradient(135deg, #1
 .greeting strong {{ color: #10b981; font-weight: 600; }}
 .message {{ font-size: 16px; color: #4a5568; line-height: 1.8; margin-bottom: 24px; }}
 .receipt {{ background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border: 2px dashed #10b981; border-radius: 12px; padding: 24px; margin: 24px 0; }}
-.receipt h3 {{ color: #1a1a2e; font-size: 18px; margin-bottom: 20px; text-align: center; display: flex; align-items: center; justify-content: center; gap: 8px; }}
-.receipt h3::before {{ content: '🧾'; font-size: 22px; }}
+.receipt h3 {{ color: #1a1a2e; font-size: 18px; margin-bottom: 20px; text-align: center; }}
 .receipt-item {{ display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #dee2e6; }}
 .receipt-item:last-child {{ border-bottom: none; font-weight: 600; background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); padding: 16px; margin: 16px -8px -8px -8px; border-radius: 8px; }}
 .receipt-label {{ color: #6b7280; font-size: 14px; }}
 .receipt-value {{ color: #1a1a2e; font-weight: 500; font-size: 14px; }}
 .success-card {{ background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border: 2px solid #10b981; border-radius: 12px; padding: 20px; margin: 24px 0; text-align: center; }}
 .success-card p {{ color: #047857; font-weight: 500; margin: 0; }}
-.cta-button {{ display: inline-block; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: #fff; padding: 16px 40px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px; margin: 20px 0; }}
+.cta-button {{ display: inline-block; background: linear-gradient(135deg, #059669 0%, #047857 100%); color: #ffffff; padding: 16px 40px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 16px; margin: 20px 0; }}
 .footer {{ background: #f8f9fa; padding: 30px; text-align: center; }}
 .footer p {{ color: #6b7280; font-size: 14px; margin: 8px 0; }}
 @media only screen and (max-width: 600px) {{
@@ -1039,7 +1121,7 @@ body {{ font-family: 'Inter', sans-serif; background: linear-gradient(135deg, #1
 </div>
 <div class='content'>
 <div style='text-align: center;'>
-<div class='celebration-badge'>✅ Transaction Completed</div>
+<div class='celebration-badge'>Transaction Completed</div>
 </div>
 <p class='greeting'>Hello <strong>{userName}</strong>,</p>
 <p class='message'>Thank you for your purchase! Your payment has been successfully processed and your order is complete.</p>
@@ -1047,33 +1129,34 @@ body {{ font-family: 'Inter', sans-serif; background: linear-gradient(135deg, #1
 <h3>Purchase Receipt</h3>
 <div class='receipt-item'>
 <span class='receipt-label'>Product</span>
-<span class='receipt-value'>{productName}</span>
+<span class='receipt-value' style='margin-left: 20px;'>{productName}</span>
 </div>
 <div class='receipt-item'>
 <span class='receipt-label'>Quantity</span>
-<span class='receipt-value'>{quantity}</span>
+<span class='receipt-value' style='margin-left: 20px;'>{quantity}</span>
 </div>
 <div class='receipt-item'>
 <span class='receipt-label'>Status</span>
-<span class='receipt-value' style='color: #10b981; font-weight: 600;'>Paid ✓</span>
+<span class='receipt-value' style='color: #10b981; font-weight: 600; margin-left: 20px;'>{status}</span>
 </div>
 <div class='receipt-item'>
 <span class='receipt-label'>Total Amount</span>
-<span class='receipt-value' style='font-size: 18px; color: #10b981;'>${amount:F2}</span>
+<span class='receipt-value' style='font-size: 18px; color: #10b981; margin-left: 20px;'>${amount:F2}</span>
 </div>
 </div>
 {licenseKeysHtml}
+{invoiceHtml}
 <div class='success-card'>
-<p>🚀 Your license has been activated! You can now access all premium features.</p>
+<p>Your license has been activated! You can now access all premium features.</p>
 </div>
 <div style='text-align: center;'>
-<a href='https://dsecuretech.com/login' class='cta-button'>Go to Dashboard</a>
+<a href='https://dsecuretech.com/login' class='cta-button' style='color: #ffffff;'>Go to Dashboard</a>
 </div>
-<p class='message' style='font-size: 14px; color: #f3f3f4ff; text-align: center; margin-top: 30px;'>Need help getting started? Contact us at <strong>support@dsecure.com</strong></p>
+<p class='message' style='font-size: 14px; color: #1a1a2e; text-align: center; margin-top: 30px;'>Need help getting started? Contact us at <strong style='color: #059669;'>support@dsecuretech.com</strong></p>
 </div>
 <div class='footer'>
-<p><strong>Thank you for choosing DSecure!</strong></p>
-<p>© {DateTime.Now.Year} DSecure. All rights reserved.</p>
+<p><strong>Thank you for choosing D-Secure Technologies Pvt Ltd!</strong></p>
+<p>© {DateTime.Now.Year} D-Secure Technologies Pvt Ltd. All rights reserved.</p>
 </div>
 </div>
 </body>

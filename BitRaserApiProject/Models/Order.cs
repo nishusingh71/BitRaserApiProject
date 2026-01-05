@@ -47,6 +47,47 @@ namespace BitRaserApiProject.Models
         public string? DodoInvoiceId { get; set; }
 
         /// <summary>
+        /// Dodo Customer ID
+        /// </summary>
+        [Column("dodo_customer_id")]
+        [StringLength(100)]
+        public string? DodoCustomerId { get; set; }
+
+        /// <summary>
+        /// Card last 4 digits (e.g., "1450")
+        /// </summary>
+        [Column("card_last_four")]
+        [StringLength(4)]
+        public string? CardLastFour { get; set; }
+
+        /// <summary>
+        /// Card network (visa, mastercard, etc.)
+        /// </summary>
+        [Column("card_network")]
+        [StringLength(50)]
+        public string? CardNetwork { get; set; }
+
+        /// <summary>
+        /// Card type (credit, debit)
+        /// </summary>
+        [Column("card_type")]
+        [StringLength(50)]
+        public string? CardType { get; set; }
+
+        /// <summary>
+        /// Tax amount in cents
+        /// </summary>
+        [Column("tax_amount_cents")]
+        public int TaxAmountCents { get; set; } = 0;
+
+        /// <summary>
+        /// Payment checkout link
+        /// </summary>
+        [Column("payment_link")]
+        [StringLength(500)]
+        public string? PaymentLink { get; set; }
+
+        /// <summary>
         /// Payment provider: polar, dodo
         /// </summary>
         [Column("payment_provider")]

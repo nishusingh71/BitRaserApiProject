@@ -93,5 +93,13 @@ namespace BitRaserApiProject.Services
         /// <param name="invoiceId">Invoice ID from Dodo</param>
         /// <returns>Full invoice details</returns>
         Task<DodoInvoiceResponse> GetInvoiceAsync(string invoiceId);
+
+        /// <summary>
+        /// Get invoice details from Dodo Payments using Payment ID
+        /// More reliable than Invoice ID as it avoids timing issues
+        /// </summary>
+        /// <param name="paymentId">Payment ID from Dodo</param>
+        /// <returns>Full invoice details</returns>
+        Task<DodoInvoiceResponse> GetInvoiceByPaymentIdAsync(string paymentId);
     }
 }
