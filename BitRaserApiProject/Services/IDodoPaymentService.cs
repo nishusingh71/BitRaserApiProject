@@ -101,5 +101,13 @@ namespace BitRaserApiProject.Services
         /// <param name="paymentId">Payment ID from Dodo</param>
         /// <returns>Full invoice details</returns>
         Task<DodoInvoiceResponse> GetInvoiceByPaymentIdAsync(string paymentId);
+
+        /// <summary>
+        /// 🆕 Create a guest checkout session (No Auth Required)
+        /// Order is NOT created until webhook fires
+        /// </summary>
+        /// <param name="request">Guest checkout request</param>
+        /// <returns>Checkout URL and session ID</returns>
+        Task<GuestCheckoutResponse> CreateGuestCheckoutSessionAsync(GuestCheckoutRequest request);
     }
 }

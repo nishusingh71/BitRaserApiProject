@@ -625,6 +625,44 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
+        /// 🦤 Create a Dodo checkout session for NEW USERS (No Auth Required)
+        /// Order is NOT created until webhook fires with actual customer data
+        /// Usage: Frontend calls this with ProductId and ReturnUrl
+        /// </summary>
+        [HttpPost("dodo/checkout/guest")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(GuestCheckoutResponse), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<IActionResult> CreateGuestDodoCheckout([FromBody] GuestCheckoutRequest request)
+        {
+            try
+            {
+                _logger.LogInformation("🛒 Guest checkout request for ProductId: {ProductId}", request.ProductId);
+
+                if (string.IsNullOrEmpty(request.ProductId))
+                {
+                    return BadRequest(new { error = "ProductId is required" });
+                }
+
+                // Build Dodo checkout - NO ORDER CREATED YET
+                var response = await _dodoPaymentService.CreateGuestCheckoutSessionAsync(request);
+
+                if (!response.Success)
+                {
+                    return BadRequest(response);
+                }
+
+                _logger.LogInformation("✅ Guest checkout session created: {Url}", response.CheckoutUrl);
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error creating guest Dodo checkout");
+                return StatusCode(500, new { error = "Failed to create checkout session" });
+            }
+        }
+
+        /// <summary>
         /// 🦤 Dodo Payments webhook endpoint
         /// Receives payment confirmations and updates from Dodo
         /// Supports both /api/Payments/dodo/webhook and /webhooks/dodo

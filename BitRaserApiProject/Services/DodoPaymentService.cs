@@ -231,6 +231,120 @@ namespace BitRaserApiProject.Services
         }
 
         /// <summary>
+        /// 🆕 Create a GUEST checkout session (No Auth Required)
+        /// NO ORDER IS CREATED until webhook fires with actual customer data
+        /// This allows new users to buy without logging in first
+        /// </summary>
+        public async Task<GuestCheckoutResponse> CreateGuestCheckoutSessionAsync(GuestCheckoutRequest request)
+        {
+            try
+            {
+                _logger.LogInformation("🛒 Creating GUEST Dodo checkout for ProductId: {ProductId}", request.ProductId);
+
+                // Build Dodo checkout request - using product_cart format per Dodo API docs
+                var dodoRequest = new Dictionary<string, object>
+                {
+                    // Product Cart - required by Dodo
+                    ["product_cart"] = new[]
+                    {
+                        new Dictionary<string, object>
+                        {
+                            ["product_id"] = request.ProductId,
+                            ["quantity"] = request.Quantity > 0 ? request.Quantity : 1
+                        }
+                    }
+                };
+
+                // Add return URL if provided
+                if (!string.IsNullOrEmpty(request.ReturnUrl))
+                {
+                    dodoRequest["return_url"] = request.ReturnUrl;
+                    dodoRequest["success_url"] = request.ReturnUrl;
+                    dodoRequest["redirect_url"] = request.ReturnUrl;
+                }
+
+                // Add cancel URL if provided
+                if (!string.IsNullOrEmpty(request.CancelUrl))
+                {
+                    dodoRequest["cancel_url"] = request.CancelUrl;
+                }
+
+                // Add discount code if provided
+                if (!string.IsNullOrEmpty(request.DiscountCode))
+                {
+                    dodoRequest["discount_code"] = request.DiscountCode;
+                }
+
+                // Add metadata if provided
+                if (request.Metadata != null && request.Metadata.Count > 0)
+                {
+                    dodoRequest["metadata"] = request.Metadata;
+                }
+
+                var jsonContent = new StringContent(
+                    JsonSerializer.Serialize(dodoRequest),
+                    Encoding.UTF8,
+                    "application/json"
+                );
+
+                _logger.LogInformation("📤 Guest checkout payload: {Payload}", JsonSerializer.Serialize(dodoRequest));
+                _logger.LogInformation("📡 Posting to: {Url}", $"{_dodoBaseUrl}/checkouts");
+
+                var response = await _httpClient.PostAsync($"{_dodoBaseUrl}/checkouts", jsonContent);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                _logger.LogInformation("📥 Dodo API Response: {StatusCode} - {Content}",
+                    response.StatusCode, responseContent);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError("❌ Dodo API error: {StatusCode} - {Response}",
+                        response.StatusCode, responseContent);
+
+                    return new GuestCheckoutResponse
+                    {
+                        Success = false,
+                        Message = "Failed to create checkout session. Please try again."
+                    };
+                }
+
+                var dodoResponse = JsonSerializer.Deserialize<JsonElement>(responseContent);
+
+                // Extract session ID and checkout URL
+                var sessionId = dodoResponse.TryGetProperty("session_id", out var sidProp)
+                    ? sidProp.GetString()
+                    : dodoResponse.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
+
+                var checkoutUrl = dodoResponse.TryGetProperty("checkout_url", out var urlProp)
+                    ? urlProp.GetString()
+                    : dodoResponse.TryGetProperty("url", out var altUrlProp) ? altUrlProp.GetString() : null;
+
+                _logger.LogInformation("✅ Guest checkout created: SessionId={SessionId}, Url={Url}",
+                    sessionId, checkoutUrl);
+
+                // NOTE: NO ORDER CREATED HERE! Order will be created when webhook fires
+                // with the actual customer data from the Dodo checkout form
+
+                return new GuestCheckoutResponse
+                {
+                    Success = true,
+                    Message = "Checkout session created successfully",
+                    SessionId = sessionId,
+                    CheckoutUrl = checkoutUrl
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error creating guest Dodo checkout");
+                return new GuestCheckoutResponse
+                {
+                    Success = false,
+                    Message = "An error occurred while creating checkout session"
+                };
+            }
+        }
+
+        /// <summary>
         /// Process webhook event from Dodo Payments
         /// </summary>
         public async Task<bool> ProcessWebhookAsync(DodoWebhookEvent webhookEvent, string rawPayload)

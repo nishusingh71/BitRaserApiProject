@@ -685,6 +685,44 @@ namespace BitRaserApiProject.Models.DTOs
     }
 
     /// <summary>
+    /// 🆕 Guest checkout request - No authentication required
+    /// Order created ONLY when webhook fires with actual customer data
+    /// </summary>
+    public class GuestCheckoutRequest
+    {
+        [Required]
+        [JsonPropertyName("product_id")]
+        public string ProductId { get; set; } = string.Empty;
+
+        [JsonPropertyName("quantity")]
+        public int Quantity { get; set; } = 1;
+
+        [JsonPropertyName("return_url")]
+        public string? ReturnUrl { get; set; }
+
+        [JsonPropertyName("cancel_url")]
+        public string? CancelUrl { get; set; }
+
+        [JsonPropertyName("discount_code")]
+        public string? DiscountCode { get; set; }
+
+        [JsonPropertyName("metadata")]
+        public Dictionary<string, string>? Metadata { get; set; }
+    }
+
+    /// <summary>
+    /// 🆕 Guest checkout response
+    /// </summary>
+    public class GuestCheckoutResponse
+    {
+        public bool Success { get; set; }
+        public string? Message { get; set; }
+        public string? CheckoutUrl { get; set; }
+        public string? SessionId { get; set; }
+        // Note: No OrderId until payment completes via webhook
+    }
+
+    /// <summary>
     /// Request to create/update a Dodo customer
     /// </summary>
     public class DodoCustomerRequest
