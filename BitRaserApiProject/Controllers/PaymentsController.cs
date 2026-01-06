@@ -1063,7 +1063,9 @@ namespace BitRaserApiProject.Controllers
                     InvoiceInfo = invoiceInfo,
                     LicenseInfo = new LicenseInformation
                     {
-                        LicenseKeys = licenseKeysList,
+                        // ❌ License keys NOT shown on order success page for security
+                        // ✅ Keys are sent via email to customer
+                        LicenseKeys = new List<string>(), // Empty - sent via email only
                         LicenseCount = order.LicenseCount,
                         LicenseYears = order.LicenseYears,
                         ExpiresAt = order.LicenseExpiresAt
