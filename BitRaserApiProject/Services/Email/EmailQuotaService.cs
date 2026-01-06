@@ -20,8 +20,8 @@ namespace BitRaserApiProject.Services.Email
         // Default limits
         private const int DEFAULT_SENDGRID_DAILY = 100;
         private const int DEFAULT_SENDGRID_MONTHLY = 3000;
-        private const int DEFAULT_GRAPH_DAILY = 50;
-        private const int DEFAULT_GRAPH_MONTHLY = 1500;
+        private const int DEFAULT_GRAPH_DAILY = 10000;
+        private const int DEFAULT_GRAPH_MONTHLY = 300000;
         private const int CIRCUIT_BREAKER_THRESHOLD = 5;
 
         public EmailQuotaService(
