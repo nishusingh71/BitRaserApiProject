@@ -37,17 +37,17 @@ namespace BitRaserApiProject.Services.Email.Providers
         public Task InitializeAsync()
         {
             // Load from environment variables first, then config
-            _apiKey = Environment.GetEnvironmentVariable("SendGrid__ApiKey")
-                ?? Environment.GetEnvironmentVariable("SENDGRID_API_KEY")
+            _apiKey = Environment.GetEnvironmentVariable("SENDGRID_API_KEY")
+                ?? Environment.GetEnvironmentVariable("SendGrid__ApiKey")
                 ?? _configuration["SendGrid:ApiKey"];
 
-            _fromEmail = Environment.GetEnvironmentVariable("SendGrid__FromEmail")
-                ?? Environment.GetEnvironmentVariable("SENDGRID_FROM_EMAIL")
+            _fromEmail = Environment.GetEnvironmentVariable("SENDGRID_SENDER_EMAIL")
+                ?? Environment.GetEnvironmentVariable("SendGrid__FromEmail")
                 ?? _configuration["SendGrid:FromEmail"]
                 ?? "noreply@dsecuretech.com";
 
-            _fromName = Environment.GetEnvironmentVariable("SendGrid__FromName")
-                ?? Environment.GetEnvironmentVariable("SENDGRID_FROM_NAME")
+            _fromName = Environment.GetEnvironmentVariable("SENDGRID_SENDER_NAME")
+                ?? Environment.GetEnvironmentVariable("SendGrid__FromName")
                 ?? _configuration["SendGrid:FromName"]
                 ?? "DSecure";
 

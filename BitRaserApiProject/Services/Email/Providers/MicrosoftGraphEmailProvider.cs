@@ -41,20 +41,20 @@ namespace BitRaserApiProject.Services.Email.Providers
             try
             {
                 // Load from environment variables first, then config
-                var clientId = Environment.GetEnvironmentVariable("MsGraph__ClientId")
-                    ?? Environment.GetEnvironmentVariable("AZURE_CLIENT_ID")
+                var clientId = Environment.GetEnvironmentVariable("AZURE_CLIENT_ID")
+                    ?? Environment.GetEnvironmentVariable("MsGraph__ClientId")
                     ?? _configuration["MsGraph:ClientId"];
 
-                var tenantId = Environment.GetEnvironmentVariable("MsGraph__TenantId")
-                    ?? Environment.GetEnvironmentVariable("AZURE_TENANT_ID")
+                var tenantId = Environment.GetEnvironmentVariable("AZURE_TENANT_ID")
+                    ?? Environment.GetEnvironmentVariable("MsGraph__TenantId")
                     ?? _configuration["MsGraph:TenantId"];
 
-                var clientSecret = Environment.GetEnvironmentVariable("MsGraph__ClientSecret")
-                    ?? Environment.GetEnvironmentVariable("AZURE_CLIENT_SECRET")
+                var clientSecret = Environment.GetEnvironmentVariable("AZURE_CLIENT_SECRET")
+                    ?? Environment.GetEnvironmentVariable("MsGraph__ClientSecret")
                     ?? _configuration["MsGraph:ClientSecret"];
 
-                _senderEmail = Environment.GetEnvironmentVariable("MsGraph__SenderEmail")
-                    ?? Environment.GetEnvironmentVariable("AZURE_SENDER_EMAIL")
+                _senderEmail = Environment.GetEnvironmentVariable("AZURE_SENDER_EMAIL")
+                    ?? Environment.GetEnvironmentVariable("MsGraph__SenderEmail")
                     ?? _configuration["MsGraph:SenderEmail"];
 
                 _senderUserId = Environment.GetEnvironmentVariable("MsGraph__SenderUserId")
