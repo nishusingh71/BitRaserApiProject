@@ -57,8 +57,9 @@ namespace BitRaserApiProject.Services.Email.Providers
                     ?? Environment.GetEnvironmentVariable("MsGraph__SenderEmail")
                     ?? _configuration["MsGraph:SenderEmail"];
 
-                _senderUserId = Environment.GetEnvironmentVariable("MsGraph__SenderUserId")
-                    ?? Environment.GetEnvironmentVariable("AZURE_SENDER_USER_ID")
+                // User ID is required for sending mail on behalf of user
+                _senderUserId = Environment.GetEnvironmentVariable("AZURE_SENDER_USER_ID")
+                    ?? Environment.GetEnvironmentVariable("MsGraph__SenderUserId")
                     ?? _configuration["MsGraph:SenderUserId"];
 
                 var priorityStr = Environment.GetEnvironmentVariable("MsGraph__Priority")
