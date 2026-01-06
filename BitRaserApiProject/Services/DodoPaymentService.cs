@@ -260,7 +260,7 @@ namespace BitRaserApiProject.Services
                 };
 
                 // ✅ Default success URL for guest checkout
-                const string defaultSuccessUrl = "https://dsecuretech.com/order-success||frontend.vercel.app/order-success";
+                const string defaultSuccessUrl = "https://dsecure-frontend.vercel.app/order-success";
                 
                 // Add return URL - use provided or default
                 var successUrl = !string.IsNullOrEmpty(request.ReturnUrl) 
