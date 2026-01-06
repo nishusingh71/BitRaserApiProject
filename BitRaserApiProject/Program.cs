@@ -118,8 +118,9 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins(
             "https://dsecure-frontend.vercel.app",
-            "http://localhost:5173",
-            "https://www.dsecuretech.com"
+            "https://dsecuretech.com",
+            "https://www.dsecuretech.com",
+            "http://localhost:5173"
         )
         .AllowAnyMethod()
         .AllowAnyHeader()
