@@ -684,10 +684,6 @@ namespace BitRaserApiProject.Models.DTOs
         public DateTime? ExpiresAt { get; set; }
     }
 
-    /// <summary>
-    /// 🆕 Guest checkout request - No authentication required
-    /// Order created ONLY when webhook fires with actual customer data
-    /// </summary>
     public class GuestCheckoutRequest
     {
         [Required]
@@ -706,14 +702,99 @@ namespace BitRaserApiProject.Models.DTOs
         [JsonPropertyName("discount_code")]
         public string? DiscountCode { get; set; }
 
+        // ========== TAX RELATED FIELDS (Dodo SDK) ==========
+
         /// <summary>
-        /// Enable tax calculation (default: true)
+        /// Enable tax calculation based on customer location (default: true)
+        /// Dodo auto-calculates VAT/GST based on billing country
         /// </summary>
         [JsonPropertyName("tax_enabled")]
         public bool TaxEnabled { get; set; } = true;
 
+        /// <summary>
+        /// Customer's Tax ID for invoicing (optional)
+        /// Used for B2B sales with tax exemption
+        /// </summary>
+        [JsonPropertyName("tax_id")]
+        public string? TaxId { get; set; }
+
+        /// <summary>
+        /// Billing address for location-based tax calculation
+        /// Country code is required for correct tax rate (ISO 3166-1 alpha-2)
+        /// </summary>
+        [JsonPropertyName("billing_address")]
+        public GuestBillingAddress? BillingAddress { get; set; }
+
+        /// <summary>
+        /// Pre-fill customer information (optional)
+        /// </summary>
+        [JsonPropertyName("customer")]
+        public GuestCustomerInfo? Customer { get; set; }
+
         [JsonPropertyName("metadata")]
         public Dictionary<string, string>? Metadata { get; set; }
+    }
+
+    /// <summary>
+    /// Billing address for tax calculation (Dodo SDK)
+    /// </summary>
+    public class GuestBillingAddress
+    {
+        /// <summary>
+        /// Country code (ISO 3166-1 alpha-2) - REQUIRED for tax calculation
+        /// Examples: US, GB, DE, IN, AU
+        /// </summary>
+        [Required]
+        [JsonPropertyName("country")]
+        public string Country { get; set; } = string.Empty;
+
+        /// <summary>
+        /// State/Province code (required for US, CA, AU)
+        /// </summary>
+        [JsonPropertyName("state")]
+        public string? State { get; set; }
+
+        /// <summary>
+        /// City name
+        /// </summary>
+        [JsonPropertyName("city")]
+        public string? City { get; set; }
+
+        /// <summary>
+        /// Street address
+        /// </summary>
+        [JsonPropertyName("street")]
+        public string? Street { get; set; }
+
+        /// <summary>
+        /// Postal/ZIP code
+        /// </summary>
+        [JsonPropertyName("zipcode")]
+        public string? Zipcode { get; set; }
+    }
+
+    /// <summary>
+    /// Customer info to pre-fill checkout form
+    /// </summary>
+    public class GuestCustomerInfo
+    {
+        /// <summary>
+        /// Customer email (pre-filled on checkout)
+        /// </summary>
+        [JsonPropertyName("email")]
+        public string? Email { get; set; }
+
+        /// <summary>
+        /// Customer name (pre-filled on checkout)
+        /// </summary>
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        /// <summary>
+        /// Customer phone number
+        /// </summary>
+        [JsonPropertyName("phone_number")]
+        public string? PhoneNumber { get; set; }
     }
 
     /// <summary>

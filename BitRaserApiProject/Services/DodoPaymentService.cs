@@ -279,6 +279,42 @@ namespace BitRaserApiProject.Services
                     dodoRequest["discount_code"] = request.DiscountCode;
                 }
 
+                // ========== TAX RELATED FIELDS (Dodo SDK) ==========
+
+                // Add Tax ID for B2B invoicing
+                if (!string.IsNullOrEmpty(request.TaxId))
+                {
+                    dodoRequest["tax_id"] = request.TaxId;
+                }
+
+                // Add billing address for country-based tax calculation
+                if (request.BillingAddress != null && !string.IsNullOrEmpty(request.BillingAddress.Country))
+                {
+                    dodoRequest["billing"] = new Dictionary<string, object?>
+                    {
+                        ["country"] = request.BillingAddress.Country,
+                        ["state"] = request.BillingAddress.State,
+                        ["city"] = request.BillingAddress.City,
+                        ["street"] = request.BillingAddress.Street,
+                        ["zipcode"] = request.BillingAddress.Zipcode
+                    }.Where(kv => kv.Value != null).ToDictionary(kv => kv.Key, kv => kv.Value);
+                    
+                    _logger.LogInformation("🌍 Billing country for tax: {Country}", request.BillingAddress.Country);
+                }
+
+                // Add customer info to pre-fill checkout form
+                if (request.Customer != null && 
+                    (!string.IsNullOrEmpty(request.Customer.Email) || 
+                     !string.IsNullOrEmpty(request.Customer.Name)))
+                {
+                    dodoRequest["customer"] = new Dictionary<string, object?>
+                    {
+                        ["email"] = request.Customer.Email,
+                        ["name"] = request.Customer.Name,
+                        ["phone_number"] = request.Customer.PhoneNumber
+                    }.Where(kv => kv.Value != null).ToDictionary(kv => kv.Key, kv => kv.Value);
+                }
+
                 // Add metadata if provided
                 if (request.Metadata != null && request.Metadata.Count > 0)
                 {
