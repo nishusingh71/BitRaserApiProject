@@ -265,8 +265,11 @@ namespace BitRaserApiProject.Services
                     ["tax_enabled"] = request.TaxEnabled
                 };
 
-                // ✅ Default success URL for guest checkout
-                const string defaultSuccessUrl = "https://dsecure-frontend.vercel.app/order-success";
+                // ✅ Default success URL from FRONTEND_URL env or dsecuretech.com
+                var frontendBaseUrl = Environment.GetEnvironmentVariable("FRONTEND_URL")
+                    ?? _configuration["FrontendUrl"]
+                    ?? "https://dsecuretech.com";
+                var defaultSuccessUrl = $"{frontendBaseUrl.TrimEnd('/')}/order-success";
                 
                 // Add return URL - use provided or default
                 var successUrl = !string.IsNullOrEmpty(request.ReturnUrl) 
