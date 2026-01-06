@@ -890,24 +890,42 @@ namespace BitRaserApiProject.Controllers
         /// Returns consolidated Order, Payment, Product, Customer, and Invoice details
         /// Robustly handles invoice fetching via Payment ID fallback
         /// </summary>
-        /// <param name="orderId">Internal Order ID</param>
-        [HttpGet("orders/{orderId}/details")]
+        /// <param name="identifier">Order ID (numeric) OR Dodo Payment ID (pay_xxx)</param>
+        [HttpGet("orders/{identifier}/details")]
         [AllowAnonymous] // Temporarily allow anonymous for testing
         [ProducesResponseType(typeof(ComprehensiveOrderDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status404NotFound)]
-        public async Task<IActionResult> GetFullOrderDetails(int orderId)
+        public async Task<IActionResult> GetFullOrderDetails(string identifier)
         {
             try
             {
-                _logger.LogInformation("🔍 Fetching comprehensive details for Order {OrderId}", orderId);
+                _logger.LogInformation("🔍 Fetching order details for: {Identifier}", identifier);
 
-                // 1. Fetch Order from DB
-                var order = await _context.Orders.FindAsync(orderId);
+                BitRaserApiProject.Models.Order? order = null;
+
+                // Detect if identifier is payment_id (starts with "pay_") or order_id (numeric)
+                if (identifier.StartsWith("pay_", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Payment ID format: pay_xxx
+                    _logger.LogInformation("🔍 Detected Payment ID format, searching by DodoPaymentId");
+                    order = await _context.Orders
+                        .FirstOrDefaultAsync(o => o.DodoPaymentId == identifier);
+                }
+                else if (int.TryParse(identifier, out int orderId))
+                {
+                    // Numeric Order ID
+                    _logger.LogInformation("🔍 Detected Order ID format: {OrderId}", orderId);
+                    order = await _context.Orders.FindAsync(orderId);
+                }
+                else
+                {
+                    return BadRequest(new { error = "Invalid identifier format. Use order_id (numeric) or payment_id (pay_xxx)" });
+                }
                 
                 if (order == null)
                 {
-                    _logger.LogWarning("❌ Order {OrderId} not found", orderId);
-                    return NotFound(new { error = "Order not found" });
+                    _logger.LogWarning("❌ Order not found for: {Identifier}", identifier);
+                    return NotFound(new { error = "Order not found", identifier = identifier });
                 }
 
                 // NOTE: Security check skipped for testing (AllowAnonymous)
@@ -972,7 +990,7 @@ namespace BitRaserApiProject.Controllers
                             TotalAmount = order.AmountCents / 100m,
                             TaxAmount = order.TaxAmountCents / 100m
                         };
-                        _logger.LogWarning("⚠️ Invoice API failed for Order {OrderId}, using DB fallback data", orderId);
+                        _logger.LogWarning("⚠️ Invoice API failed for Order {OrderId}, using DB fallback data", order.OrderId);
                     }
                 }
 
@@ -1056,7 +1074,7 @@ namespace BitRaserApiProject.Controllers
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error fetching comprehensive details for Order {OrderId}", orderId);
+                _logger.LogError(ex, "Error fetching comprehensive details for identifier {Identifier}", identifier);
                 return StatusCode(500, new { error = "Failed to fetch order details" });
             }
         }
@@ -1100,7 +1118,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 // Redirect to existing order details endpoint
-                return await GetFullOrderDetails(order.OrderId);
+                return await GetFullOrderDetails(order.OrderId.ToString());
             }
             catch (Exception ex)
             {
