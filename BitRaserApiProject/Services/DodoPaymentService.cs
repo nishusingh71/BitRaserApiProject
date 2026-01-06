@@ -259,19 +259,22 @@ namespace BitRaserApiProject.Services
                     ["tax_enabled"] = request.TaxEnabled
                 };
 
-                // Add return URL if provided
-                if (!string.IsNullOrEmpty(request.ReturnUrl))
-                {
-                    dodoRequest["return_url"] = request.ReturnUrl;
-                    dodoRequest["success_url"] = request.ReturnUrl;
-                    dodoRequest["redirect_url"] = request.ReturnUrl;
-                }
+                // ✅ Default success URL for guest checkout
+                const string defaultSuccessUrl = "https://dsecuretech.com/order-success||frontend.vercel.app/order-success";
+                
+                // Add return URL - use provided or default
+                var successUrl = !string.IsNullOrEmpty(request.ReturnUrl) 
+                    ? request.ReturnUrl 
+                    : defaultSuccessUrl;
+                    
+                dodoRequest["return_url"] = successUrl;
+                dodoRequest["success_url"] = successUrl;
+                dodoRequest["redirect_url"] = successUrl;
 
-                // Add cancel URL if provided
-                if (!string.IsNullOrEmpty(request.CancelUrl))
-                {
-                    dodoRequest["cancel_url"] = request.CancelUrl;
-                }
+                // Add cancel URL if provided (default to success URL)
+                dodoRequest["cancel_url"] = !string.IsNullOrEmpty(request.CancelUrl) 
+                    ? request.CancelUrl 
+                    : defaultSuccessUrl;
 
                 // Add discount code if provided
                 if (!string.IsNullOrEmpty(request.DiscountCode))
