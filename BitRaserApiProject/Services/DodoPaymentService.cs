@@ -21,6 +21,8 @@ namespace BitRaserApiProject.Services
         private readonly HttpClient _httpClient;
         private readonly IMemoryCache _cache;
         private readonly IEmailService _emailService;
+        private readonly Email.IEmailOrchestrator? _emailOrchestrator;
+        private readonly Email.ExcelExportService? _excelExportService;
 
         // Dodo API configuration
         private readonly string _dodoApiKey;
@@ -38,7 +40,9 @@ namespace BitRaserApiProject.Services
             ILogger<DodoPaymentService> logger,
             IHttpClientFactory httpClientFactory,
             IMemoryCache cache,
-            IEmailService emailService)
+            IEmailService emailService,
+            Email.IEmailOrchestrator? emailOrchestrator = null,
+            Email.ExcelExportService? excelExportService = null)
         {
             _context = context;
             _configuration = configuration;
@@ -46,6 +50,8 @@ namespace BitRaserApiProject.Services
             _httpClient = httpClientFactory.CreateClient("DodoApi");
             _cache = cache;
             _emailService = emailService;
+            _emailOrchestrator = emailOrchestrator;
+            _excelExportService = excelExportService;
 
             // Load configuration - Environment variables take priority
             _dodoApiKey = Environment.GetEnvironmentVariable("Dodo__ApiKey")
@@ -976,6 +982,55 @@ namespace BitRaserApiProject.Services
                 }
             }
 
+            // ✅ HYBRID EMAIL SYSTEM - Send additional email with Excel attachment (if orchestrator available)
+            if (_emailOrchestrator != null && _excelExportService != null)
+            {
+                try
+                {
+                    _logger.LogInformation("📧 Sending hybrid email with Excel attachment to: {Email}", customerEmail);
+                    
+                    // Generate Excel with order details
+                    var excelBytes = _excelExportService.GenerateOrderDetailsExcel(order, licenseKeys);
+                    
+                    // Build email request
+                    var emailRequest = new Email.EmailSendRequest
+                    {
+                        ToEmail = customerEmail,
+                        ToName = customerName,
+                        Subject = userCreated 
+                            ? $"Welcome to DSecure - Order #{order.OrderId} Confirmed" 
+                            : $"Payment Confirmed - Order #{order.OrderId}",
+                        HtmlBody = GenerateOrderConfirmationHtml(order, customerName, userCreated, tempPassword, invoiceUrl, licenseKeys),
+                        Type = Email.EmailType.Transactional,
+                        OrderId = order.OrderId,
+                        Attachments = new List<Email.EmailAttachment>
+                        {
+                            new Email.EmailAttachment(
+                                $"DSecure_Order_{order.OrderId}.xlsx",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                excelBytes
+                            )
+                        }
+                    };
+                    
+                    var result = await _emailOrchestrator.SendEmailAsync(emailRequest);
+                    
+                    if (result.Success)
+                    {
+                        _logger.LogInformation("✅ Hybrid email sent via {Provider} to: {Email}", 
+                            result.ProviderUsed, customerEmail);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("⚠️ Hybrid email failed: {Message}", result.Message);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "❌ Error sending hybrid email to: {Email}", customerEmail);
+                }
+            }
+
             _logger.LogInformation("✅ Dodo payment succeeded: OrderId={OrderId}, PaymentId={PaymentId}, UserCreated={UserCreated}",
                 order.OrderId, data.PaymentId, userCreated);
         }
@@ -998,6 +1053,101 @@ namespace BitRaserApiProject.Services
             }
             
             return new string(password);
+        }
+
+        /// <summary>
+        /// Generate HTML email body for order confirmation (used by hybrid email system)
+        /// </summary>
+        private string GenerateOrderConfirmationHtml(Order order, string customerName, bool isNewUser, string? tempPassword, string? invoiceUrl, List<string>? licenseKeys)
+        {
+            var amount = order.AmountCents / 100m;
+            var tax = order.TaxAmountCents / 100m;
+            
+            var html = $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='utf-8'>
+    <style>
+        body {{ font-family: 'Segoe UI', Arial, sans-serif; background-color: #f5f5f5; margin: 0; padding: 20px; }}
+        .container {{ max-width: 600px; margin: 0 auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+        .header {{ background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: white; padding: 30px; text-align: center; }}
+        .header h1 {{ margin: 0; font-size: 24px; }}
+        .content {{ padding: 30px; }}
+        .order-box {{ background: #f8f9fa; border-radius: 8px; padding: 20px; margin: 20px 0; }}
+        .row {{ display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }}
+        .row:last-child {{ border-bottom: none; }}
+        .label {{ color: #666; }}
+        .value {{ font-weight: 600; color: #333; }}
+        .total {{ font-size: 20px; color: #1a1a2e; }}
+        .cta-button {{ display: inline-block; background: #4CAF50; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; margin: 20px 0; }}
+        .alert {{ background: #e3f2fd; border-left: 4px solid #2196F3; padding: 15px; margin: 20px 0; border-radius: 4px; }}
+        .license-box {{ background: #f0f4c3; border-radius: 8px; padding: 15px; margin: 15px 0; }}
+        .footer {{ background: #f5f5f5; padding: 20px; text-align: center; font-size: 12px; color: #666; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='header'>
+            <h1>🎉 {(isNewUser ? "Welcome to DSecure!" : "Payment Confirmed!")}</h1>
+            <p>Order #{order.OrderId}</p>
+        </div>
+        <div class='content'>
+            <p>Dear {customerName},</p>
+            <p>{(isNewUser ? "Thank you for your purchase! Your account has been created and is ready to use." : "Thank you for your continued trust in DSecure!")}</p>
+            
+            <div class='order-box'>
+                <h3 style='margin-top: 0;'>Order Summary</h3>
+                <div class='row'><span class='label'>Product</span><span class='value'>{order.ProductName ?? "DSecure Product"}</span></div>
+                <div class='row'><span class='label'>Licenses</span><span class='value'>{order.LicenseCount}</span></div>
+                <div class='row'><span class='label'>Duration</span><span class='value'>{order.LicenseYears} Year(s)</span></div>
+                <div class='row'><span class='label'>Subtotal</span><span class='value'>{order.Currency ?? "USD"} {amount:N2}</span></div>
+                {(tax > 0 ? $"<div class='row'><span class='label'>Tax</span><span class='value'>{order.Currency ?? "USD"} {tax:N2}</span></div>" : "")}
+                <div class='row'><span class='label'>Total</span><span class='value total'>{order.Currency ?? "USD"} {amount + tax:N2}</span></div>
+            </div>";
+
+            // Add credentials for new users
+            if (isNewUser && !string.IsNullOrEmpty(tempPassword))
+            {
+                html += $@"
+            <div class='alert'>
+                <strong>🔐 Your Login Credentials</strong><br><br>
+                <strong>Email:</strong> {order.UserEmail}<br>
+                <strong>Password:</strong> {tempPassword}<br><br>
+                <em>Please change your password after first login.</em>
+            </div>
+            <a href='https://dsecuretech.com/login' class='cta-button'>Login to Dashboard</a>";
+            }
+
+            // Add license keys summary
+            if (licenseKeys != null && licenseKeys.Count > 0)
+            {
+                html += $@"
+            <div class='license-box'>
+                <strong>📋 License Keys ({licenseKeys.Count})</strong><br>
+                <em>Complete license details are in the attached Excel file.</em>
+            </div>";
+            }
+
+            // Add invoice link
+            if (!string.IsNullOrEmpty(invoiceUrl))
+            {
+                html += $@"
+            <p><a href='{invoiceUrl}' style='color: #1a1a2e;'>📄 Download Invoice (PDF)</a></p>";
+            }
+
+            html += @"
+            <p style='margin-top: 30px;'><strong>📎 Attachment:</strong> Complete order details and license keys are in the attached Excel file.</p>
+        </div>
+        <div class='footer'>
+            <p>DSecure Technologies • support@dsecuretech.com</p>
+            <p>© 2026 DSecure. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>";
+
+            return html;
         }
 
         private async Task HandlePaymentFailedAsync(DodoWebhookData? data, string rawPayload)
