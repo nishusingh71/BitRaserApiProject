@@ -706,6 +706,12 @@ namespace BitRaserApiProject.Models.DTOs
         [JsonPropertyName("discount_code")]
         public string? DiscountCode { get; set; }
 
+        /// <summary>
+        /// Enable tax calculation (default: true)
+        /// </summary>
+        [JsonPropertyName("tax_enabled")]
+        public bool TaxEnabled { get; set; } = true;
+
         [JsonPropertyName("metadata")]
         public Dictionary<string, string>? Metadata { get; set; }
     }

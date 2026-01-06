@@ -255,8 +255,8 @@ namespace BitRaserApiProject.Services
                             ["quantity"] = request.Quantity > 0 ? request.Quantity : 1
                         }
                     },
-                    // ✅ Enable tax calculation by default
-                    ["tax_enabled"] = true
+                    // ✅ Tax calculation from request (default: true)
+                    ["tax_enabled"] = request.TaxEnabled
                 };
 
                 // Add return URL if provided
