@@ -3,6 +3,7 @@ using BitRaserApiProject.Models.DTOs;
 using BitRaserApiProject.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text.Json;
 
@@ -1071,6 +1072,41 @@ namespace BitRaserApiProject.Controllers
                 order.BillingCountry 
             };
             return string.Join(", ", parts.Where(p => !string.IsNullOrEmpty(p)));
+        }
+
+        /// <summary>
+        /// 🆕 Get order details by Dodo Payment ID
+        /// Used for guest checkout success page where order_id is not known
+        /// </summary>
+        /// <param name="paymentId">Dodo Payment ID (pay_xxx)</param>
+        [HttpGet("orders/by-payment/{paymentId}")]
+        [AllowAnonymous]
+        [ProducesResponseType(typeof(ComprehensiveOrderDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<IActionResult> GetOrderByPaymentId(string paymentId)
+        {
+            try
+            {
+                _logger.LogInformation("🔍 Fetching order by PaymentId: {PaymentId}", paymentId);
+
+                // Find order by Dodo Payment ID
+                var order = await _context.Orders
+                    .FirstOrDefaultAsync(o => o.DodoPaymentId == paymentId);
+
+                if (order == null)
+                {
+                    _logger.LogWarning("❌ Order with PaymentId {PaymentId} not found", paymentId);
+                    return NotFound(new { error = "Order not found", paymentId = paymentId });
+                }
+
+                // Redirect to existing order details endpoint
+                return await GetFullOrderDetails(order.OrderId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching order by PaymentId {PaymentId}", paymentId);
+                return StatusCode(500, new { error = "Failed to fetch order details" });
+            }
         }
 
         #endregion
