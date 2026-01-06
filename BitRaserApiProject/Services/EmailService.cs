@@ -1131,10 +1131,6 @@ body {{ font-family: 'Inter', sans-serif; background: linear-gradient(135deg, #1
 </div>
 </div>
 {licenseKeysHtml}
-{invoiceHtml}
-<div class='success-card'>
-<p>Your license has been activated! You can now access all premium features.</p>
-</div>
 <div style='text-align: center;'>
 <a href='https://dsecuretech.com/login' class='cta-button' style='color: #ffffff;'>Go to Dashboard</a>
 </div>
