@@ -120,7 +120,9 @@ namespace BitRaserApiProject.Services
                             ["product_id"] = request.ProductId,
                             ["quantity"] = 1
                         }
-                    }
+                    },
+                    // ✅ Enable tax calculation by default
+                    ["tax_enabled"] = true
                 };
 
                 // Add success/return URL if provided - Dodo uses return_url for redirects
@@ -252,7 +254,9 @@ namespace BitRaserApiProject.Services
                             ["product_id"] = request.ProductId,
                             ["quantity"] = request.Quantity > 0 ? request.Quantity : 1
                         }
-                    }
+                    },
+                    // ✅ Enable tax calculation by default
+                    ["tax_enabled"] = true
                 };
 
                 // Add return URL if provided
