@@ -22,7 +22,7 @@ namespace BitRaserApiProject.Services.Email.Providers
         private bool _isInitialized = false;
 
         public string ProviderName => "SendGrid";
-        public int Priority { get; private set; } = 1;
+        public int Priority { get; private set; } = 2;
 
         public SendGridEmailProvider(
             IConfiguration configuration,

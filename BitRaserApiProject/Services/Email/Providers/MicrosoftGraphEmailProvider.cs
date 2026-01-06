@@ -24,7 +24,7 @@ namespace BitRaserApiProject.Services.Email.Providers
         private bool _isInitialized = false;
 
         public string ProviderName => "MicrosoftGraph";
-        public int Priority { get; private set; } = 2;
+        public int Priority { get; private set; } = 1;
 
         public MicrosoftGraphEmailProvider(
             IConfiguration configuration,

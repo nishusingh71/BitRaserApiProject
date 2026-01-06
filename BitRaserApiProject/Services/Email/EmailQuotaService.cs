@@ -64,7 +64,7 @@ namespace BitRaserApiProject.Services.Email
                         AccountIdentifier = "default",
                         DailyLimit = dailyLimit,
                         MonthlyLimit = monthlyLimit,
-                        Priority = 1,
+                        Priority = 2,
                         IsEnabled = true
                     };
                     _context.Set<EmailQuota>().Add(sendGridQuota);
@@ -97,7 +97,7 @@ namespace BitRaserApiProject.Services.Email
                         AccountIdentifier = senderEmail ?? "default",
                         DailyLimit = dailyLimit,
                         MonthlyLimit = monthlyLimit,
-                        Priority = 2,
+                        Priority = 1,
                         IsEnabled = !string.IsNullOrEmpty(senderEmail)
                     };
                     _context.Set<EmailQuota>().Add(graphQuota);
