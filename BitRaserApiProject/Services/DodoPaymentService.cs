@@ -887,43 +887,23 @@ namespace BitRaserApiProject.Services
                 throw;
             }
 
-            // ✅ FETCH INVOICE FOR EMAIL - Using payment_id (more reliable than invoice_id)
+            // ✅ GENERATE INVOICE DOWNLOAD URL (Using direct Dodo format)
+            // Format: https://live.dodopayments.com/invoices/payments/{payment_id}
             string? invoiceUrl = null;
             
             if (!string.IsNullOrEmpty(data.PaymentId))
             {
-                try
-                {
-                    _logger.LogInformation("📄 Fetching invoice using PaymentId: {PaymentId}", data.PaymentId);
-                    var invoiceResponse = await GetInvoiceByPaymentIdAsync(data.PaymentId);
+                // Determine if sandbox or live mode
+                var dodoBaseUrl = _isSandbox 
+                    ? "https://test.dodopayments.com" 
+                    : "https://live.dodopayments.com";
                     
-                    if (invoiceResponse.Success && invoiceResponse.Invoice != null)
-                    {
-                        // Prefer PDF URL, fallback to Invoice URL (HTML)
-                        invoiceUrl = invoiceResponse.Invoice.PdfUrl ?? invoiceResponse.Invoice.InvoiceUrl;
-                        
-                        if (string.IsNullOrEmpty(invoiceUrl))
-                        {
-                            _logger.LogWarning("⚠️ Invoice fetched but both PdfUrl and InvoiceUrl are null for PaymentId: {PaymentId}", data.PaymentId);
-                        }
-                        else
-                        {
-                            _logger.LogInformation("✅ Invoice URL fetched successfully: {InvoiceUrl}", invoiceUrl);
-                        }
-                    }
-                    else
-                    {
-                         _logger.LogWarning("⚠️ Failed to fetch invoice by PaymentId: {Message}", invoiceResponse.Message);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "⚠️ Exception while fetching invoice for PaymentId: {PaymentId}", data.PaymentId);
-                }
+                invoiceUrl = $"{dodoBaseUrl}/invoices/payments/{data.PaymentId}";
+                _logger.LogInformation("📄 Invoice Download URL generated: {InvoiceUrl}", invoiceUrl);
             }
             else
             {
-                 _logger.LogWarning("⚠️ PaymentId is null, cannot fetch invoice.");
+                _logger.LogWarning("⚠️ PaymentId is null, cannot generate invoice URL.");
             }
 
             // ✅ SEND CREDENTIALS EMAIL (only for new users)
