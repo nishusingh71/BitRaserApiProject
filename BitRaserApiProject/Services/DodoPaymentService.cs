@@ -569,6 +569,13 @@ namespace BitRaserApiProject.Services
             order.WebhookProcessedAt = DateTime.UtcNow;
             order.UserCreated = userCreated;
 
+            // ✅ CRITICAL: Always update UserEmail from Dodo Customer to use checkout form email
+            if (!string.IsNullOrEmpty(data.Customer?.Email))
+            {
+                order.UserEmail = data.Customer.Email;
+                _logger.LogInformation("📧 Order email updated from Dodo checkout: {Email}", data.Customer.Email);
+            }
+
             // ✅ Update DodoInvoiceId from webhook data (important for existing orders)
             if (!string.IsNullOrEmpty(data.InvoiceId))
             {
