@@ -915,95 +915,30 @@ namespace BitRaserApiProject.Services
                 _logger.LogWarning("⚠️ PaymentId is null, cannot generate invoice URL.");
             }
 
-            // ✅ SEND CREDENTIALS EMAIL (only for new users)
-            if (userCreated && !string.IsNullOrEmpty(tempPassword))
+            // ✅ SEND ORDER EMAIL VIA HYBRID SYSTEM (MS Graph → SendGrid fallback)
+            // Uses orchestrator with Excel attachment, replaces old email logic
+            if (_emailOrchestrator != null && _excelExportService != null)
             {
                 try
                 {
                     var loginUrl = Environment.GetEnvironmentVariable("FRONTEND_URL")
                         ?? _configuration["FrontendUrl"]
-                        ?? "https://dsecuretech.com/login";
-
-                    // ⚠️ SECURITY: tempPassword is ONLY passed to email, NEVER logged
-                    var emailSent = await _emailService.SendAccountCreatedEmailAsync(
-                        customerEmail,
-                        customerName,
-                        tempPassword,
-                        loginUrl,
-                        order.ProductName,
-                        order.LicenseCount,
-                        order.AmountCents > 0 ? order.AmountCents / 100m : (decimal?)null,
-                        licenseKeys,
-                        invoiceUrl // ✅ Pass invoice URL
-                    );
-
-                    order.CredentialsEmailSent = emailSent;
-                    await _context.SaveChangesAsync();
-
-                    if (emailSent)
-                    {
-                        _logger.LogInformation("📧 Credentials email sent to: {Email}", customerEmail);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("⚠️ Failed to send credentials email to: {Email}", customerEmail);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "❌ Error sending credentials email to: {Email}", customerEmail);
-                }
-            }
-            else
-            {
-                // ✅ SEND PAYMENT SUCCESS EMAIL (for existing users)
-                try
-                {
-                    var emailSent = await _emailService.SendPaymentSuccessEmailAsync(
-                        customerEmail,
-                        customerName,
-                        order.ProductName ?? "Product",
-                        order.AmountCents > 0 ? order.AmountCents / 100m : 0m,
-                        order.LicenseCount,
-                        licenseKeys,
-                        "Paid",
-                        invoiceUrl // ✅ Pass invoice URL
-                    );
-
-                    if (emailSent)
-                    {
-                        _logger.LogInformation("📧 Payment success email sent to: {Email}", customerEmail);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("⚠️ Failed to send payment success email to: {Email}", customerEmail);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "❌ Error sending payment success email to: {Email}", customerEmail);
-                }
-            }
-
-            // ✅ HYBRID EMAIL SYSTEM - Send additional email with Excel attachment (if orchestrator available)
-            if (_emailOrchestrator != null && _excelExportService != null)
-            {
-                try
-                {
-                    _logger.LogInformation("📧 Sending hybrid email with Excel attachment to: {Email}", customerEmail);
+                        ?? "https://dsecuretech.com";
                     
-                    // Generate Excel with order details
+                    _logger.LogInformation("📧 Sending order email via hybrid system to: {Email}", customerEmail);
+                    
+                    // Generate Excel with order details and license keys
                     var excelBytes = _excelExportService.GenerateOrderDetailsExcel(order, licenseKeys);
                     
-                    // Build email request
+                    // Build email request with minimal theme
                     var emailRequest = new Email.EmailSendRequest
                     {
                         ToEmail = customerEmail,
                         ToName = customerName,
                         Subject = userCreated 
-                            ? $"Welcome to DSecure - Order #{order.OrderId} Confirmed" 
-                            : $"Payment Confirmed - Order #{order.OrderId}",
-                        HtmlBody = GenerateOrderConfirmationHtml(order, customerName, userCreated, tempPassword, invoiceUrl, licenseKeys),
+                            ? $"Welcome to DSecure - Order #{order.OrderId}" 
+                            : $"Order Confirmed - #{order.OrderId}",
+                        HtmlBody = GenerateMinimalOrderEmailHtml(order, customerName, userCreated, tempPassword, loginUrl, licenseKeys),
                         Type = Email.EmailType.Transactional,
                         OrderId = order.OrderId,
                         Attachments = new List<Email.EmailAttachment>
@@ -1020,18 +955,29 @@ namespace BitRaserApiProject.Services
                     
                     if (result.Success)
                     {
-                        _logger.LogInformation("✅ Hybrid email sent via {Provider} to: {Email}", 
+                        order.CredentialsEmailSent = true;
+                        await _context.SaveChangesAsync();
+                        _logger.LogInformation("✅ Order email sent via {Provider} to: {Email}", 
                             result.ProviderUsed, customerEmail);
                     }
                     else
                     {
-                        _logger.LogWarning("⚠️ Hybrid email failed: {Message}", result.Message);
+                        _logger.LogWarning("⚠️ Hybrid email failed, falling back to old system: {Message}", result.Message);
+                        // Fallback to old email system if hybrid fails
+                        await SendFallbackEmail(customerEmail, customerName, order, userCreated, tempPassword, licenseKeys, invoiceUrl);
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "❌ Error sending hybrid email to: {Email}", customerEmail);
+                    _logger.LogError(ex, "❌ Hybrid email error, using fallback for: {Email}", customerEmail);
+                    // Fallback to old email system on exception
+                    await SendFallbackEmail(customerEmail, customerName, order, userCreated, tempPassword, licenseKeys, invoiceUrl);
                 }
+            }
+            else
+            {
+                // Fallback: use old email system if orchestrator not available
+                await SendFallbackEmail(customerEmail, customerName, order, userCreated, tempPassword, licenseKeys, invoiceUrl);
             }
 
             _logger.LogInformation("✅ Dodo payment succeeded: OrderId={OrderId}, PaymentId={PaymentId}, UserCreated={UserCreated}",
@@ -1056,6 +1002,115 @@ namespace BitRaserApiProject.Services
             }
             
             return new string(password);
+        }
+
+        /// <summary>
+        /// Fallback to old email system if hybrid fails
+        /// </summary>
+        private async Task SendFallbackEmail(string customerEmail, string customerName, Order order, bool userCreated, string? tempPassword, List<string>? licenseKeys, string? invoiceUrl)
+        {
+            try
+            {
+                var loginUrl = Environment.GetEnvironmentVariable("FRONTEND_URL")
+                    ?? _configuration["FrontendUrl"]
+                    ?? "https://dsecuretech.com/login";
+
+                if (userCreated && !string.IsNullOrEmpty(tempPassword))
+                {
+                    var emailSent = await _emailService.SendAccountCreatedEmailAsync(
+                        customerEmail, customerName, tempPassword, loginUrl,
+                        order.ProductName, order.LicenseCount,
+                        order.AmountCents > 0 ? order.AmountCents / 100m : (decimal?)null,
+                        licenseKeys, invoiceUrl);
+                    
+                    order.CredentialsEmailSent = emailSent;
+                    await _context.SaveChangesAsync();
+                    _logger.LogInformation("📧 Fallback credentials email sent to: {Email}", customerEmail);
+                }
+                else
+                {
+                    await _emailService.SendPaymentSuccessEmailAsync(
+                        customerEmail, customerName, order.ProductName ?? "Product",
+                        order.AmountCents > 0 ? order.AmountCents / 100m : 0m,
+                        order.LicenseCount, licenseKeys, "Paid", invoiceUrl);
+                    _logger.LogInformation("📧 Fallback payment email sent to: {Email}", customerEmail);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Fallback email also failed for: {Email}", customerEmail);
+            }
+        }
+
+        /// <summary>
+        /// Generate minimal theme HTML email for order confirmation
+        /// Clean, professional, no invoice button - details in Excel attachment
+        /// </summary>
+        private string GenerateMinimalOrderEmailHtml(Order order, string customerName, bool isNewUser, string? tempPassword, string loginUrl, List<string>? licenseKeys)
+        {
+            var amount = order.AmountCents / 100m;
+            var tax = order.TaxAmountCents / 100m;
+            var total = amount + tax;
+            var currency = order.Currency ?? "USD";
+            
+            var credentialsHtml = "";
+            if (isNewUser && !string.IsNullOrEmpty(tempPassword))
+            {
+                credentialsHtml = $@"
+<tr><td style='padding:20px;background:#f8f9fa;border-radius:8px;margin:15px 0;'>
+<p style='margin:0 0 10px 0;font-weight:600;color:#1a1a2e;'>🔐 Your Login Credentials</p>
+<p style='margin:5px 0;'><strong>Email:</strong> {order.UserEmail}</p>
+<p style='margin:5px 0;'><strong>Password:</strong> {tempPassword}</p>
+<p style='margin:10px 0 0 0;font-size:12px;color:#666;'>Please change your password after first login.</p>
+</td></tr>
+<tr><td style='padding:15px 0;text-align:center;'>
+<a href='{loginUrl}/login' style='display:inline-block;background:#1a1a2e;color:#fff;padding:12px 30px;text-decoration:none;border-radius:6px;font-weight:600;'>Login to Dashboard</a>
+</td></tr>";
+            }
+
+            var licenseHtml = "";
+            if (licenseKeys != null && licenseKeys.Count > 0)
+            {
+                licenseHtml = $@"
+<tr><td style='padding:15px 0;'>
+<p style='margin:0;color:#666;'>📋 <strong>{licenseKeys.Count} License Key(s)</strong> included in attached Excel file.</p>
+</td></tr>";
+            }
+
+            return $@"<!DOCTYPE html>
+<html>
+<head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'></head>
+<body style='margin:0;padding:20px;background:#f5f5f5;font-family:Segoe UI,Arial,sans-serif;'>
+<table width='100%' cellpadding='0' cellspacing='0' style='max-width:550px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;'>
+<tr><td style='background:#1a1a2e;color:#fff;padding:25px;text-align:center;'>
+<h1 style='margin:0;font-size:22px;'>{(isNewUser ? "Welcome to DSecure!" : "Order Confirmed")}</h1>
+<p style='margin:8px 0 0 0;opacity:0.9;'>Order #{order.OrderId}</p>
+</td></tr>
+<tr><td style='padding:25px;'>
+<p style='margin:0 0 20px 0;'>Hi {customerName},</p>
+<p style='margin:0 0 20px 0;color:#444;'>{(isNewUser ? "Thank you for your purchase! Your account is ready." : "Thank you for your order!")}</p>
+
+<table width='100%' cellpadding='8' cellspacing='0' style='background:#f8f9fa;border-radius:8px;margin:15px 0;'>
+<tr><td style='color:#666;'>Product</td><td style='text-align:right;font-weight:600;'>{order.ProductName ?? "DSecure"}</td></tr>
+<tr><td style='color:#666;'>Licenses</td><td style='text-align:right;font-weight:600;'>{order.LicenseCount}</td></tr>
+<tr><td style='color:#666;'>Duration</td><td style='text-align:right;font-weight:600;'>{order.LicenseYears} Year(s)</td></tr>
+{(tax > 0 ? $"<tr><td style='color:#666;'>Tax</td><td style='text-align:right;'>{currency} {tax:N2}</td></tr>" : "")}
+<tr style='border-top:1px solid #ddd;'><td style='color:#1a1a2e;font-weight:600;padding-top:12px;'>Total</td><td style='text-align:right;font-weight:700;font-size:18px;color:#1a1a2e;padding-top:12px;'>{currency} {total:N2}</td></tr>
+</table>
+
+{credentialsHtml}
+{licenseHtml}
+
+<tr><td style='padding:20px 0 0 0;border-top:1px solid #eee;'>
+<p style='margin:0;font-size:13px;color:#666;'>📎 Complete order details and license keys are in the attached Excel file.</p>
+</td></tr>
+</td></tr>
+<tr><td style='background:#f8f9fa;padding:20px;text-align:center;font-size:12px;color:#888;'>
+<p style='margin:0;'>DSecure Technologies • support@dsecuretech.com</p>
+</td></tr>
+</table>
+</body>
+</html>";
         }
 
         /// <summary>

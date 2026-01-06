@@ -863,17 +863,17 @@ body {{ font-family: 'Inter', sans-serif; background: #f8fafc; margin: 0; paddin
             }
 
             // Invoice download section
-            var invoiceHtml = "";
-            if (!string.IsNullOrEmpty(invoiceUrl))
-            {
-                invoiceHtml = $@"
-<div style='background: #1a1a2e; border-radius: 12px; padding: 24px; margin: 30px 0; text-align: center;'>
-<a href='{invoiceUrl}' target='_blank' style='display: inline-flex; align-items: center; justify-content: center; gap: 10px; background: #2d2d44; color: #ffffff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px; border: 1px solid #3d3d5c; transition: all 0.3s ease;'>
-<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='vertical-align: middle;'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='7 10 12 15 17 10'/><line x1='12' y1='15' x2='12' y2='3'/></svg>
-Download Invoice
-</a>
-</div>";
-            }
+//             var invoiceHtml = "";
+//             if (!string.IsNullOrEmpty(invoiceUrl))
+//             {
+//                 invoiceHtml = $@"
+// <div style='background: #1a1a2e; border-radius: 12px; padding: 24px; margin: 30px 0; text-align: center;'>
+// <a href='{invoiceUrl}' target='_blank' style='display: inline-flex; align-items: center; justify-content: center; gap: 10px; background: #2d2d44; color: #ffffff; padding: 14px 32px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px; border: 1px solid #3d3d5c; transition: all 0.3s ease;'>
+// <svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' style='vertical-align: middle;'><path d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/><polyline points='7 10 12 15 17 10'/><line x1='12' y1='15' x2='12' y2='3'/></svg>
+// Download Invoice
+// </a>
+// </div>";
+//             }
 
             return $@"
 <!DOCTYPE html>
@@ -948,7 +948,6 @@ body {{ font-family: 'Inter', sans-serif; background: #f8fafc; margin: 0; paddin
 <a href='{loginUrl}' class='cta-button' style='color: #ffffff;'>Access Your Dashboard</a>
 </div>
 {licenseKeysHtml}
-{invoiceHtml}
 <div class='warning-box'>
 <p><strong>Security First:</strong> Please change your temporary password immediately after logging in. This ensures your account remains secure.</p>
 </div>
