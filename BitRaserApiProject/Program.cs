@@ -412,6 +412,13 @@ builder.Services.AddHttpClient("DodoApi", client =>
 });
 builder.Services.AddScoped<IDodoPaymentService, DodoPaymentService>();
 
+// ✅ HYBRID EMAIL SYSTEM - SendGrid + Microsoft Graph with Quota Management
+builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailQuotaService, BitRaserApiProject.Services.Email.EmailQuotaService>();
+builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailProvider, BitRaserApiProject.Services.Email.Providers.SendGridEmailProvider>();
+builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailProvider, BitRaserApiProject.Services.Email.Providers.MicrosoftGraphEmailProvider>();
+builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailOrchestrator, BitRaserApiProject.Services.Email.EmailProviderOrchestrator>();
+builder.Services.AddScoped<BitRaserApiProject.Services.Email.ExcelExportService>();
+
 // ✅ HYBRID MULTI-TENANT SUPPORT - Automatic tenant routing
 builder.Services.AddHttpContextAccessor();  // Required for reading JWT claims
 builder.Services.AddScoped<ITenantConnectionService, TenantConnectionService>();

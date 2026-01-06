@@ -65,6 +65,10 @@ namespace BitRaserApiProject
         // ✅ Downloads (Software download tracking)
         public DbSet<Download> Downloads { get; set; }
 
+        // ✅ Email System (Hybrid Email with Quota Management)
+        public DbSet<EmailQuota> EmailQuotas { get; set; }
+        public DbSet<EmailLog> EmailLogs { get; set; }
+
         public static string HashLicenseKey(string licenseKey)
         {
             using var sha256 = SHA256.Create();
