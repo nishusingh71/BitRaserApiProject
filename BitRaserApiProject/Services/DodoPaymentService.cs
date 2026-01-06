@@ -915,8 +915,8 @@ namespace BitRaserApiProject.Services
                 _logger.LogWarning("⚠️ PaymentId is null, cannot generate invoice URL.");
             }
 
-            // ✅ SEND ORDER EMAIL VIA HYBRID SYSTEM (MS Graph → SendGrid fallback)
-            // Uses orchestrator with Excel attachment, replaces old email logic
+            // ✅ SEND ORDER EMAIL VIA HYBRID SYSTEM ONLY (MS Graph → SendGrid)
+            // Old EmailService fallback disabled - only hybrid providers used
             if (_emailOrchestrator != null && _excelExportService != null)
             {
                 try
@@ -962,22 +962,19 @@ namespace BitRaserApiProject.Services
                     }
                     else
                     {
-                        _logger.LogWarning("⚠️ Hybrid email failed, falling back to old system: {Message}", result.Message);
-                        // Fallback to old email system if hybrid fails
-                        await SendFallbackEmail(customerEmail, customerName, order, userCreated, tempPassword, licenseKeys, invoiceUrl);
+                        _logger.LogError("❌ Email failed via all hybrid providers: {Message}", result.Message);
+                        // No fallback to old system - email will be skipped
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "❌ Hybrid email error, using fallback for: {Email}", customerEmail);
-                    // Fallback to old email system on exception
-                    await SendFallbackEmail(customerEmail, customerName, order, userCreated, tempPassword, licenseKeys, invoiceUrl);
+                    _logger.LogError(ex, "❌ Hybrid email error for: {Email} - No fallback", customerEmail);
+                    // No fallback to old system - email will be skipped
                 }
             }
             else
             {
-                // Fallback: use old email system if orchestrator not available
-                await SendFallbackEmail(customerEmail, customerName, order, userCreated, tempPassword, licenseKeys, invoiceUrl);
+                _logger.LogError("❌ Email orchestrator not configured! Email not sent to: {Email}", customerEmail);
             }
 
             _logger.LogInformation("✅ Dodo payment succeeded: OrderId={OrderId}, PaymentId={PaymentId}, UserCreated={UserCreated}",
