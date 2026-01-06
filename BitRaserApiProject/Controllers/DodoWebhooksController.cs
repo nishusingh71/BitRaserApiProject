@@ -54,6 +54,10 @@ namespace BitRaserApiProject.Controllers
                 Request.Body.Position = 0; // Reset for potential re-read
 
                 _logger.LogInformation("📥 Webhook body length: {Length} chars", rawPayload?.Length ?? 0);
+                
+                // 🔍 PRODUCTION DEBUG: Log raw LIVE payload for structure analysis
+                _logger.LogWarning("📥 RAW LIVE WEBHOOK PAYLOAD (first 2000 chars): {Payload}", 
+                    rawPayload.Length > 2000 ? rawPayload.Substring(0, 2000) + "..." : rawPayload);
 
                 if (string.IsNullOrEmpty(rawPayload))
                 {
@@ -90,6 +94,18 @@ namespace BitRaserApiProject.Controllers
                 try 
                 {
                     webhookEvent = JsonSerializer.Deserialize<DodoWebhookEvent>(rawPayload, jsonOptions);
+                    
+                    // 🔍 PRODUCTION DEBUG: Log deserialization success
+                    if (webhookEvent?.Data != null)
+                    {
+                        _logger.LogWarning("✅ Deserialization SUCCESS - Event Type: {Type}, PaymentId: {PaymentId}", 
+                            webhookEvent.Type, webhookEvent.Data.PaymentId ?? "NULL");
+                    }
+                    else if (webhookEvent != null)
+                    {
+                        _logger.LogWarning("⚠️ Deserialization returned Event with NULL Data object - Type: {Type}", 
+                            webhookEvent.Type ?? "NULL");
+                    }
                 }
                 catch (Exception deserializationEx)
                 {

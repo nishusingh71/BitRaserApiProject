@@ -73,7 +73,11 @@ namespace BitRaserApiProject.Services
             var keyPreview = _dodoApiKey.Length > 20
                 ? $"{_dodoApiKey.Substring(0, 20)}..."
                 : "[SHORT KEY]";
+            
+            // 🔍 PRODUCTION DEBUG: Clearly identify LIVE vs TEST mode
+            var modeLabel = _isSandbox ? "TEST (SANDBOX)" : "LIVE (PRODUCTION)";
             _logger.LogWarning("🦤 Dodo Config Loaded:");
+            _logger.LogWarning("   - MODE: {Mode} ⚠️", modeLabel);
             _logger.LogWarning("   - Key: {KeyPreview}", keyPreview);
             _logger.LogWarning("   - Sandbox: {IsSandbox}", _isSandbox);
             _logger.LogWarning("   - Base URL: {BaseUrl}", _dodoBaseUrl);
@@ -120,11 +124,17 @@ namespace BitRaserApiProject.Services
                 };
 
                 // Add success/return URL if provided - Dodo uses return_url for redirects
+                // ✅ Automatically append order_id so frontend can fetch order details
                 if (!string.IsNullOrEmpty(request.SuccessUrl))
                 {
-                    dodoRequest["return_url"] = request.SuccessUrl;  // Primary redirect URL
-                    dodoRequest["success_url"] = request.SuccessUrl; // Fallback
-                    dodoRequest["redirect_url"] = request.SuccessUrl; // Alternative format
+                    var separator = request.SuccessUrl.Contains('?') ? '&' : '?';
+                    var successUrlWithOrderId = $"{request.SuccessUrl}{separator}order_id={order.OrderId}";
+                    
+                    dodoRequest["return_url"] = successUrlWithOrderId;  // Primary redirect URL
+                    dodoRequest["success_url"] = successUrlWithOrderId; // Fallback
+                    dodoRequest["redirect_url"] = successUrlWithOrderId; // Alternative format
+                    
+                    _logger.LogInformation("✅ Success URL with OrderId: {Url}", successUrlWithOrderId);
                 }
 
                 // Add cancel URL if provided (for failed/cancelled payments)
@@ -203,6 +213,7 @@ namespace BitRaserApiProject.Services
                 {
                     Success = true,
                     Message = "Checkout session created successfully",
+                    OrderId = order.OrderId, // ✅ Return OrderId for frontend
                     PaymentId = sessionId,
                     CheckoutUrl = checkoutUrl,
                     ExpiresAt = DateTime.UtcNow.AddHours(24)
@@ -282,6 +293,31 @@ namespace BitRaserApiProject.Services
             if (data?.PaymentId == null) return;
 
             _logger.LogInformation("💳 Processing payment.succeeded for PaymentId: {PaymentId}", data.PaymentId);
+            
+            // 🔍 PRODUCTION DEBUG: Log full payload structure for LIVE vs TEST comparison
+            _logger.LogWarning("🔍 LIVE PAYLOAD ANALYSIS - PaymentId: {PaymentId}", data.PaymentId);
+            _logger.LogWarning("  Amount: {Amount}", data.Amount ?? 0);
+            _logger.LogWarning("  TotalAmount: {TotalAmount}", data.TotalAmount ?? 0);
+            _logger.LogWarning("  SettlementAmount: {SettlementAmount}", data.SettlementAmount ?? 0);
+            _logger.LogWarning("  Tax: {Tax}", data.Tax ?? 0);
+            _logger.LogWarning("  Currency: {Currency}", data.Currency ?? "NULL");
+            _logger.LogWarning("  SettlementCurrency: {SettlementCurrency}", data.SettlementCurrency ?? "NULL");
+            _logger.LogWarning("  InvoiceId: {InvoiceId}", data.InvoiceId ?? "NULL");
+            _logger.LogWarning("  CardLastFour: {CardLastFour}", data.CardLastFour ?? "NULL");
+            _logger.LogWarning("  CardNetwork: {CardNetwork}", data.CardNetwork ?? "NULL");
+            _logger.LogWarning("  CardType: {CardType}", data.CardType ?? "NULL");
+            _logger.LogWarning("  PaymentMethod: {PaymentMethod}", data.PaymentMethod ?? "NULL");
+            _logger.LogWarning("  PaymentLink: {PaymentLink}", data.PaymentLink ?? "NULL");
+            _logger.LogWarning("  Customer.Name: {Name}", data.Customer?.Name ?? "NULL");
+            _logger.LogWarning("  Customer.Email: {Email}", data.Customer?.Email ?? "NULL");
+            _logger.LogWarning("  Customer.CustomerId: {CustomerId}", data.Customer?.CustomerId ?? "NULL");
+            _logger.LogWarning("  Customer.PhoneNumber: {Phone}", data.Customer?.PhoneNumber ?? "NULL");
+            _logger.LogWarning("  Billing.Street: {Street}", data.Billing?.Street ?? "NULL");
+            _logger.LogWarning("  Billing.City: {City}", data.Billing?.City ?? "NULL");
+            _logger.LogWarning("  Billing.State: {State}", data.Billing?.State ?? "NULL");
+            _logger.LogWarning("  Billing.Country: {Country}", data.Billing?.Country ?? "NULL");
+            _logger.LogWarning("  Billing.Zipcode: {Zip}", data.Billing?.Zipcode ?? "NULL");
+            _logger.LogWarning("  ProductCart Count: {Count}", data.ProductCart?.Count ?? 0);
             _logger.LogInformation("🔍 DEBUG: Webhook InvoiceId = '{InvoiceId}'", data.InvoiceId ?? "NULL");
 
             // Find the order
@@ -620,10 +656,72 @@ namespace BitRaserApiProject.Services
             _logger.LogInformation("🔑 Generated {Count} license keys for OrderId={OrderId}", 
                 licenseKeys.Count, order.OrderId);
 
-            await _context.SaveChangesAsync();
+            // 🔍 LOG ORDER ENTITY BEFORE SAVE (PRODUCTION DEBUG)
+            _logger.LogWarning("💾 SAVING ORDER TO DB - OrderId: {OrderId}, DodoPaymentId: {PaymentId}", 
+                order.OrderId, order.DodoPaymentId);
+            _logger.LogWarning("  Status: {Status}, PaidAt: {PaidAt}", order.Status, order.PaidAt);
+            _logger.LogWarning("  AmountCents: {Amount}, Currency: {Currency}", order.AmountCents, order.Currency);
+            _logger.LogWarning("  TaxAmountCents: {Tax}", order.TaxAmountCents);
+            _logger.LogWarning("  DodoInvoiceId: {InvoiceId}", order.DodoInvoiceId ?? "NULL");
+            _logger.LogWarning("  CardLastFour: {Card}, CardNetwork: {Network}, CardType: {Type}", 
+                order.CardLastFour ?? "NULL", order.CardNetwork ?? "NULL", order.CardType ?? "NULL");
+            _logger.LogWarning("  PaymentMethod: {Method}, PaymentLink: {Link}", 
+                order.PaymentMethod ?? "NULL", order.PaymentLink ?? "NULL");
+            _logger.LogWarning("  CustomerName: {First} {Last}", order.FirstName ?? "NULL", order.LastName ?? "NULL");
+            _logger.LogWarning("  CustomerEmail: {Email}, Phone: {Phone}", order.UserEmail, order.PhoneNumber ?? "NULL");
+            _logger.LogWarning("  DodoCustomerId: {CustomerId}", order.DodoCustomerId ?? "NULL");
+            _logger.LogWarning("  BillingAddress: {Address}", order.BillingAddress ?? "NULL");
+            _logger.LogWarning("  BillingCity: {City}, State: {State}, Country: {Country}, Zip: {Zip}", 
+                order.BillingCity ?? "NULL", order.BillingState ?? "NULL", 
+                order.BillingCountry ?? "NULL", order.BillingZip ?? "NULL");
+            _logger.LogWarning("  ProductId: {ProductId}, ProductName: {ProductName}", 
+                order.ProductId ?? "NULL", order.ProductName ?? "NULL");
+            _logger.LogWarning("  LicenseCount: {Count}, LicenseYears: {Years}, ExpiresAt: {Expires}", 
+                order.LicenseCount, order.LicenseYears, order.LicenseExpiresAt);
 
-            _logger.LogInformation("✅ Order updated: OrderId={OrderId}, Status={Status}",
-                order.OrderId, order.Status);
+            // Save to database with enhanced error handling
+            try
+            {
+                await _context.SaveChangesAsync();
+                _logger.LogInformation("✅ DB SAVE SUCCESS - OrderId: {OrderId}", order.OrderId);
+
+                // 🔍 POST-SAVE VERIFICATION (PRODUCTION DEBUG)
+                var savedOrder = await _context.Orders.AsNoTracking()
+                    .FirstOrDefaultAsync(o => o.OrderId == order.OrderId);
+                
+                if (savedOrder == null)
+                {
+                    _logger.LogError("🔴 CRITICAL: Order {OrderId} saved but not found in DB on verification!", order.OrderId);
+                }
+                else
+                {
+                    _logger.LogInformation("✅ POST-SAVE VERIFICATION: Order {OrderId} confirmed in DB", order.OrderId);
+                    
+                    // Verify critical fields persisted correctly
+                    if (savedOrder.CardLastFour != order.CardLastFour)
+                    {
+                        _logger.LogWarning("⚠️ DATA MISMATCH: CardLastFour - Expected '{Expected}' but got '{Actual}'", 
+                            order.CardLastFour, savedOrder.CardLastFour);
+                    }
+                    if (savedOrder.TaxAmountCents != order.TaxAmountCents)
+                    {
+                        _logger.LogWarning("⚠️ DATA MISMATCH: TaxAmountCents - Expected {Expected} but got {Actual}", 
+                            order.TaxAmountCents, savedOrder.TaxAmountCents);
+                    }
+                }
+            }
+            catch (DbUpdateException dbEx)
+            {
+                _logger.LogError(dbEx, "💥 DATABASE SAVE FAILED for OrderId {OrderId}: {Message}", 
+                    order.OrderId, dbEx.InnerException?.Message ?? dbEx.Message);
+                _logger.LogError("DB Error Details: {Details}", dbEx.ToString());
+                throw; // Re-throw to ensure webhook returns error
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ UNEXPECTED ERROR during DB save for OrderId {OrderId}", order.OrderId);
+                throw;
+            }
 
             // ✅ FETCH INVOICE FOR EMAIL - Using payment_id (more reliable than invoice_id)
             string? invoiceUrl = null;

@@ -678,6 +678,7 @@ namespace BitRaserApiProject.Models.DTOs
     {
         public bool Success { get; set; }
         public string? Message { get; set; }
+        public int? OrderId { get; set; } // ✅ Internal order ID for frontend tracking
         public string? PaymentId { get; set; }
         public string? CheckoutUrl { get; set; }
         public DateTime? ExpiresAt { get; set; }
