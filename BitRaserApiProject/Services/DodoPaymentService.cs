@@ -58,7 +58,7 @@ namespace BitRaserApiProject.Services
 
             _isSandbox = bool.TryParse(Environment.GetEnvironmentVariable("Dodo__Sandbox"), out var sandbox)
                 ? sandbox
-                : configuration.GetValue<bool>("Dodo:Sandbox", true);
+                : configuration.GetValue<bool>("Dodo:Sandbox", false);
 
             _dodoBaseUrl = _isSandbox
                 ? "https://test.dodopayments.com"
