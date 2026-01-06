@@ -132,16 +132,28 @@ namespace BitRaserApiProject.Services.Email
 
             foreach (var provider in _providers.OrderBy(p => p.Priority))
             {
+                // Initialize provider if not already initialized
+                try
+                {
+                    await provider.InitializeAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("⚠️ Failed to initialize {Provider}: {Error}", 
+                        provider.ProviderName, ex.Message);
+                    continue;
+                }
+
                 if (await provider.IsAvailableAsync())
                 {
                     var remaining = await provider.GetRemainingQuotaAsync();
-                    _logger.LogDebug("📊 {Provider}: Available, {Remaining} quota remaining",
-                        provider.ProviderName, remaining);
+                    _logger.LogInformation("📊 {Provider}: Available, {Remaining} quota remaining, Priority={Priority}",
+                        provider.ProviderName, remaining, provider.Priority);
                     available.Add(provider);
                 }
                 else
                 {
-                    _logger.LogDebug("📊 {Provider}: Not available (quota exhausted or unhealthy)",
+                    _logger.LogInformation("📊 {Provider}: Not available (quota exhausted or unhealthy)",
                         provider.ProviderName);
                 }
             }
