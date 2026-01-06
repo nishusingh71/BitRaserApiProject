@@ -1004,11 +1004,12 @@ namespace BitRaserApiProject.Services
 
             try
             {
-                _logger.LogInformation("🔐 Verifying Dodo webhook signature...");
-                _logger.LogDebug("   webhook-id: {Id}", webhookId);
-                _logger.LogDebug("   webhook-timestamp: {Ts}", webhookTimestamp);
-                _logger.LogDebug("   webhook-signature: {Sig}", webhookSignature);
-                _logger.LogDebug("   payload length: {Len}", payload?.Length);
+                _logger.LogWarning("🔐 Verifying Dodo webhook signature...");
+                _logger.LogWarning("   webhook-id: {Id}", webhookId);
+                _logger.LogWarning("   webhook-timestamp: {Ts}", webhookTimestamp);
+                _logger.LogWarning("   webhook-signature (first 30): {Sig}", webhookSignature?.Length > 30 ? webhookSignature.Substring(0, 30) : webhookSignature);
+                _logger.LogWarning("   payload length: {Len}", payload?.Length);
+                _logger.LogWarning("   Secret configured (first 15): {Sec}", _dodoWebhookSecret?.Length > 15 ? _dodoWebhookSecret.Substring(0, 15) : "[SHORT]");
 
                 // Step 1: Extract the actual secret key
                 // Dodo secrets are prefixed with "whsec_" followed by Base64 encoded key
@@ -1029,7 +1030,7 @@ namespace BitRaserApiProject.Services
                     receivedSig = webhookSignature.Substring(3);
                 }
                 
-                _logger.LogDebug("   Received signature (cleaned): {Sig}", receivedSig);
+                _logger.LogWarning("   Received signature (cleaned, first 30): {Sig}", receivedSig?.Length > 30 ? receivedSig.Substring(0, 30) : receivedSig);
 
                 // Step 3: Try BOTH secret formats - Base64 decoded AND raw UTF8
                 // This handles different Dodo environments/configurations
