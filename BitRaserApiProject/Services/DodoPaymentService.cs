@@ -1188,11 +1188,11 @@ namespace BitRaserApiProject.Services
             }
 
             // Add invoice link
-            if (!string.IsNullOrEmpty(invoiceUrl))
-            {
-                html += $@"
-            <p><a href='{invoiceUrl}' style='color: #1a1a2e;'>📄 Download Invoice (PDF)</a></p>";
-            }
+            // if (!string.IsNullOrEmpty(invoiceUrl))
+            // {
+            //     html += $@"
+            // <p><a href='{invoiceUrl}' style='color: #1a1a2e;'>📄 Download Invoice (PDF)</a></p>";
+            // }
 
             html += @"
             <p style='margin-top: 30px;'><strong>📎 Attachment:</strong> Complete order details and license keys are in the attached Excel file.</p>

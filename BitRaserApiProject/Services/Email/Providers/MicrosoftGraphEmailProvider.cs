@@ -130,7 +130,8 @@ namespace BitRaserApiProject.Services.Email.Providers
                 _logger.LogInformation("📧 MS Graph: Sending email to {Email} - Subject: {Subject}", 
                     request.ToEmail, request.Subject);
 
-                // Build message
+                // Build message - Note: Don't set 'From' for application permissions
+                // Graph API automatically sets sender based on userId
                 var message = new Message
                 {
                     Subject = request.Subject,
@@ -146,18 +147,11 @@ namespace BitRaserApiProject.Services.Email.Providers
                             EmailAddress = new EmailAddress
                             {
                                 Address = request.ToEmail,
-                                Name = request.ToName
+                                Name = request.ToName ?? request.ToEmail
                             }
                         }
-                    },
-                    From = new Recipient
-                    {
-                        EmailAddress = new EmailAddress
-                        {
-                            Address = request.FromEmail ?? _senderEmail,
-                            Name = request.FromName ?? "DSecure"
-                        }
                     }
+                    // From is NOT set - Graph API infers from userId for app-only auth
                 };
 
                 // Add Reply-To if specified
