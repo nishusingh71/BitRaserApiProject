@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using BitRaserApiProject.Models;
 using System.Text.Json.Serialization;
 using BitRaserApiProject.Services;
+using BitRaserApiProject.Services.Email;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -16,15 +17,19 @@ namespace BitRaserApiProject.Controllers
         private readonly ApplicationDbContext _context;
         private readonly ILogger<ContactFormSubmissionsController> _logger;
         private readonly ICacheService _cacheService;
+        private readonly IEmailOrchestrator? _emailOrchestrator;
+        private const string TEAM_EMAIL = "Support@dsecuretech.com";
 
         public ContactFormSubmissionsController(
             ApplicationDbContext context,
             ILogger<ContactFormSubmissionsController> logger,
-            ICacheService cacheService)
+            ICacheService cacheService,
+            IEmailOrchestrator? emailOrchestrator = null)
         {
             _context = context;
             _logger = logger;
             _cacheService = cacheService;
+            _emailOrchestrator = emailOrchestrator;
         }
 
         /// <summary>
@@ -78,6 +83,26 @@ namespace BitRaserApiProject.Controllers
 
                 _logger.LogInformation("New contact form submission from {Email} - ID: {Id}", 
                     submission.Email, submission.Id);
+
+                // ═══════════════════════════════════════════════════════════════
+                // EMAIL AUTOMATION - Send notifications via hybrid email system
+                // ═══════════════════════════════════════════════════════════════
+                if (_emailOrchestrator != null)
+                {
+                    try
+                    {
+                        // 1. Send internal team notification
+                        await SendTeamNotificationAsync(submission);
+                        
+                        // 2. Send auto-response to user
+                        await SendUserAutoResponseAsync(submission);
+                    }
+                    catch (Exception emailEx)
+                    {
+                        // Don't fail the submission if email fails
+                        _logger.LogWarning(emailEx, "Failed to send contact form emails for submission {Id}", submission.Id);
+                    }
+                }
 
                 var response = MapToResponse(submission);
 
@@ -472,6 +497,131 @@ namespace BitRaserApiProject.Controllers
             }
 
             return HttpContext.Connection.RemoteIpAddress?.ToString();
+        }
+
+        /// <summary>
+        /// Send notification email to internal team (Support@dsecuretech.com)
+        /// </summary>
+        private async Task SendTeamNotificationAsync(ContactFormSubmission submission)
+        {
+            if (_emailOrchestrator == null) return;
+
+            var emailRequest = new EmailSendRequest
+            {
+                ToEmail = TEAM_EMAIL,
+                ToName = "DSecure Support Team",
+                Subject = $"📩 New Contact Form: {submission.Name} - {submission.BusinessType ?? "General"}",
+                HtmlBody = GenerateTeamNotificationHtml(submission),
+                Type = EmailType.Notification
+            };
+
+            var result = await _emailOrchestrator.SendEmailAsync(emailRequest);
+            
+            if (result.Success)
+            {
+                _logger.LogInformation("✅ Team notification sent for submission {Id} via {Provider}", 
+                    submission.Id, result.ProviderUsed);
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ Failed to send team notification for submission {Id}: {Message}", 
+                    submission.Id, result.Message);
+            }
+        }
+
+        /// <summary>
+        /// Send auto-response email to the user who submitted the form
+        /// </summary>
+        private async Task SendUserAutoResponseAsync(ContactFormSubmission submission)
+        {
+            if (_emailOrchestrator == null) return;
+
+            var emailRequest = new EmailSendRequest
+            {
+                ToEmail = submission.Email,
+                ToName = submission.Name,
+                Subject = "Thank you for contacting DSecure Technologies",
+                HtmlBody = GenerateUserAutoResponseHtml(submission.Name),
+                Type = EmailType.Notification
+            };
+
+            var result = await _emailOrchestrator.SendEmailAsync(emailRequest);
+            
+            if (result.Success)
+            {
+                _logger.LogInformation("✅ Auto-response sent to {Email} via {Provider}", 
+                    submission.Email, result.ProviderUsed);
+            }
+            else
+            {
+                _logger.LogWarning("⚠️ Failed to send auto-response to {Email}: {Message}", 
+                    submission.Email, result.Message);
+            }
+        }
+
+        /// <summary>
+        /// Generate HTML for team notification email
+        /// </summary>
+        private string GenerateTeamNotificationHtml(ContactFormSubmission s)
+        {
+            return $@"
+<!DOCTYPE html><html><head><meta charset='utf-8'></head>
+<body style='font-family: Segoe UI, Arial; padding: 20px; background: #f5f5f5;'>
+<div style='max-width: 600px; margin: 0 auto; background: #fff; border-radius: 10px; overflow: hidden;'>
+<div style='background: linear-gradient(135deg, #1a1a2e, #16213e); color: #fff; padding: 25px;'>
+<h1 style='margin: 0; font-size: 20px;'>📩 New Contact Form Submission</h1>
+<p style='margin: 5px 0 0 0; opacity: 0.8;'>Submitted: {s.SubmittedAt:yyyy-MM-dd HH:mm} UTC</p>
+</div>
+<div style='padding: 25px;'>
+<table style='width: 100%; border-collapse: collapse;'>
+<tr><td style='padding: 8px 0; color: #666;'><strong>Name:</strong></td><td>{s.Name}</td></tr>
+<tr><td style='padding: 8px 0; color: #666;'><strong>Email:</strong></td><td><a href='mailto:{s.Email}'>{s.Email}</a></td></tr>
+<tr><td style='padding: 8px 0; color: #666;'><strong>Company:</strong></td><td>{s.Company ?? "Not provided"}</td></tr>
+<tr><td style='padding: 8px 0; color: #666;'><strong>Phone:</strong></td><td>{s.Phone ?? "Not provided"}</td></tr>
+<tr><td style='padding: 8px 0; color: #666;'><strong>Country:</strong></td><td>{s.Country ?? "Not provided"}</td></tr>
+<tr><td style='padding: 8px 0; color: #666;'><strong>Business Type:</strong></td><td>{s.BusinessType ?? "Not specified"}</td></tr>
+<tr><td style='padding: 8px 0; color: #666;'><strong>Solution Type:</strong></td><td>{s.SolutionType ?? "Not specified"}</td></tr>
+</table>
+<div style='background: #f8f9fa; padding: 15px; border-radius: 8px; margin-top: 20px;'>
+<strong>Message:</strong>
+<p style='margin: 10px 0 0 0; white-space: pre-wrap;'>{s.Message}</p>
+</div>
+</div>
+<div style='background: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #888;'>
+Submission ID: #{s.Id} • Source: {s.Source}
+</div>
+</div>
+</body></html>";
+        }
+
+        /// <summary>
+        /// Generate HTML for user auto-response email
+        /// </summary>
+        private string GenerateUserAutoResponseHtml(string userName)
+        {
+            return $@"
+<!DOCTYPE html><html><head><meta charset='utf-8'></head>
+<body style='font-family: Segoe UI, Arial; padding: 20px; background: #f5f5f5;'>
+<div style='max-width: 600px; margin: 0 auto; background: #fff; border-radius: 10px; overflow: hidden;'>
+<div style='background: linear-gradient(135deg, #1a1a2e, #16213e); color: #fff; padding: 30px; text-align: center;'>
+<h1 style='margin: 0; font-size: 24px;'>Thank You for Contacting Us!</h1>
+</div>
+<div style='padding: 30px;'>
+<p style='font-size: 16px;'>Dear {userName},</p>
+<p>Thank you for reaching out to DSecure Technologies. We have received your message and appreciate you taking the time to contact us.</p>
+<div style='background: #e8f5e9; padding: 20px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #4caf50;'>
+<p style='margin: 0; font-weight: 500;'>⏰ Our team will get back to you within 24 hours.</p>
+</div>
+<p>In the meantime, if you have any urgent queries, feel free to reach us at:</p>
+<p>📧 <a href='mailto:Support@dsecuretech.com'>Support@dsecuretech.com</a></p>
+<p style='margin-top: 25px;'>Best regards,<br><strong>DSecure Technologies Team</strong></p>
+</div>
+<div style='background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #888;'>
+© 2024 DSecure Technologies. All rights reserved.<br>
+<a href='https://dsecuretech.com' style='color: #1a1a2e;'>www.dsecuretech.com</a>
+</div>
+</div>
+</body></html>";
         }
 
         #endregion
