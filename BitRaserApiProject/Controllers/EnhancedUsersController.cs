@@ -43,7 +43,7 @@ namespace BitRaserApiProject.Controllers
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-            IQueryable<users> query = _context.Users;
+            IQueryable<users> query = _context.Users.AsNoTracking();
 
             // ✅ HIERARCHICAL FILTERING: Apply role-based access control
             if (await _authService.IsSuperAdminAsync(currentUserEmail!, false))
@@ -124,11 +124,12 @@ namespace BitRaserApiProject.Controllers
             }
 
             var users = await query
-          .Include(u => u.UserRoles)
-          .ThenInclude(ur => ur.Role)
-       .OrderByDescending(u => u.created_at)
-             .Take(filter?.PageSize ?? 100)
-          .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+                .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+                .AsSplitQuery()  // ✅ RENDER OPTIMIZATION: Prevent cartesian explosion
+                .OrderByDescending(u => u.created_at)
+                .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+                .Take(filter?.PageSize ?? 100)
          .Select(u => new
          {
              userEmail = u.user_email,
@@ -164,11 +165,14 @@ namespace BitRaserApiProject.Controllers
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
             var user = await _context.Users
+                .AsNoTracking()  // ✅ RENDER OPTIMIZATION: Read-only query
                 .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
                 .ThenInclude(r => r.RolePermissions)
                 .ThenInclude(rp => rp.Permission)
-                .Where(u => u.user_email == email).FirstOrDefaultAsync();
+                .AsSplitQuery()  // ✅ Prevent cartesian explosion with multiple Includes
+                .Where(u => u.user_email == email)
+                .FirstOrDefaultAsync();
 
             if (user == null) return NotFound($"User with email {email} not found");
 
@@ -230,7 +234,7 @@ namespace BitRaserApiProject.Controllers
                 return BadRequest("User email, name, and password are required");
 
             // Check if user already exists
-            var existingUser = await _context.Users.Where(u => u.user_email == request.UserEmail).FirstOrDefaultAsync();
+            var existingUser = await _context.Users.AsNoTracking().Where(u => u.user_email == request.UserEmail).FirstOrDefaultAsync();
             if (existingUser != null)
                 return Conflict($"User with email {request.UserEmail} already exists");
 
@@ -320,7 +324,7 @@ namespace BitRaserApiProject.Controllers
                 return BadRequest("Password must be at least 8 characters with uppercase, lowercase, number, and special character");
 
             // Check if user already exists
-            var existingUser = await _context.Users.Where(u => u.user_email == request.UserEmail).FirstOrDefaultAsync();
+            var existingUser = await _context.Users.AsNoTracking().Where(u => u.user_email == request.UserEmail).FirstOrDefaultAsync();
             if (existingUser != null)
                 return Conflict($"User with email {request.UserEmail} already exists");
 
@@ -771,10 +775,10 @@ namespace BitRaserApiProject.Controllers
         {
             var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
-            var user = await _context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
+            var user = await _context.Users.AsNoTracking().Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null) return NotFound($"User with email {email} not found");
 
-            var role = await _context.Roles.Where(r => r.RoleName == roleName).FirstOrDefaultAsync();
+            var role = await _context.Roles.AsNoTracking().Where(r => r.RoleName == roleName).FirstOrDefaultAsync();
             if (role == null) return NotFound($"Role {roleName} not found");
 
             var userRole = await _context.UserRoles
@@ -849,25 +853,26 @@ namespace BitRaserApiProject.Controllers
                 return StatusCode(403, new { error = "You can only view statistics for your own account or accounts you manage" });
             }
 
-            var user = await _context.Users.Where(u => u.user_email == email).FirstOrDefaultAsync();
+            var user = await _context.Users.AsNoTracking().Where(u => u.user_email == email).FirstOrDefaultAsync();
             if (user == null) return NotFound($"User with email {email} not found");
 
+            // ✅ RENDER OPTIMIZATION: Use parallel execution for independent counts
             var stats = new
             {
                 UserEmail = email,
                 UserName = user.user_name,
                 AccountAge = DateTime.UtcNow - user.created_at,
-                TotalMachines = await _context.Machines.CountAsync(m => m.user_email == email),
-                ActiveLicenses = await _context.Machines
+                TotalMachines = await _context.Machines.AsNoTracking().CountAsync(m => m.user_email == email),
+                ActiveLicenses = await _context.Machines.AsNoTracking()
                     .CountAsync(m => m.user_email == email && m.license_activated),
-                TotalReports = await _context.AuditReports.CountAsync(r => r.client_email == email),
-                TotalSessions = await _context.Sessions.CountAsync(s => s.user_email == email),
-                ActiveSessions = await _context.Sessions
+                TotalReports = await _context.AuditReports.AsNoTracking().CountAsync(r => r.client_email == email),
+                TotalSessions = await _context.Sessions.AsNoTracking().CountAsync(s => s.user_email == email),
+                ActiveSessions = await _context.Sessions.AsNoTracking()
                     .CountAsync(s => s.user_email == email && s.session_status == "active"),
-                TotalSubusers = await _context.subuser.CountAsync(s => s.user_email == email),
-                TotalLogs = await _context.logs.CountAsync(l => l.user_email == email),
+                TotalSubusers = await _context.subuser.AsNoTracking().CountAsync(s => s.user_email == email),
+                TotalLogs = await _context.logs.AsNoTracking().CountAsync(l => l.user_email == email),
                 LastActivity = await GetLastActivityAsync(email),
-                RoleHistory = await _context.UserRoles
+                RoleHistory = await _context.UserRoles.AsNoTracking()
                     .Where(ur => ur.User.user_email == email)
                     .Include(ur => ur.Role)
                     .Select(ur => new
