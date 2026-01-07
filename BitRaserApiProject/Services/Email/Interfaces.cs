@@ -61,6 +61,11 @@ namespace BitRaserApiProject.Services.Email
         public string? ReplyToEmail { get; set; }
         public List<string>? CcEmails { get; set; }
         public Dictionary<string, string>? CustomHeaders { get; set; }
+        
+        /// <summary>
+        /// If true, use only primary provider (MS Graph) and don't fallback to secondary providers
+        /// </summary>
+        public bool ForcePrimaryProvider { get; set; } = false;
     }
 
     /// <summary>

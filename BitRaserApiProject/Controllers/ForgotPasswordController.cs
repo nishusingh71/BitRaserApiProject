@@ -611,11 +611,11 @@ service = "ForgotPasswordController",
         #region Hybrid Email Helpers
 
         /// <summary>
-        /// Send OTP email via hybrid system (MS Graph > SendGrid) with fallback to old EmailService
+        /// Send OTP email via Microsoft Graph API ONLY (no SendGrid fallback)
         /// </summary>
         private async Task<bool> SendOtpEmailAsync(string email, string otp, string userName)
         {
-            // Try hybrid orchestrator first
+            // Use hybrid orchestrator with MS Graph as primary (no SendGrid fallback)
             if (_emailOrchestrator != null)
             {
                 try
@@ -626,7 +626,9 @@ service = "ForgotPasswordController",
                         ToName = userName,
                         Subject = $"Your DSecure Verification Code: {otp}",
                         HtmlBody = GenerateOtpEmailHtml(otp, userName),
-                        Type = EmailType.OTP
+                        Type = EmailType.OTP,
+                        // Force MS Graph only by using critical type
+                        ForcePrimaryProvider = true
                     };
 
                     var result = await _emailOrchestrator.SendEmailAsync(request);
@@ -639,18 +641,20 @@ service = "ForgotPasswordController",
                     }
                     else
                     {
-                        _logger.LogWarning("⚠️ Hybrid OTP email failed: {Message}, falling back to old service", 
-                            result.Message);
+                        _logger.LogError("❌ OTP email failed via MS Graph: {Message}", result.Message);
+                        return false;
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "⚠️ Hybrid OTP email exception, falling back to old service");
+                    _logger.LogError(ex, "❌ OTP email exception via MS Graph");
+                    return false;
                 }
             }
 
-            // Fallback to old EmailService
-            return await _emailService.SendOtpEmailAsync(email, otp, userName);
+            // No orchestrator available - log error but don't use SendGrid
+            _logger.LogError("❌ Email orchestrator not available for OTP email");
+            return false;
         }
 
         /// <summary>
