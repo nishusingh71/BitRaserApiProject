@@ -438,6 +438,10 @@ builder.Services.AddEnterpriseCaching(options =>
 // ✅ TIDB DIAGNOSTICS & OBSERVABILITY SYSTEM
 // Thread-safe in-memory metrics store (Singleton for global metrics)
 builder.Services.AddSingleton<DiagnosticsMetricsStore>();
+
+// ✅ PERFORMANCE: User Location Cache - Eliminates private cloud DB scanning
+// Caches user email → database location mapping for 10 minutes
+builder.Services.AddSingleton<IUserLocationCacheService, UserLocationCacheService>();
 // DB Command Interceptor for SQL query monitoring
 builder.Services.AddSingleton<DbDiagnosticsInterceptor>();
 // TiDB Health Service for cluster inspection
@@ -597,6 +601,26 @@ catch (Exception emailInitEx)
     // Don't crash app, but log critical warning
     Console.WriteLine($"⚠️ Failed to initialize email quotas: {emailInitEx.Message}");
     Console.WriteLine("⚠️ Email system may use fallback providers");
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ✅ PERFORMANCE: Warm up User Location Cache at Startup
+// Pre-populates cache with all users and subusers to eliminate private cloud scanning
+// ═══════════════════════════════════════════════════════════════════════════════
+try
+{
+    using var cacheScope = app.Services.CreateScope();
+    var locationCache = cacheScope.ServiceProvider.GetService<BitRaserApiProject.Services.IUserLocationCacheService>();
+    if (locationCache != null)
+    {
+        locationCache.WarmUpCacheAsync().GetAwaiter().GetResult();
+        Console.WriteLine("✅ User location cache warmed up successfully - login will be faster!");
+    }
+}
+catch (Exception cacheEx)
+{
+    Console.WriteLine($"⚠️ Failed to warm up user location cache: {cacheEx.Message}");
+    Console.WriteLine("⚠️ Cache will populate lazily on first request");
 }
 
 // CRITICAL FIX: Apply CORS BEFORE other middleware
