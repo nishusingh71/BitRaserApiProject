@@ -420,6 +420,9 @@ builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailProvider, Bit
 builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailOrchestrator, BitRaserApiProject.Services.Email.EmailProviderOrchestrator>();
 builder.Services.AddScoped<BitRaserApiProject.Services.Email.ExcelExportService>();
 
+// ✅ LICENSE VALIDATION HOOK - Placeholder for future product-based license integration
+builder.Services.AddScoped<BitRaserApiProject.Services.License.ILicenseValidationHook, BitRaserApiProject.Services.License.DefaultLicenseValidationHook>();
+
 // ✅ HYBRID MULTI-TENANT SUPPORT - Automatic tenant routing
 builder.Services.AddHttpContextAccessor();  // Required for reading JWT claims
 builder.Services.AddScoped<ITenantConnectionService, TenantConnectionService>();
