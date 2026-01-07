@@ -196,7 +196,34 @@ namespace BitRaserApiProject.Controllers
                 var user = await _context.Users
                     .Where(u => u.user_email == request.Email)
                     .FirstOrDefaultAsync();
-                if (user != null && !string.IsNullOrEmpty(user.hash_password) && BCrypt.Net.BCrypt.Verify(request.Password, user.hash_password))
+                
+                // ✅ ENHANCED LOGIN: Check hash_password (BCrypt) first, fallback to user_password (plain text)
+                bool passwordValid = false;
+                if (user != null)
+                {
+                    // Priority 1: Check hash_password with BCrypt (secure)
+                    if (!string.IsNullOrEmpty(user.hash_password))
+                    {
+                        try
+                        {
+                            passwordValid = BCrypt.Net.BCrypt.Verify(request.Password, user.hash_password);
+                            _logger.LogInformation("🔐 BCrypt verification result: {Result}", passwordValid);
+                        }
+                        catch (Exception bcryptEx)
+                        {
+                            _logger.LogWarning(bcryptEx, "⚠️ BCrypt verification failed, trying plain text fallback");
+                        }
+                    }
+                    
+                    // Priority 2: Fallback to user_password plain text comparison (legacy)
+                    if (!passwordValid && !string.IsNullOrEmpty(user.user_password))
+                    {
+                        passwordValid = (user.user_password == request.Password);
+                        _logger.LogInformation("🔐 Plain text verification result: {Result}", passwordValid);
+                    }
+                }
+                
+                if (user != null && passwordValid)
                 {
                     userEmail = request.Email;
                     isSubuser = false;
