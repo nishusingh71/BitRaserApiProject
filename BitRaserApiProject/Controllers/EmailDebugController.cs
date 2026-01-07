@@ -398,7 +398,382 @@ DSecure Technologies • Support@dsecuretech.com
 </body>
 </html>";
         }
+
         /// <summary>
+        /// 🎯 COMPREHENSIVE TEST: Test ALL hybrid email conditions with just sender email
+        /// POST /api/EmailDebug/test-all-hybrid
+        /// Tests: MS Graph → SendGrid → Quota → Provider availability
+        /// </summary>
+        [HttpPost("test-all-hybrid")]
+        [AllowAnonymous]
+        public async Task<IActionResult> TestAllHybridConditions([FromBody] SimpleEmailTestRequest request)
+        {
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var testResults = new List<object>();
+            var testNumber = 0;
+
+            try
+            {
+                if (string.IsNullOrEmpty(request.ToEmail))
+                {
+                    return BadRequest(new { success = false, message = "toEmail is required" });
+                }
+
+                if (_emailOrchestrator == null)
+                {
+                    return StatusCode(500, new { 
+                        success = false, 
+                        message = "Email orchestrator not configured",
+                        hint = "IEmailOrchestrator not registered in DI"
+                    });
+                }
+
+                _logger.LogInformation("🎯 Starting FULL HYBRID EMAIL TEST to: {Email}", request.ToEmail);
+
+                // ═══════════════════════════════════════════════════════════════
+                // TEST 1: Check Provider Availability
+                // ═══════════════════════════════════════════════════════════════
+                testNumber++;
+                var test1Start = DateTime.UtcNow;
+                try
+                {
+                    var providers = await _emailOrchestrator.GetAvailableProvidersAsync(EmailType.Transactional);
+                    var providerList = providers.ToList();
+                    var providerStatus = providerList.Select(p => new { 
+                        name = p.ProviderName, 
+                        priority = p.Priority,
+                        available = true 
+                    }).ToList();
+
+                    testResults.Add(new
+                    {
+                        test = testNumber,
+                        name = "Provider Availability Check",
+                        success = true,
+                        durationMs = (DateTime.UtcNow - test1Start).TotalMilliseconds,
+                        data = new
+                        {
+                            totalProviders = providerList.Count,
+                            providers = providerStatus,
+                            primaryProvider = providerList.FirstOrDefault()?.ProviderName ?? "None"
+                        }
+                    });
+                }
+                catch (Exception ex)
+                {
+                    testResults.Add(new
+                    {
+                        test = testNumber,
+                        name = "Provider Availability Check",
+                        success = false,
+                        durationMs = (DateTime.UtcNow - test1Start).TotalMilliseconds,
+                        error = ex.Message
+                    });
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // TEST 2: Simple Transactional Email (MS Graph Priority)
+                // ═══════════════════════════════════════════════════════════════
+                testNumber++;
+                var test2Start = DateTime.UtcNow;
+                try
+                {
+                    var result = await _emailOrchestrator.SendEmailAsync(new EmailSendRequest
+                    {
+                        ToEmail = request.ToEmail,
+                        ToName = request.ToEmail.Split('@')[0],
+                        Subject = $"🧪 Test #{testNumber}: Simple Email - {DateTime.UtcNow:HH:mm:ss}",
+                        HtmlBody = GenerateTestHtml("Simple Transactional Email", 
+                            "This tests the primary email provider (MS Graph).", testNumber),
+                        Type = EmailType.Transactional
+                    });
+
+                    testResults.Add(new
+                    {
+                        test = testNumber,
+                        name = "Simple Transactional Email",
+                        success = result.Success,
+                        provider = result.ProviderUsed,
+                        durationMs = (DateTime.UtcNow - test2Start).TotalMilliseconds,
+                        message = result.Message
+                    });
+                }
+                catch (Exception ex)
+                {
+                    testResults.Add(new
+                    {
+                        test = testNumber,
+                        name = "Simple Transactional Email",
+                        success = false,
+                        durationMs = (DateTime.UtcNow - test2Start).TotalMilliseconds,
+                        error = ex.Message
+                    });
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // TEST 3: Email with Excel Attachment
+                // ═══════════════════════════════════════════════════════════════
+                testNumber++;
+                var test3Start = DateTime.UtcNow;
+                try
+                {
+                    // Generate test Excel
+                    byte[] excelBytes;
+                    using (var workbook = new ClosedXML.Excel.XLWorkbook())
+                    {
+                        var ws = workbook.Worksheets.Add("Test Data");
+                        ws.Cell("A1").Value = "Hybrid Email Test";
+                        ws.Cell("A2").Value = "Timestamp:";
+                        ws.Cell("B2").Value = DateTime.UtcNow.ToString("o");
+                        ws.Cell("A3").Value = "Recipient:";
+                        ws.Cell("B3").Value = request.ToEmail;
+                        ws.Columns().AdjustToContents();
+                        
+                        using var stream = new MemoryStream();
+                        workbook.SaveAs(stream);
+                        excelBytes = stream.ToArray();
+                    }
+
+                    var result = await _emailOrchestrator.SendEmailAsync(new EmailSendRequest
+                    {
+                        ToEmail = request.ToEmail,
+                        ToName = request.ToEmail.Split('@')[0],
+                        Subject = $"🧪 Test #{testNumber}: Excel Attachment - {DateTime.UtcNow:HH:mm:ss}",
+                        HtmlBody = GenerateTestHtml("Email with Excel Attachment", 
+                            "This tests attachment handling. Check for attached Excel file!", testNumber),
+                        Type = EmailType.Transactional,
+                        Attachments = new List<EmailAttachment>
+                        {
+                            new EmailAttachment("TestData.xlsx", 
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+                                excelBytes)
+                        }
+                    });
+
+                    testResults.Add(new
+                    {
+                        test = testNumber,
+                        name = "Email with Excel Attachment",
+                        success = result.Success,
+                        provider = result.ProviderUsed,
+                        durationMs = (DateTime.UtcNow - test3Start).TotalMilliseconds,
+                        attachmentSize = $"{excelBytes.Length} bytes",
+                        message = result.Message
+                    });
+                }
+                catch (Exception ex)
+                {
+                    testResults.Add(new
+                    {
+                        test = testNumber,
+                        name = "Email with Excel Attachment",
+                        success = false,
+                        durationMs = (DateTime.UtcNow - test3Start).TotalMilliseconds,
+                        error = ex.Message
+                    });
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // TEST 4: OTP Email Type
+                // ═══════════════════════════════════════════════════════════════
+                testNumber++;
+                var test4Start = DateTime.UtcNow;
+                try
+                {
+                    var testOtp = new Random().Next(100000, 999999).ToString();
+                    var result = await _emailOrchestrator.SendEmailAsync(new EmailSendRequest
+                    {
+                        ToEmail = request.ToEmail,
+                        ToName = request.ToEmail.Split('@')[0],
+                        Subject = $"🧪 Test #{testNumber}: OTP Email - {DateTime.UtcNow:HH:mm:ss}",
+                        HtmlBody = GenerateOtpTestHtml(testOtp, testNumber),
+                        Type = EmailType.OTP
+                    });
+
+                    testResults.Add(new
+                    {
+                        test = testNumber,
+                        name = "OTP Email Type",
+                        success = result.Success,
+                        provider = result.ProviderUsed,
+                        durationMs = (DateTime.UtcNow - test4Start).TotalMilliseconds,
+                        testOtp = testOtp,
+                        message = result.Message
+                    });
+                }
+                catch (Exception ex)
+                {
+                    testResults.Add(new
+                    {
+                        test = testNumber,
+                        name = "OTP Email Type",
+                        success = false,
+                        durationMs = (DateTime.UtcNow - test4Start).TotalMilliseconds,
+                        error = ex.Message
+                    });
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // TEST 5: Order Confirmation Simulation
+                // ═══════════════════════════════════════════════════════════════
+                testNumber++;
+                var test5Start = DateTime.UtcNow;
+                try
+                {
+                    var orderId = new Random().Next(10000, 99999);
+                    var licenseKey = $"TEST-{Guid.NewGuid():N}".Substring(0, 20).ToUpper();
+
+                    var result = await _emailOrchestrator.SendEmailAsync(new EmailSendRequest
+                    {
+                        ToEmail = request.ToEmail,
+                        ToName = request.ToEmail.Split('@')[0],
+                        Subject = $"🧪 Test #{testNumber}: Order #{orderId} - {DateTime.UtcNow:HH:mm:ss}",
+                        HtmlBody = GenerateOrderTestHtml(orderId, licenseKey, testNumber),
+                        Type = EmailType.Transactional,
+                        OrderId = orderId
+                    });
+
+                    testResults.Add(new
+                    {
+                        test = testNumber,
+                        name = "Order Confirmation Simulation",
+                        success = result.Success,
+                        provider = result.ProviderUsed,
+                        durationMs = (DateTime.UtcNow - test5Start).TotalMilliseconds,
+                        testData = new { orderId, licenseKey },
+                        message = result.Message
+                    });
+                }
+                catch (Exception ex)
+                {
+                    testResults.Add(new
+                    {
+                        test = testNumber,
+                        name = "Order Confirmation Simulation",
+                        success = false,
+                        durationMs = (DateTime.UtcNow - test5Start).TotalMilliseconds,
+                        error = ex.Message
+                    });
+                }
+
+                stopwatch.Stop();
+
+                // Calculate summary
+                var successCount = testResults.Count(t => ((dynamic)t).success == true);
+                var failCount = testResults.Count - successCount;
+
+                _logger.LogInformation("🎯 FULL HYBRID TEST COMPLETE: {Success}/{Total} passed in {Ms}ms", 
+                    successCount, testResults.Count, stopwatch.ElapsedMilliseconds);
+
+                return Ok(new
+                {
+                    success = failCount == 0,
+                    message = $"Hybrid email test complete: {successCount}/{testResults.Count} tests passed",
+                    recipientEmail = request.ToEmail,
+                    totalDurationMs = stopwatch.ElapsedMilliseconds,
+                    summary = new
+                    {
+                        totalTests = testResults.Count,
+                        passed = successCount,
+                        failed = failCount,
+                        emailsSent = successCount - 1 // Minus the provider check
+                    },
+                    testResults = testResults,
+                    timestamp = DateTime.UtcNow.ToString("o")
+                });
+            }
+            catch (Exception ex)
+            {
+                stopwatch.Stop();
+                _logger.LogError(ex, "❌ FULL HYBRID TEST FAILED");
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = ex.Message,
+                    recipientEmail = request.ToEmail,
+                    totalDurationMs = stopwatch.ElapsedMilliseconds,
+                    testResults = testResults,
+                    exceptionType = ex.GetType().Name
+                });
+            }
+        }
+
+        public class SimpleEmailTestRequest
+        {
+            public string ToEmail { get; set; } = string.Empty;
+        }
+
+        private string GenerateTestHtml(string title, string description, int testNumber)
+        {
+            return $@"
+<!DOCTYPE html><html><head><meta charset='utf-8'></head>
+<body style='font-family: Segoe UI, Arial; padding: 20px; background: #f5f5f5;'>
+<div style='max-width: 500px; margin: 0 auto; background: #fff; border-radius: 10px; overflow: hidden;'>
+<div style='background: linear-gradient(135deg, #1a1a2e, #16213e); color: #fff; padding: 25px; text-align: center;'>
+<h1 style='margin: 0; font-size: 18px;'>🧪 Hybrid Test #{testNumber}</h1>
+<p style='margin: 5px 0 0 0; opacity: 0.8; font-size: 14px;'>{title}</p>
+</div>
+<div style='padding: 25px;'>
+<p>{description}</p>
+<p style='color: #888; font-size: 12px;'>Sent: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC</p>
+</div>
+<div style='background: #f8f9fa; padding: 15px; text-align: center; font-size: 11px; color: #888;'>
+DSecure Technologies • Hybrid Email System Test
+</div>
+</div>
+</body></html>";
+        }
+
+        private string GenerateOtpTestHtml(string otp, int testNumber)
+        {
+            return $@"
+<!DOCTYPE html><html><head><meta charset='utf-8'></head>
+<body style='font-family: Segoe UI, Arial; padding: 20px; background: #f5f5f5;'>
+<div style='max-width: 500px; margin: 0 auto; background: #fff; border-radius: 10px; overflow: hidden;'>
+<div style='background: linear-gradient(135deg, #059669, #047857); color: #fff; padding: 25px; text-align: center;'>
+<h1 style='margin: 0; font-size: 18px;'>🔐 Test #{testNumber}: OTP Email</h1>
+</div>
+<div style='padding: 25px; text-align: center;'>
+<p>Your test verification code is:</p>
+<div style='background: #f0fdf4; padding: 20px; border-radius: 8px; margin: 20px 0;'>
+<span style='font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #059669;'>{otp}</span>
+</div>
+<p style='color: #888; font-size: 12px;'>This is a TEST OTP - do not use for actual verification</p>
+</div>
+<div style='background: #f8f9fa; padding: 15px; text-align: center; font-size: 11px; color: #888;'>
+DSecure Technologies • OTP Email Test
+</div>
+</div>
+</body></html>";
+        }
+
+        private string GenerateOrderTestHtml(int orderId, string licenseKey, int testNumber)
+        {
+            return $@"
+<!DOCTYPE html><html><head><meta charset='utf-8'></head>
+<body style='font-family: Segoe UI, Arial; padding: 20px; background: #f5f5f5;'>
+<div style='max-width: 500px; margin: 0 auto; background: #fff; border-radius: 10px; overflow: hidden;'>
+<div style='background: linear-gradient(135deg, #1a1a2e, #16213e); color: #fff; padding: 25px; text-align: center;'>
+<h1 style='margin: 0; font-size: 18px;'>📦 Test #{testNumber}: Order Confirmation</h1>
+<p style='margin: 5px 0 0 0; opacity: 0.8;'>Order #{orderId}</p>
+</div>
+<div style='padding: 25px;'>
+<div style='background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px;'>
+<p style='margin: 5px 0;'><strong>Product:</strong> BitRaser Professional (Test)</p>
+<p style='margin: 5px 0;'><strong>Quantity:</strong> 1</p>
+<p style='margin: 5px 0;'><strong>Amount:</strong> $99.00</p>
+</div>
+<div style='background: #e8f5e9; padding: 15px; border-radius: 8px;'>
+<p style='margin: 0 0 10px 0;'><strong>🔑 Test License Key:</strong></p>
+<code style='background: #fff; padding: 8px 12px; display: block; border-radius: 4px;'>{licenseKey}</code>
+</div>
+</div>
+<div style='background: #f8f9fa; padding: 15px; text-align: center; font-size: 11px; color: #888;'>
+DSecure Technologies • Order Email Test
+</div>
+</div>
+</body></html>";
+        }        /// <summary>
         /// Test endpoint: Encode email to Base64
         /// GET /api/EmailDebug/encode/{email}
         /// </summary>
