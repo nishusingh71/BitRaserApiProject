@@ -5,9 +5,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using BCrypt.Net;
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]

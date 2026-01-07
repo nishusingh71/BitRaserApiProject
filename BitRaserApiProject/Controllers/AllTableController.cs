@@ -3,17 +3,17 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json.Serialization;
 using BCrypt.Net;
-using BitRaserApiProject.Attributes;
-using BitRaserApiProject.Factories;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
+using DSecureApi.Attributes;
+using DSecureApi.Factories;
+using DSecureApi.Models;
+using DSecureApi.Services;
+using DSecureApi.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Sessions management controller

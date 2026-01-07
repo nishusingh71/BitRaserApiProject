@@ -2,7 +2,7 @@ using Microsoft.Extensions.Caching.Memory;
 using System.Collections.Concurrent;
 using System.Security.Claims;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Enterprise-grade caching service implementation.

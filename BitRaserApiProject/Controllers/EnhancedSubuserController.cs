@@ -1,17 +1,17 @@
 using System.Security.Claims;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Attributes;
-using BitRaserApiProject.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
+using DSecureApi.Services;
+using DSecureApi.Attributes;
+using DSecureApi.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
 using BCrypt.Net;
 using System.ComponentModel.DataAnnotations;
-using BitRaserApiProject.Factories;
+using DSecureApi.Factories;
 using Microsoft.Extensions.Logging; // ✅ ADDED
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Enhanced Subuser management controller with email-based operations and role-based access control

@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace BitRaserApiProject.Helpers
+namespace DSecureApi.Helpers
 {
     /// <summary>
     /// Helper class for standardized DateTime operations across the application

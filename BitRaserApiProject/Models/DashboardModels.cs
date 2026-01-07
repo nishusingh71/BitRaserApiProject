@@ -1,6 +1,6 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 
-namespace BitRaserApiProject.Models
+namespace DSecureApi.Models
 {
     // Dashboard-specific DTOs (renamed to avoid conflicts with Models/DTOs/UserDtos.cs)
     

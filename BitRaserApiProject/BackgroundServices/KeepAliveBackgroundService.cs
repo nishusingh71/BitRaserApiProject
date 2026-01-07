@@ -1,4 +1,4 @@
-namespace BitRaserApiProject.BackgroundServices
+namespace DSecureApi.BackgroundServices
 {
     /// <summary>
     /// Background service to prevent Render.com free tier from spinning down

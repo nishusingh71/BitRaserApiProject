@@ -1,4 +1,4 @@
-﻿namespace BitRaserApiProject.Models.DTOs
+namespace DSecureApi.Models.DTOs
 {
     public class License
     {

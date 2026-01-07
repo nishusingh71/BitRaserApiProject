@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 
-namespace BitRaserApiProject.Diagnostics
+namespace DSecureApi.Diagnostics
 {
     /// <summary>
     /// Admin-only diagnostics controller for production incident investigation.

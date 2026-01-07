@@ -2,7 +2,7 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace BitRaserApiProject.Converters
+namespace DSecureApi.Converters
 {
     /// <summary>
     /// Custom JSON converter for DateTime to ensure ISO 8601 format

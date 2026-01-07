@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace BitRaserApiProject.Models
+namespace DSecureApi.Models
 {
     /// <summary>
     /// User Activity & Reports DTOs - Based on BitRaser Dashboard Screenshots

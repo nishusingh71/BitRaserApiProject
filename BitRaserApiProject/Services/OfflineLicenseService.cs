@@ -2,10 +2,10 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Factories;
+using DSecureApi.Models;
+using DSecureApi.Factories;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     #region DTOs
 

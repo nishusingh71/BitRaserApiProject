@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using MySql.Data.MySqlClient;
 
-namespace BitRaserApiProject.Diagnostics
+namespace DSecureApi.Diagnostics
 {
     /// <summary>
     /// Service to inspect TiDB cluster health using SQL queries.

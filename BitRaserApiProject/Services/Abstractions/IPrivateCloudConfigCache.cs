@@ -1,4 +1,4 @@
-namespace BitRaserApiProject.Services.Abstractions
+namespace DSecureApi.Services.Abstractions
 {
     public interface IPrivateCloudConfigCache
     {

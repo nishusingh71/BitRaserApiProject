@@ -8,14 +8,14 @@ using System.Text;
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;  // ✅ ADD: For JsonPropertyName
 using BCrypt.Net;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Attributes;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Helpers;
-using BitRaserApiProject.Utilities;  // For Base64EmailEncoder
-using BitRaserApiProject.Factories;  // ✅ ADD: For DynamicDbContextFactory
+using DSecureApi.Services;
+using DSecureApi.Attributes;
+using DSecureApi.Models;
+using DSecureApi.Helpers;
+using DSecureApi.Utilities;  // For Base64EmailEncoder
+using DSecureApi.Factories;  // ✅ ADD: For DynamicDbContextFactory
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]

@@ -3,7 +3,7 @@ using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// License export data model

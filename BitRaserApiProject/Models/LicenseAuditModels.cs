@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace BitRaserApiProject.Models
+namespace DSecureApi.Models
 {
     /// <summary>
     /// License Audit Report Models - Based on BitRaser License Audit Report Modal UI

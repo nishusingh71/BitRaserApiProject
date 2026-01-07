@@ -1,6 +1,6 @@
-using BitRaserApiProject.Middleware;
+using DSecureApi.Middleware;
 
-namespace BitRaserApiProject.BackgroundServices
+namespace DSecureApi.BackgroundServices
 {
     /// <summary>
     /// Background service to periodically cleanup expired rate limit entries

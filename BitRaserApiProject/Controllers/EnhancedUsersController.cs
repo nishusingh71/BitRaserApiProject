@@ -1,13 +1,13 @@
 using System.Security.Claims;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Attributes;
+using DSecureApi.Services;
+using DSecureApi.Attributes;
 using BCrypt.Net;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Enhanced Users management controller with comprehensive email-based operations and role-based access control

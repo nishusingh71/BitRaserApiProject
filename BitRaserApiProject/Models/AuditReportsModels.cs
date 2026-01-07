@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace BitRaserApiProject.Models
+namespace DSecureApi.Models
 {
   /// <summary>
     /// Audit Reports Models - Based on BitRaser Audit Reports UI

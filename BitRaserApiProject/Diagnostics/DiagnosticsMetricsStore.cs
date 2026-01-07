@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace BitRaserApiProject.Diagnostics
+namespace DSecureApi.Diagnostics
 {
     /// <summary>
     /// Thread-safe in-memory metrics store for database diagnostics.

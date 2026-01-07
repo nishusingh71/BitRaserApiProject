@@ -1,15 +1,15 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using BitRaserApiProject;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Repositories;
-using BitRaserApiProject.BackgroundServices;
-using BitRaserApiProject.Middleware;
-using BitRaserApiProject.Swagger;
-using BitRaserApiProject.Converters;  // ✅ ADD: Custom DateTime Converters
-using BitRaserApiProject.Factories;   // ✅ ADD: Factories for multi-tenant support
-using BitRaserApiProject.Diagnostics; // ✅ ADD: TiDB Diagnostics & Observability
+using DSecureApi;
+using DSecureApi.Services;
+using DSecureApi.Repositories;
+using DSecureApi.BackgroundServices;
+using DSecureApi.Middleware;
+using DSecureApi.Swagger;
+using DSecureApi.Converters;  // ✅ ADD: Custom DateTime Converters
+using DSecureApi.Factories;   // ✅ ADD: Factories for multi-tenant support
+using DSecureApi.Diagnostics; // ✅ ADD: TiDB Diagnostics & Observability
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.DataProtection;  // ✅ ADD: For DataProtection in Docker
 using Microsoft.EntityFrameworkCore;
@@ -106,7 +106,7 @@ if (!keysDirectory.Exists)
 }
 
 builder.Services.AddDataProtection()
-    .SetApplicationName("BitRaserApiProject")
+    .SetApplicationName("DSecureApi")
     .PersistKeysToFileSystem(keysDirectory)
     .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
 
@@ -362,8 +362,8 @@ builder.Services.AddSingleton<ILicenseKeyGenerator, LicenseKeyGenerator>(); // �
 builder.Services.AddScoped<IPurchaseDomainService, PurchaseDomainService>(); // ✅ Purchase Domain Service
 
 // ✅ PERFORMANCE: Centralized caching services
-builder.Services.AddScoped<BitRaserApiProject.Services.Abstractions.IUserContextService, BitRaserApiProject.Services.Implementations.UserContextService>();
-builder.Services.AddScoped<BitRaserApiProject.Services.Abstractions.IPrivateCloudConfigCache, BitRaserApiProject.Services.Implementations.PrivateCloudConfigCache>();
+builder.Services.AddScoped<DSecureApi.Services.Abstractions.IUserContextService, DSecureApi.Services.Implementations.UserContextService>();
+builder.Services.AddScoped<DSecureApi.Services.Abstractions.IPrivateCloudConfigCache, DSecureApi.Services.Implementations.PrivateCloudConfigCache>();
 
 // ✅ FORGOT PASSWORD SERVICES - OTP AND EMAIL (OLD - RETAINED FOR BACKWARD COMPATIBILITY)
 builder.Services.AddSingleton<IOtpService, OtpService>();
@@ -414,14 +414,14 @@ builder.Services.AddHttpClient("DodoApi", client =>
 builder.Services.AddScoped<IDodoPaymentService, DodoPaymentService>();
 
 // ✅ HYBRID EMAIL SYSTEM - SendGrid + Microsoft Graph with Quota Management
-builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailQuotaService, BitRaserApiProject.Services.Email.EmailQuotaService>();
-builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailProvider, BitRaserApiProject.Services.Email.Providers.SendGridEmailProvider>();
-builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailProvider, BitRaserApiProject.Services.Email.Providers.MicrosoftGraphEmailProvider>();
-builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailOrchestrator, BitRaserApiProject.Services.Email.EmailProviderOrchestrator>();
-builder.Services.AddScoped<BitRaserApiProject.Services.Email.ExcelExportService>();
+builder.Services.AddScoped<DSecureApi.Services.Email.IEmailQuotaService, DSecureApi.Services.Email.EmailQuotaService>();
+builder.Services.AddScoped<DSecureApi.Services.Email.IEmailProvider, DSecureApi.Services.Email.Providers.SendGridEmailProvider>();
+builder.Services.AddScoped<DSecureApi.Services.Email.IEmailProvider, DSecureApi.Services.Email.Providers.MicrosoftGraphEmailProvider>();
+builder.Services.AddScoped<DSecureApi.Services.Email.IEmailOrchestrator, DSecureApi.Services.Email.EmailProviderOrchestrator>();
+builder.Services.AddScoped<DSecureApi.Services.Email.ExcelExportService>();
 
 // ✅ LICENSE VALIDATION HOOK - Placeholder for future product-based license integration
-builder.Services.AddScoped<BitRaserApiProject.Services.License.ILicenseValidationHook, BitRaserApiProject.Services.License.DefaultLicenseValidationHook>();
+builder.Services.AddScoped<DSecureApi.Services.License.ILicenseValidationHook, DSecureApi.Services.License.DefaultLicenseValidationHook>();
 
 // ✅ HYBRID MULTI-TENANT SUPPORT - Automatic tenant routing
 builder.Services.AddHttpContextAccessor();  // Required for reading JWT claims
@@ -533,9 +533,9 @@ builder.Services.AddSwaggerGen(c =>
     // ❌ BASE64 EMAIL ENCODING FILTERS - DISABLED FOR SWAGGER UI
     // Backend still handles Base64 encoding/decoding automatically
     // Swagger UI shows normal emails for better user experience
-    // c.ParameterFilter<BitRaserApiProject.Filters.Base64EmailParameterFilter>();
-    // c.OperationFilter<BitRaserApiProject.Filters.Base64EmailOperationFilter>();
-    // c.DocumentFilter<BitRaserApiProject.Filters.Base64EmailDocumentFilter>();
+    // c.ParameterFilter<DSecureApi.Filters.Base64EmailParameterFilter>();
+    // c.OperationFilter<DSecureApi.Filters.Base64EmailOperationFilter>();
+    // c.DocumentFilter<DSecureApi.Filters.Base64EmailDocumentFilter>();
 
     // Enhanced security definitions
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
@@ -581,7 +581,7 @@ var app = builder.Build();
 try
 {
     using var scope = app.Services.CreateScope();
-    var quotaService = scope.ServiceProvider.GetService<BitRaserApiProject.Services.Email.IEmailQuotaService>();
+    var quotaService = scope.ServiceProvider.GetService<DSecureApi.Services.Email.IEmailQuotaService>();
     if (quotaService != null)
     {
         quotaService.InitializeQuotasAsync().GetAwaiter().GetResult();
@@ -774,7 +774,7 @@ app.UseAuthorization();
 
 // ✅ IP BINDING - Prevent Token Theft
 // Verify that the request IP matches the token's bound IP
-app.UseMiddleware<BitRaserApiProject.Middleware.IpBindingMiddleware>();
+app.UseMiddleware<DSecureApi.Middleware.IpBindingMiddleware>();
 
 // ✅ RATE LIMITING MIDDLEWARE - Protect against abuse
 // Place AFTER Authentication so we can identify users

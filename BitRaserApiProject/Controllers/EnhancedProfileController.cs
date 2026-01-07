@@ -1,12 +1,12 @@
 using System.Security.Claims;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Attributes;
+using DSecureApi.Services;
+using DSecureApi.Attributes;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Enhanced Profile Controller with hierarchical user management and comprehensive profile operations

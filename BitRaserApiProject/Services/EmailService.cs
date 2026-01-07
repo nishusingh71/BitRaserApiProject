@@ -8,7 +8,7 @@ using System.Net;
 using SendGrid;
 using SendGrid.Helpers.Mail;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     public interface IEmailService
     {
@@ -104,7 +104,7 @@ namespace BitRaserApiProject.Services
                     _logger.LogInformation("📎 Downloading attachment from: {Url}", attachmentUrl);
                     using var httpClient = new HttpClient();
                     // Add User-Agent to avoid 403 Forbidden from some servers
-                    httpClient.DefaultRequestHeaders.Add("User-Agent", "BitRaserApiProject/1.0");
+                    httpClient.DefaultRequestHeaders.Add("User-Agent", "DSecureApi/1.0");
                     attachmentData = await httpClient.GetByteArrayAsync(attachmentUrl);
                     
                     try 

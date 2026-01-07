@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace BitRaserApiProject.Models
+namespace DSecureApi.Models
 {
     /// <summary>
     /// Performance Metrics Models - Based on BitRaser Performance Dashboard UI

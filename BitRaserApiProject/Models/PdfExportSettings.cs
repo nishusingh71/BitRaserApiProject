@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 
-namespace BitRaserApiProject.Models
+namespace DSecureApi.Models
 {
     /// <summary>
     /// PDF Export Settings entity for storing user/subuser default export configurations

@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Base controller with multi-tenant database context support

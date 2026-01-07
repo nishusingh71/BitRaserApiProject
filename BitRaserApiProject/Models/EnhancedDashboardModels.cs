@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace BitRaserApiProject.Models
+namespace DSecureApi.Models
 {
     /// <summary>
     /// Enhanced Dashboard DTOs - Based on BitRaser Admin Dashboard Design

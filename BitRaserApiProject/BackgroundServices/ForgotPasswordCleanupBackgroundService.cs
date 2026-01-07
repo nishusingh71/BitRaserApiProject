@@ -1,6 +1,6 @@
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 
-namespace BitRaserApiProject.BackgroundServices
+namespace DSecureApi.BackgroundServices
 {
     /// <summary>
     /// Background service to automatically cleanup expired password reset requests

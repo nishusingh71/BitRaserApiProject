@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace BitRaserApiProject.Diagnostics
+namespace DSecureApi.Diagnostics
 {
     /// <summary>
     /// Middleware that tracks database usage at the HTTP request level.

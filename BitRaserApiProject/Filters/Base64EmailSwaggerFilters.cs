@@ -1,8 +1,8 @@
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.SwaggerGen;
-using BitRaserApiProject.Utilities;
+using DSecureApi.Utilities;
 
-namespace BitRaserApiProject.Filters
+namespace DSecureApi.Filters
 {
     /// <summary>
     /// Swagger filter to add Base64 encoding examples for email parameters
@@ -87,7 +87,7 @@ namespace BitRaserApiProject.Filters
                                  "```\n\n" +
                                  "**C#:**\n" +
                                  "```csharp\n" +
-                                 "using BitRaserApiProject.Utilities;\n\n" +
+                                 "using DSecureApi.Utilities;\n\n" +
                                  "var encoded = Base64EmailEncoder.Encode(\"user@example.com\");\n" +
                                  "// Result: \"dXNlckBleGFtcGxlLmNvbQ\"\n" +
                                  "```\n\n" +

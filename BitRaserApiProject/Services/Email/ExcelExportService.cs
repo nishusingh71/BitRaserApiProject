@@ -1,8 +1,8 @@
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using ClosedXML.Excel;
 using Microsoft.Extensions.Logging;
 
-namespace BitRaserApiProject.Services.Email
+namespace DSecureApi.Services.Email
 {
     /// <summary>
     /// Excel export service for generating order detail attachments

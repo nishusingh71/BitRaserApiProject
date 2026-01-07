@@ -1,7 +1,7 @@
-using BitRaserApiProject.Services.Abstractions;
+using DSecureApi.Services.Abstractions;
 using Microsoft.EntityFrameworkCore;
 
-namespace BitRaserApiProject.Services.Implementations
+namespace DSecureApi.Services.Implementations
 {
     public class UserContextService : IUserContextService
     {

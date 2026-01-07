@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 
-namespace BitRaserApiProject.Factories
+namespace DSecureApi.Factories
 {
     /// <summary>
     /// Factory for creating ApplicationDbContext with proper connection string resolution

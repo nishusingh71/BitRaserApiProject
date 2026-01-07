@@ -1,11 +1,11 @@
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Services;
+using DSecureApi.Models;
+using DSecureApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Group Management Controller - Complete CRUD for Groups (BitRaser Design)

@@ -7,10 +7,10 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.ComponentModel.DataAnnotations;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Models;
+using DSecureApi.Services;
+using DSecureApi.Models;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Enhanced Authentication controller with session management

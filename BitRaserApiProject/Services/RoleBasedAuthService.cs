@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Factories;
+using DSecureApi.Models;
+using DSecureApi.Factories;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     public class RoleBasedAuthService : IRoleBasedAuthService
     {

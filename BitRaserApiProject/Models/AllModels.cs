@@ -1,10 +1,10 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json.Serialization;
 using System;
 using System.Collections.Generic;
 
-namespace BitRaserApiProject.Models
+namespace DSecureApi.Models
 {
     public class machines
     {
@@ -644,14 +644,14 @@ public class License
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastSeen { get; set; }
 }
-// End of namespace BitRaserApiProject.Models
+// End of namespace DSecureApi.Models
 // ReportRequest class (used for PDF generation)
 // Note: ReportData and ErasureLogEntry are defined in ReportDataOptional.cs
 // Note: FlexibleStringConverter is defined in ReportDataOptional.cs
 public class ReportRequest
 {
     [Required]
-    public BitRaserApiProject.Models.ReportData ReportData { get; set; } = new();
+    public DSecureApi.Models.ReportData ReportData { get; set; } = new();
 
     public string? ReportTitle { get; set; }
     public string? HeaderText { get; set; }

@@ -1,6 +1,6 @@
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Service for checking and enforcing user quotas and limits

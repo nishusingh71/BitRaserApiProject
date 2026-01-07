@@ -1,4 +1,4 @@
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Enterprise-grade caching service interface.

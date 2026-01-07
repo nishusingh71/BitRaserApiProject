@@ -1,10 +1,10 @@
-using BitRaserApiProject.Models.DTOs;
-using BitRaserApiProject.Services;
+using DSecureApi.Models.DTOs;
+using DSecureApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Dedicated Dodo Payments Webhook Controller

@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Hybrid OTP service - Uses both in-memory cache AND database storage
@@ -265,7 +265,7 @@ namespace BitRaserApiProject.Services
                 }
 
                 // Create new OTP record with HASHED OTP for security
-                var otpRecord = new BitRaserApiProject.Models.ForgotPasswordRequest
+                var otpRecord = new DSecureApi.Models.ForgotPasswordRequest
                 {
                     Email = email,
                     Otp = HashOtp(otp), // ✅ SECURITY FIX: Hash OTP before storing

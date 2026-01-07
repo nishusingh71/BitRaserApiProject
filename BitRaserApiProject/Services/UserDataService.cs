@@ -1,10 +1,10 @@
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using System.Text.RegularExpressions;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Implementation of dynamic, email-based user data operations

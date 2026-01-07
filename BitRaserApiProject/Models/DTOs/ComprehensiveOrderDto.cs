@@ -1,6 +1,6 @@
 using System.Text.Json.Serialization;
 
-namespace BitRaserApiProject.Models.DTOs
+namespace DSecureApi.Models.DTOs
 {
     /// <summary>
     /// Consolidated API response for detailed order information

@@ -7,7 +7,7 @@ using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.Net;
 
-namespace BitRaserApiProject.Services.Email.Providers
+namespace DSecureApi.Services.Email.Providers
 {
     /// <summary>
     /// Microsoft Graph API email provider implementation

@@ -1,5 +1,5 @@
-﻿using BitRaserApiProject.Models;
-using BitRaserApiProject.Services;
+using DSecureApi.Models;
+using DSecureApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,7 +9,7 @@ using System.Security.Claims;
 using System.Text;
 using BCrypt.Net;
 
-namespace BitRaserApiProject.Controllers    
+namespace DSecureApi.Controllers    
 {
     /// <summary>
     /// Dashboard Authentication Controller

@@ -1,7 +1,7 @@
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
-namespace BitRaserApiProject.Swagger
+namespace DSecureApi.Swagger
 {
     /// <summary>
     /// Swagger operation filter to provide default values and better documentation

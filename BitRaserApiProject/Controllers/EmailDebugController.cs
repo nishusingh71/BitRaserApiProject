@@ -1,13 +1,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using BitRaserApiProject.Utilities;
+using DSecureApi.Utilities;
 using System.Security.Claims;
-using BitRaserApiProject.Factories;
+using DSecureApi.Factories;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Services.Email;
+using DSecureApi.Services;
+using DSecureApi.Services.Email;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Debug controller for testing email encoding/decoding

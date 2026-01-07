@@ -1,4 +1,4 @@
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Service interface for resolving tenant-specific database connections

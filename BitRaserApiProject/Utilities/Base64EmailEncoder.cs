@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace BitRaserApiProject.Utilities
+namespace DSecureApi.Utilities
 {
     /// <summary>
     /// Utility class for encoding/decoding emails in URLs using Base64

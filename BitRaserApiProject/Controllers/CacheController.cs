@@ -1,9 +1,9 @@
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Cache management and diagnostics controller.

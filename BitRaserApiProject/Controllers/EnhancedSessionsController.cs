@@ -1,14 +1,14 @@
 using System.Security.Claims;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Attributes;
-using BitRaserApiProject.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
-using BitRaserApiProject.Factories; // ✅ ADD THIS
+using DSecureApi.Services;
+using DSecureApi.Attributes;
+using DSecureApi.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
+using DSecureApi.Factories; // ✅ ADD THIS
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Enhanced Sessions management controller with automatic expiration and role-based access control

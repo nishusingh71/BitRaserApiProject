@@ -2,11 +2,11 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Helpers;  // ✅ ADD: For DateTimeHelper
-using BitRaserApiProject.Services;
+using DSecureApi.Models;
+using DSecureApi.Helpers;  // ✅ ADD: For DateTimeHelper
+using DSecureApi.Services;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Login Activity Controller - Automatic login/logout tracking for Users and Subusers

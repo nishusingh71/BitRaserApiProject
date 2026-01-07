@@ -1,7 +1,7 @@
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Models.DTOs;
+using DSecureApi.Models;
+using DSecureApi.Models.DTOs;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Interface for Polar.sh payment service

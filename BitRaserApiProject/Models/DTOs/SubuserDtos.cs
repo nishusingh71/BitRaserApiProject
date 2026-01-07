@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
-namespace BitRaserApiProject.Models.DTOs
+namespace DSecureApi.Models.DTOs
 {
     /// <summary>
     /// Comprehensive DTOs for Subusers (Team Members / Child Users) Management

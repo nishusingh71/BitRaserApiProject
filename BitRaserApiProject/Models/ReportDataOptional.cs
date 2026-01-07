@@ -2,7 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 using System.Text.Json;
 
-namespace BitRaserApiProject.Models;
+namespace DSecureApi.Models;
 
 public class ReportData
 {

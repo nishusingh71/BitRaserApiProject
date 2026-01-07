@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using System.Net;
 
-namespace BitRaserApiProject.Middleware
+namespace DSecureApi.Middleware
 {
     public class IpBindingMiddleware
     {

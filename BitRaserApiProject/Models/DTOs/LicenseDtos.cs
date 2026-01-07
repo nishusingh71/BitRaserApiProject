@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace BitRaserApiProject.Models.DTOs
+namespace DSecureApi.Models.DTOs
 {
     /// <summary>
     /// License Activation API - Request/Response DTOs

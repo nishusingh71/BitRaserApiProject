@@ -3,10 +3,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text.Json;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Services;
+using DSecureApi.Models;
+using DSecureApi.Services;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Logout controller for handling user and subuser logout with session management

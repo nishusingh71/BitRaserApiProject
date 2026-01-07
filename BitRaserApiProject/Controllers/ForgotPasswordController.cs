@@ -1,14 +1,14 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using BCrypt.Net;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Services.Email;
+using DSecureApi.Models;
+using DSecureApi.Services;
+using DSecureApi.Services.Email;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Forgot Password Controller - OTP-based password reset

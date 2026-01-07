@@ -1,9 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Factories;
+using DSecureApi.Models;
+using DSecureApi.Factories;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Service for logging user activities in Sessions table

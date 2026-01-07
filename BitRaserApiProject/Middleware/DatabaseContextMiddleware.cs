@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Http;
 using System.Security.Claims;
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 using Microsoft.EntityFrameworkCore;
 
-namespace BitRaserApiProject.Middleware
+namespace DSecureApi.Middleware
 {
     /// <summary>
  /// Middleware to automatically inject appropriate database context based on user's private cloud status

@@ -2,9 +2,9 @@ using Microsoft.AspNetCore.Mvc;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Controller to monitor API's own CPU and Memory usage on Render

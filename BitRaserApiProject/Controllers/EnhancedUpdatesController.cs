@@ -1,13 +1,13 @@
 using System.Security.Claims;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 using System.Text;
 using System.Security.Cryptography;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Enhanced Updates Controller with comprehensive update management

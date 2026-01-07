@@ -1,13 +1,13 @@
-using BitRaserApiProject.Data;
-using BitRaserApiProject.Models.DTOs;
-using BitRaserApiProject.Services;
+using DSecureApi.Data;
+using DSecureApi.Models.DTOs;
+using DSecureApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using System.Text.Json;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Payment Controller - Handles Polar.sh and Dodo Payments integration
@@ -901,7 +901,7 @@ namespace BitRaserApiProject.Controllers
             {
                 _logger.LogInformation("🔍 Fetching order details for: {Identifier}", identifier);
 
-                BitRaserApiProject.Models.Order? order = null;
+                DSecureApi.Models.Order? order = null;
 
                 // Detect if identifier is payment_id (starts with "pay_") or order_id (numeric)
                 if (identifier.StartsWith("pay_", StringComparison.OrdinalIgnoreCase))
@@ -1081,7 +1081,7 @@ namespace BitRaserApiProject.Controllers
             }
         }
 
-        private string BuildBillingAddressString(BitRaserApiProject.Models.Order order)
+        private string BuildBillingAddressString(DSecureApi.Models.Order order)
         {
             var parts = new List<string?> 
             { 

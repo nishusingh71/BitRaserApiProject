@@ -1,15 +1,15 @@
 using System.Security.Claims;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Attributes;
-using BitRaserApiProject.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
+using DSecureApi.Services;
+using DSecureApi.Attributes;
+using DSecureApi.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
 using System.Text.Json;
-using BitRaserApiProject.Factories;
+using DSecureApi.Factories;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Enhanced Audit Reports management controller with comprehensive role-based access control

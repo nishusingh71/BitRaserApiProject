@@ -1,11 +1,11 @@
-using BitRaserApiProject.Models.DTOs;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Helpers;  // ✅ ADD: For DateTimeHelper
+using DSecureApi.Models.DTOs;
+using DSecureApi.Services;
+using DSecureApi.Helpers;  // ✅ ADD: For DateTimeHelper
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;  // ✅ ADD: For ToListAsync()
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Forgot/Reset Password API WITHOUT Email Sending

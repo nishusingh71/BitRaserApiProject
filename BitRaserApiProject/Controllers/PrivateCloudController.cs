@@ -1,13 +1,13 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Services;
+using DSecureApi.Models;
+using DSecureApi.Services;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
-using BitRaserApiProject.Factories;
+using DSecureApi.Factories;
 using MySql.Data.MySqlClient;  // ✅ Add this for MySqlException
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Private Cloud Database Management Controller

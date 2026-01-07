@@ -1,10 +1,10 @@
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Dynamic Route Discovery Service - Automatically discovers and manages API routes

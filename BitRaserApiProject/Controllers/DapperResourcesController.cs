@@ -1,10 +1,10 @@
 using System.Security.Claims;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Services;
+using DSecureApi.Models;
+using DSecureApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// High-Performance Dapper Resources Controller

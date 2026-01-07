@@ -1,14 +1,14 @@
 using System.Security.Claims;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Attributes;
-using BitRaserApiProject.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
-using BitRaserApiProject.Factories; // ✅ ADDED
+using DSecureApi.Services;
+using DSecureApi.Attributes;
+using DSecureApi.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
+using DSecureApi.Factories; // ✅ ADDED
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Enhanced Machines management controller with email-based operations and role-based access control

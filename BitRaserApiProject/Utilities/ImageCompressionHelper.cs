@@ -1,6 +1,6 @@
 using System.IO.Compression;
 
-namespace BitRaserApiProject.Utilities
+namespace DSecureApi.Utilities
 {
     /// <summary>
     /// Utility class for compressing and decompressing Base64 encoded images

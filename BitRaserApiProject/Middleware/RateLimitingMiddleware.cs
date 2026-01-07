@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
 
-namespace BitRaserApiProject.Middleware
+namespace DSecureApi.Middleware
 {
     /// <summary>
     /// Rate Limiting Middleware with tiered limits based on user type

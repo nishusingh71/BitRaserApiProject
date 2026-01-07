@@ -1,14 +1,14 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Models.DTOs;
-using BitRaserApiProject.Factories;
+using DSecureApi.Models;
+using DSecureApi.Models.DTOs;
+using DSecureApi.Factories;
 using System.Security.Cryptography;
 using System.Text;
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// License Activation API Controller

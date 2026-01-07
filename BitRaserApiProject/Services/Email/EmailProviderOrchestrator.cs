@@ -1,10 +1,10 @@
-using BitRaserApiProject.Data;
-using BitRaserApiProject.Models;
+using DSecureApi.Data;
+using DSecureApi.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 
-namespace BitRaserApiProject.Services.Email
+namespace DSecureApi.Services.Email
 {
     /// <summary>
     /// Email provider orchestrator - Smart decision engine for hybrid email delivery

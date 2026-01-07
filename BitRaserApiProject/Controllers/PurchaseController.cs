@@ -1,11 +1,11 @@
-using BitRaserApiProject.Data;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Services;
+using DSecureApi.Data;
+using DSecureApi.Models;
+using DSecureApi.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Purchase Controller

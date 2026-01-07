@@ -4,7 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 
-namespace BitRaserApiProject.Services.Email.Providers
+namespace DSecureApi.Services.Email.Providers
 {
     /// <summary>
     /// SendGrid email provider implementation

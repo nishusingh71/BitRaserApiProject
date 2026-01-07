@@ -1,12 +1,12 @@
 using Microsoft.AspNetCore.Mvc;
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 using Microsoft.AspNetCore.Authorization;
-using BitRaserApiProject.Attributes;
+using DSecureApi.Attributes;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Dynamic System Management Controller

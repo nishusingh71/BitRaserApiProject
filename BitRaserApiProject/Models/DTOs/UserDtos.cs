@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 
-namespace BitRaserApiProject.Models.DTOs
+namespace DSecureApi.Models.DTOs
 {
     /// <summary>
     /// Data Transfer Objects for API requests and responses

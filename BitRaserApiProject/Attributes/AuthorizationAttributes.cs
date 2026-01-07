@@ -2,10 +2,10 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 using System.Security.Claims;
 
-namespace BitRaserApiProject.Attributes
+namespace DSecureApi.Attributes
 {
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method)]
     public class RequirePermissionAttribute : Attribute, IAsyncAuthorizationFilter

@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
-using BitRaserApiProject.Utilities;
+using DSecureApi.Utilities;
 
-namespace BitRaserApiProject.Middleware
+namespace DSecureApi.Middleware
 {
     /// <summary>
     /// Middleware to prevent raw email addresses in URLs

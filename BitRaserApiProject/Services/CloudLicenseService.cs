@@ -1,10 +1,10 @@
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Factories;
+using DSecureApi.Models;
+using DSecureApi.Factories;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// DTOs for Cloud License Activation

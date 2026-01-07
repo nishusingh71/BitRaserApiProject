@@ -2,10 +2,10 @@ using Dapper;
 using Microsoft.Data.SqlClient;
 using MySqlConnector;
 using System.Data;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using System.Reflection.PortableExecutable;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
  /// <summary>
     /// High-performance Dapper service for hierarchical queries

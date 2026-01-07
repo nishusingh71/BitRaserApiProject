@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.RegularExpressions;
 
-namespace BitRaserApiProject.Attributes
+namespace DSecureApi.Attributes
 {
     /// <summary>
     /// Validates email format with strict RFC 5322 compliance

@@ -1,4 +1,4 @@
-namespace BitRaserApiProject.Services.License
+namespace DSecureApi.Services.License
 {
     /// <summary>
     /// License Validation Hook - Future-Ready Placeholder

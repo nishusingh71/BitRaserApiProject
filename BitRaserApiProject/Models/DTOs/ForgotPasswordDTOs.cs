@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace BitRaserApiProject.Models.DTOs
+namespace DSecureApi.Models.DTOs
 {
     /// <summary>
     /// DTOs for Forgot/Reset Password WITHOUT Email Sending

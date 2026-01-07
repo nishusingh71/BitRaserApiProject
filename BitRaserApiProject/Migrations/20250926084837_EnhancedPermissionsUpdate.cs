@@ -1,9 +1,9 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace BitRaserApiProject.Migrations
+namespace DSecureApi.Migrations
 {
     /// <inheritdoc />
     public partial class EnhancedPermissionsUpdate : Migration

@@ -1,13 +1,13 @@
 using System.Security.Cryptography;
 using System.Text;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Models.DTOs;
-using BitRaserApiProject.Repositories;
-using BitRaserApiProject.Helpers;  // ✅ ADD: For DateTimeHelper
+using DSecureApi.Models;
+using DSecureApi.Models.DTOs;
+using DSecureApi.Repositories;
+using DSecureApi.Helpers;  // ✅ ADD: For DateTimeHelper
 using Microsoft.EntityFrameworkCore;
 using MySql.Data.MySqlClient;  // ✅ ADD: For MySQL connection
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Service for Forgot/Reset Password WITHOUT Email Sending

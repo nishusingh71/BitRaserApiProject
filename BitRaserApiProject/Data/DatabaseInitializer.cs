@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 
-namespace BitRaserApiProject.Data
+namespace DSecureApi.Data
 {
     /// <summary>
     /// Database Initialization Helper for Dynamic System

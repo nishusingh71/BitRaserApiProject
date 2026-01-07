@@ -1,13 +1,13 @@
 using System.Security.Claims;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Attributes;
-using BitRaserApiProject.Factories; // ✅ ADDED
+using DSecureApi.Services;
+using DSecureApi.Attributes;
+using DSecureApi.Factories; // ✅ ADDED
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Enhanced Commands management controller with comprehensive role-based access control

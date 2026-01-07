@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
-using BitRaserApiProject.Factories;
-using BitRaserApiProject.Services;
+using DSecureApi.Factories;
+using DSecureApi.Services;
 using System.Security.Claims;
 
-namespace BitRaserApiProject.Controllers.Base
+namespace DSecureApi.Controllers.Base
 {
     /// <summary>
     /// Base controller that provides automatic private cloud database routing

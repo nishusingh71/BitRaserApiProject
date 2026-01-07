@@ -1,8 +1,8 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
-using BitRaserApiProject.Utilities;
+using DSecureApi.Utilities;
 
-namespace BitRaserApiProject.Attributes
+namespace DSecureApi.Attributes
 {
     /// <summary>
     /// Attribute to automatically decode Base64-encoded email parameters

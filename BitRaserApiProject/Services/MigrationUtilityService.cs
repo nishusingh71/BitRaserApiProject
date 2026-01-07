@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Migration utility service to help transition from ID-based to email-based operations

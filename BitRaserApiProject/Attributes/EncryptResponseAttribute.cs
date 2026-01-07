@@ -1,9 +1,9 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using System.Text.Json;
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 
-namespace BitRaserApiProject.Attributes
+namespace DSecureApi.Attributes
 {
     /// <summary>
     /// Attribute to mark endpoints that should return encrypted + compressed responses

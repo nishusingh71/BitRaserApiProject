@@ -1,2 +1,2 @@
-using BitRaserApiProject.Attributes;
+using DSecureApi.Attributes;
 using Microsoft.EntityFrameworkCore;

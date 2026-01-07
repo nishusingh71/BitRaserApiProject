@@ -1,7 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Mvc;
 
-namespace BitRaserApiProject.Models;
+namespace DSecureApi.Models;
 
 // Model for handling multipart form data with file uploads in Swagger
 public class ReportRequestWithFiles

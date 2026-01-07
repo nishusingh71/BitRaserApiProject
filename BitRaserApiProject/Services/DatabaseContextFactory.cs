@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Factory to create appropriate database context based on user's private cloud status

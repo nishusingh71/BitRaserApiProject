@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Health check endpoint for monitoring and keep-alive

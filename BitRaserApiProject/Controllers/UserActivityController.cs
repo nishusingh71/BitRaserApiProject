@@ -1,8 +1,8 @@
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Helpers;  // ✅ ADD: For DateTimeHelper
-using BitRaserApiProject.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
-using BitRaserApiProject.Factories; // ✅ ADD: For DynamicDbContextFactory
+using DSecureApi.Models;
+using DSecureApi.Services;
+using DSecureApi.Helpers;  // ✅ ADD: For DateTimeHelper
+using DSecureApi.Utilities; // ✅ ADD: For Base64EmailEncoder.DecodeEmailParam
+using DSecureApi.Factories; // ✅ ADD: For DynamicDbContextFactory
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -10,9 +10,9 @@ using System.Security.Claims;
 using BCrypt.Net;
 
 // Use DTOs namespace explicitly
-using DTO = BitRaserApiProject.Models.DTOs;
+using DTO = DSecureApi.Models.DTOs;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Enhanced User Activity Tracking Controller - Hierarchical monitoring with real-time status

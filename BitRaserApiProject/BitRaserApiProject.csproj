@@ -4,6 +4,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>DSecureApi</AssemblyName>
+    <RootNamespace>DSecureApi</RootNamespace>
     <!-- Suppress nullable and non-critical warnings for cleaner builds -->
     <NoWarn>CS8602;CS8604;CS8620;CS8618;CS8603;CS8601;CS8981;CS0219;CS0162;CS1998;CS0168;CS8714;ASP0019;NETSDK1194</NoWarn>
   </PropertyGroup>

@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using System.Data.Common;
 using System.Diagnostics;
 
-namespace BitRaserApiProject.Diagnostics
+namespace DSecureApi.Diagnostics
 {
     /// <summary>
     /// EF Core command interceptor that captures all SQL queries for diagnostics.

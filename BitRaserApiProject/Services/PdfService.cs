@@ -1,9 +1,9 @@
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 
-namespace BitRaserApiProject.Services;
+namespace DSecureApi.Services;
 
 public class PdfService
 {

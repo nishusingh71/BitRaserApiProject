@@ -3,9 +3,9 @@ using MySql.Data.MySqlClient;
 using System.Data;
 using System.Security.Cryptography;
 using System.Text;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     public interface IPrivateCloudService
     {

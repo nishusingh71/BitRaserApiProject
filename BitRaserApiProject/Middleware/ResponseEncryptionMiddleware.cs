@@ -1,7 +1,7 @@
 using System.Text;
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 
-namespace BitRaserApiProject.Middleware
+namespace DSecureApi.Middleware
 {
     /// <summary>
     /// Middleware to encrypt HTTP responses using AES-256-CBC

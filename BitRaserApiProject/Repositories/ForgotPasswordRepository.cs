@@ -1,7 +1,7 @@
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using Microsoft.EntityFrameworkCore;
 
-namespace BitRaserApiProject.Repositories
+namespace DSecureApi.Repositories
 {
     /// <summary>
  /// Repository for Forgot Password operations

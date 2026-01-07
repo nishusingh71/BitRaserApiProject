@@ -1,12 +1,12 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Models.DTOs;
+using DSecureApi.Models;
+using DSecureApi.Models.DTOs;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// Polar.sh Payment Service Implementation

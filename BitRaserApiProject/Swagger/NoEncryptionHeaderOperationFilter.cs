@@ -1,7 +1,7 @@
 using Microsoft.OpenApi.Models;
 using Swashbuckle.AspNetCore.SwaggerGen;
 
-namespace BitRaserApiProject.Swagger
+namespace DSecureApi.Swagger
 {
     /// <summary>
     /// Swagger operation filter to add X-No-Encryption header parameter to all API endpoints

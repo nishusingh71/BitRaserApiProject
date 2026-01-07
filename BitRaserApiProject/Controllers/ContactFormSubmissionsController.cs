@@ -1,11 +1,11 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using System.Text.Json.Serialization;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Services.Email;
+using DSecureApi.Services;
+using DSecureApi.Services.Email;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Controller for managing contact form submissions

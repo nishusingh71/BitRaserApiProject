@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.IO.Compression;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     /// <summary>
     /// AES Encryption Helper for encrypting API responses

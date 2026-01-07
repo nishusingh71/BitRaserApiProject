@@ -1,10 +1,10 @@
-using BitRaserApiProject.Data;
-using BitRaserApiProject.Models;
+using DSecureApi.Data;
+using DSecureApi.Models;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
-namespace BitRaserApiProject.Services.Email
+namespace DSecureApi.Services.Email
 {
     /// <summary>
     /// Email quota management service

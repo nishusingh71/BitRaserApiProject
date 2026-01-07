@@ -1,13 +1,13 @@
-﻿using System;
+using System;
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 using Microsoft.EntityFrameworkCore;
 
-namespace BitRaserApiProject
+namespace DSecureApi
 {
     public class ApplicationDbContext : DbContext
     {

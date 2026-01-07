@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace BitRaserApiProject.Models.DTOs
+namespace DSecureApi.Models.DTOs
 {
     /// <summary>
     /// DTO for user activity tracking with hierarchical access

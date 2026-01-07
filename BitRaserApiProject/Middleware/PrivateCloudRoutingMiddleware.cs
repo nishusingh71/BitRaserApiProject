@@ -1,8 +1,8 @@
 using System.Security.Claims;
-using BitRaserApiProject.Services;
+using DSecureApi.Services;
 using Microsoft.EntityFrameworkCore;
 
-namespace BitRaserApiProject.Middleware
+namespace DSecureApi.Middleware
 {
     /// <summary>
     /// Middleware to automatically set tenant context for private cloud routing

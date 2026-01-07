@@ -1,12 +1,12 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using BitRaserApiProject.Services;
-using BitRaserApiProject.Attributes;
+using DSecureApi.Services;
+using DSecureApi.Attributes;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
-using BitRaserApiProject.Models;
+using DSecureApi.Models;
 
-namespace BitRaserApiProject.Controllers
+namespace DSecureApi.Controllers
 {
     /// <summary>
     /// Migration and System Management Controller

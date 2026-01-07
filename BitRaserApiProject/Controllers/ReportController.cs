@@ -1,10 +1,10 @@
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Services;
+using DSecureApi.Models;
+using DSecureApi.Services;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 using System.ComponentModel.DataAnnotations;
 
-namespace BitRaserApiProject.Controllers;
+namespace DSecureApi.Controllers;
 
 //[Authorize]
 [ApiController]

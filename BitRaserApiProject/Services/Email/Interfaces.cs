@@ -1,4 +1,4 @@
-namespace BitRaserApiProject.Services.Email
+namespace DSecureApi.Services.Email
 {
     /// <summary>
     /// Email type for priority-based provider selection

@@ -1,12 +1,12 @@
-using BitRaserApiProject.Data;
-using BitRaserApiProject.Models;
-using BitRaserApiProject.Models.DTOs;
+using DSecureApi.Data;
+using DSecureApi.Models;
+using DSecureApi.Models.DTOs;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
-namespace BitRaserApiProject.Services
+namespace DSecureApi.Services
 {
     #region DTOs
 
