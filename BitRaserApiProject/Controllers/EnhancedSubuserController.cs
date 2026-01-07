@@ -83,7 +83,7 @@ namespace BitRaserApiProject.Controllers
                 bool isCurrentUserSubuser = currentSubuser != null;
                 string? parentEmail = currentSubuser?.user_email;
 
-                IQueryable<subuser> query = context.subuser;
+                IQueryable<subuser> query = context.subuser.AsNoTracking();
 
                 // Check if user has admin-level permissions
                 bool hasAdminPermission = await _authService.HasPermissionAsync(
@@ -118,12 +118,13 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 var subusers = await query
-                .Include(s => s.SubuserRoles)
-                 .ThenInclude(sr => sr.Role)
-                 .OrderByDescending(s => s.subuser_id)
-                 .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
-                 .Take(filter?.PageSize ?? 100)
-               .Select(s => new
+                    .Include(s => s.SubuserRoles)
+                    .ThenInclude(sr => sr.Role)
+                    .AsSplitQuery()  // ✅ RENDER OPTIMIZATION: Prevent cartesian explosion
+                    .OrderByDescending(s => s.subuser_id)
+                    .Skip((filter?.Page ?? 0) * (filter?.PageSize ?? 100))
+                    .Take(filter?.PageSize ?? 100)
+                    .Select(s => new
                {
                    s.subuser_id,
                    s.subuser_email,
@@ -176,11 +177,14 @@ namespace BitRaserApiProject.Controllers
                 var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
                 var subuser = await context.subuser
-         .Include(s => s.SubuserRoles)
-              .ThenInclude(sr => sr.Role)
-          .ThenInclude(r => r.RolePermissions)
-        .ThenInclude(rp => rp.Permission)
-                  .Where(s => s.subuser_email.ToLower() == decodedEmail).FirstOrDefaultAsync(); // ✅ Use decoded email
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION: Read-only query
+                    .Include(s => s.SubuserRoles)
+                    .ThenInclude(sr => sr.Role)
+                    .ThenInclude(r => r.RolePermissions)
+                    .ThenInclude(rp => rp.Permission)
+                    .AsSplitQuery()  // ✅ Prevent cartesian explosion
+                    .Where(s => s.subuser_email.ToLower() == decodedEmail)
+                    .FirstOrDefaultAsync(); // ✅ Use decoded email
 
                 if (subuser == null) return NotFound($"Subuser with email {decodedEmail} not found");
 

@@ -72,8 +72,10 @@ namespace BitRaserApiProject.Controllers
             _logger.LogInformation("🔍 Fetching subusers for user: {Email}", currentUserEmail);
 
             IQueryable<subuser> query = _context.subuser
-            .Include(s => s.SubuserRoles)
-          .ThenInclude(sr => sr.Role);
+                .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                .Include(s => s.SubuserRoles)
+                .ThenInclude(sr => sr.Role)
+                .AsSplitQuery();  // ✅ Prevent cartesian explosion
 
             // ✅ HIERARCHICAL FILTERING: Users can only see subusers they can manage
             if (await _authService.IsSuperAdminAsync(currentUserEmail!, isCurrentUserSubuser))
@@ -112,10 +114,10 @@ namespace BitRaserApiProject.Controllers
                 query = query.Where(s => s.Role.Contains(role));
 
             var subusers = await query
-         .OrderByDescending(s => s.CreatedAt)
-              .Skip(page * pageSize)
+                .OrderByDescending(s => s.CreatedAt)
+                .Skip(page * pageSize)
                 .Take(pageSize)
-            .ToListAsync();
+                .ToListAsync();
 
             _logger.LogInformation("✅ Found {Count} subusers", subusers.Count);
 
@@ -170,11 +172,14 @@ namespace BitRaserApiProject.Controllers
             using var _context = await GetContextAsync();
 
             var subuser = await _context.subuser
-             .Include(s => s.SubuserRoles)
-          .ThenInclude(sr => sr.Role)
-          .ThenInclude(r => r.RolePermissions)
-          .ThenInclude(rp => rp.Permission)
-         .Where(s => s.subuser_email.ToLower() == decodedEmail).FirstOrDefaultAsync(); // ✅ Use decoded email
+                .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                .Include(s => s.SubuserRoles)
+                .ThenInclude(sr => sr.Role)
+                .ThenInclude(r => r.RolePermissions)
+                .ThenInclude(rp => rp.Permission)
+                .AsSplitQuery()  // ✅ Prevent cartesian explosion
+                .Where(s => s.subuser_email.ToLower() == decodedEmail)
+                .FirstOrDefaultAsync(); // ✅ Use decoded email
 
             if (subuser == null)
                 return NotFound($"Subuser with email {decodedEmail} not found");
