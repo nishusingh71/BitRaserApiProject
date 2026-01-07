@@ -189,6 +189,216 @@ DSecure Technologies • Test Email
         }
 
         /// <summary>
+        /// 🧪 FULL TEST: Send order email with Excel attachment (simulates checkout)
+        /// POST /api/EmailDebug/test-full-hybrid
+        /// </summary>
+        [HttpPost("test-full-hybrid")]
+        [AllowAnonymous]
+        public async Task<IActionResult> TestFullHybridEmail([FromBody] FullHybridTestRequest request)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(request.ToEmail))
+                {
+                    return BadRequest(new { success = false, message = "toEmail is required" });
+                }
+
+                if (_emailOrchestrator == null)
+                {
+                    return StatusCode(500, new { 
+                        success = false, 
+                        message = "Email orchestrator not configured",
+                        hint = "IEmailOrchestrator not registered in DI"
+                    });
+                }
+
+                _logger.LogInformation("🧪 FULL HYBRID TEST: Sending to {Email}", request.ToEmail);
+
+                // Simulate order data
+                var orderId = request.TestOrderId ?? new Random().Next(10000, 99999);
+                var productName = request.ProductName ?? "BitRaser Professional";
+                var quantity = request.Quantity ?? 1;
+                var amount = request.Amount ?? 99.00m;
+                var licenseKey = $"TEST-{Guid.NewGuid().ToString("N").Substring(0, 16).ToUpper()}";
+
+                // Generate test Excel attachment
+                byte[]? excelBytes = null;
+                try
+                {
+                    excelBytes = GenerateTestExcelAttachment(orderId, productName, quantity, amount, licenseKey);
+                    _logger.LogInformation("📎 Generated test Excel: {Size} bytes", excelBytes.Length);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "⚠️ Could not generate Excel, proceeding without attachment");
+                }
+
+                // Build email request
+                var emailRequest = new EmailSendRequest
+                {
+                    ToEmail = request.ToEmail,
+                    ToName = request.ToName ?? request.ToEmail.Split('@')[0],
+                    Subject = $"🧪 TEST - Order #{orderId} Confirmation",
+                    HtmlBody = GenerateFullTestEmailHtml(orderId, productName, quantity, amount, licenseKey, request.ToName ?? "Customer"),
+                    Type = EmailType.Transactional,
+                    OrderId = orderId
+                };
+
+                // Add Excel attachment if generated successfully
+                if (excelBytes != null && excelBytes.Length > 0)
+                {
+                    emailRequest.Attachments = new List<EmailAttachment>
+                    {
+                        new EmailAttachment(
+                            $"DSecure_Order_{orderId}.xlsx",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            excelBytes
+                        )
+                    };
+                }
+
+                // Send via hybrid orchestrator
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                var result = await _emailOrchestrator.SendEmailAsync(emailRequest);
+                stopwatch.Stop();
+
+                if (result.Success)
+                {
+                    _logger.LogInformation("✅ FULL HYBRID TEST: Success via {Provider} in {Ms}ms", 
+                        result.ProviderUsed, stopwatch.ElapsedMilliseconds);
+                    
+                    return Ok(new
+                    {
+                        success = true,
+                        message = "Full hybrid email sent successfully!",
+                        provider = result.ProviderUsed,
+                        durationMs = stopwatch.ElapsedMilliseconds,
+                        toEmail = request.ToEmail,
+                        testData = new
+                        {
+                            orderId = orderId,
+                            productName = productName,
+                            quantity = quantity,
+                            amount = amount,
+                            licenseKey = licenseKey,
+                            hasExcelAttachment = excelBytes != null
+                        },
+                        sentAt = DateTime.UtcNow.ToString("o")
+                    });
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ FULL HYBRID TEST: Failed - {Message}", result.Message);
+                    return StatusCode(500, new
+                    {
+                        success = false,
+                        message = result.Message,
+                        provider = result.ProviderUsed,
+                        hint = "Check Render logs for detailed error"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ FULL HYBRID TEST: Exception");
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = ex.Message,
+                    exceptionType = ex.GetType().Name
+                });
+            }
+        }
+
+        public class FullHybridTestRequest
+        {
+            public string ToEmail { get; set; } = string.Empty;
+            public string? ToName { get; set; }
+            public string? ProductName { get; set; }
+            public int? Quantity { get; set; }
+            public decimal? Amount { get; set; }
+            public int? TestOrderId { get; set; }
+        }
+
+        private byte[] GenerateTestExcelAttachment(int orderId, string productName, int quantity, decimal amount, string licenseKey)
+        {
+            using var workbook = new ClosedXML.Excel.XLWorkbook();
+            var ws = workbook.Worksheets.Add("Order Details");
+
+            // Header
+            ws.Cell("A1").Value = "Order Details";
+            ws.Range("A1:C1").Merge();
+            ws.Cell("A1").Style.Font.Bold = true;
+            ws.Cell("A1").Style.Font.FontSize = 16;
+
+            // Order info
+            ws.Cell("A3").Value = "Order ID:";
+            ws.Cell("B3").Value = orderId;
+            ws.Cell("A4").Value = "Product:";
+            ws.Cell("B4").Value = productName;
+            ws.Cell("A5").Value = "Quantity:";
+            ws.Cell("B5").Value = quantity;
+            ws.Cell("A6").Value = "Amount:";
+            ws.Cell("B6").Value = $"${amount:N2}";
+            ws.Cell("A7").Value = "Date:";
+            ws.Cell("B7").Value = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+
+            // License Keys section
+            ws.Cell("A9").Value = "License Keys";
+            ws.Cell("A9").Style.Font.Bold = true;
+            ws.Cell("A10").Value = "#1";
+            ws.Cell("B10").Value = licenseKey;
+
+            ws.Columns().AdjustToContents();
+
+            using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+            return stream.ToArray();
+        }
+
+        private string GenerateFullTestEmailHtml(int orderId, string productName, int quantity, decimal amount, string licenseKey, string customerName)
+        {
+            return $@"
+<!DOCTYPE html>
+<html>
+<head><meta charset='utf-8'></head>
+<body style='font-family: Segoe UI, Arial; padding: 20px; background: #f5f5f5;'>
+<div style='max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px; overflow: hidden;'>
+<div style='background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); color: #fff; padding: 30px; text-align: center;'>
+<h1 style='margin: 0; font-size: 24px;'>🧪 TEST ORDER CONFIRMATION</h1>
+<p style='margin: 10px 0 0 0; opacity: 0.8;'>Order #{orderId}</p>
+</div>
+<div style='padding: 30px;'>
+<p>Hi {customerName},</p>
+<p>This is a <strong>TEST EMAIL</strong> from the hybrid email system.</p>
+
+<div style='background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;'>
+<h3 style='margin: 0 0 15px 0;'>📦 Order Summary</h3>
+<p style='margin: 5px 0;'><strong>Product:</strong> {productName}</p>
+<p style='margin: 5px 0;'><strong>Quantity:</strong> {quantity}</p>
+<p style='margin: 5px 0;'><strong>Amount:</strong> ${amount:N2}</p>
+</div>
+
+<div style='background: #e8f5e9; padding: 20px; border-radius: 8px; margin: 20px 0;'>
+<h3 style='margin: 0 0 15px 0;'>🔑 Test License Key</h3>
+<p style='font-family: monospace; font-size: 16px; background: #fff; padding: 10px; border-radius: 4px;'>{licenseKey}</p>
+</div>
+
+<p>📎 <strong>Attachment:</strong> Excel file with order details is attached.</p>
+
+<p style='margin-top: 30px; color: #888; font-size: 12px;'>
+This is a test email sent at {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC<br>
+Sent via DSecure Hybrid Email System
+</p>
+</div>
+<div style='background: #1a1a2e; color: #fff; padding: 15px; text-align: center; font-size: 12px;'>
+DSecure Technologies • Support@dsecuretech.com
+</div>
+</div>
+</body>
+</html>";
+        }
+        /// <summary>
         /// Test endpoint: Encode email to Base64
         /// GET /api/EmailDebug/encode/{email}
         /// </summary>
