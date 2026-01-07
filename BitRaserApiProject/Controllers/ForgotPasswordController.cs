@@ -287,15 +287,18 @@ message = "OTP has been sent to your email. Please check your inbox.",
       string userName;
 
        // Update password based on user type
-       if (user != null)
-    {
-        // Update main user password
-         user.user_password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);
-      user.updated_at = DateTime.UtcNow;
+        if (user != null)
+        {
+            // ✅ CRITICAL FIX: Store passwords correctly (same as user creation)
+            // user_password = plain text (for admin reference)
+            // hash_password = BCrypt hash (for login verification)
+            user.user_password = request.NewPassword;                              // Plain text
+            user.hash_password = BCrypt.Net.BCrypt.HashPassword(request.NewPassword);  // BCrypt hash - LOGIN CHECKS THIS
+            user.updated_at = DateTime.UtcNow;
        
-     _context.Entry(user).State = EntityState.Modified;
-              userType = "User";
-        userName = user.user_name;
+            _context.Entry(user).State = EntityState.Modified;
+            userType = "User";
+            userName = user.user_name;
      }
                 else
       {
