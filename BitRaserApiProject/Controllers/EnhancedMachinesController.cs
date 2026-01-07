@@ -87,7 +87,7 @@ namespace BitRaserApiProject.Controllers
                     
                     _logger.LogInformation("📊 DB FETCH: Machines for user: {Email}", decodedEmail);
 
-                    IQueryable<machines> query = _context.Machines.Where(m => m.user_email.ToLower() == decodedEmail);
+                    IQueryable<machines> query = _context.Machines.AsNoTracking().Where(m => m.user_email.ToLower() == decodedEmail);  // ✅ RENDER OPTIMIZATION
 
                     // Apply additional filters if provided
                     if (filter != null)
@@ -161,7 +161,7 @@ namespace BitRaserApiProject.Controllers
                 var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail!);
 
-                IQueryable<machines> query = _context.Machines;
+                IQueryable<machines> query = _context.Machines.AsNoTracking();  // ✅ RENDER OPTIMIZATION
 
                 // ✅ SIMPLIFIED: Apply role-based filtering based on actual permissions
                 bool hasGlobalAccess = await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_MACHINES", isCurrentUserSubuser);
@@ -199,9 +199,10 @@ namespace BitRaserApiProject.Controllers
                 {
                     // ✅ Regular User - own machines + subuser machines
                     var subuserEmails = await _context.subuser
-              .Where(s => s.user_email == currentUserEmail)
-              .Select(s => s.subuser_email)
-                .ToListAsync();
+                        .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                        .Where(s => s.user_email == currentUserEmail)
+                        .Select(s => s.subuser_email)
+                        .ToListAsync();
 
                     query = query.Where(m =>
                        m.user_email == currentUserEmail ||  // Own machines
