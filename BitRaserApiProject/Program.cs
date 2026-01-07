@@ -157,6 +157,14 @@ builder.Services.AddCors(options =>
         .AllowCredentials();
     });
 
+    // FormSubmit.co Webhook Policy - for contact form webhooks
+    options.AddPolicy("AllowFormSubmit", policy =>
+    {
+        policy.WithOrigins("https://formsubmit.co")
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
+
     // Production policy - restricted origins for security
     options.AddPolicy("ProductionPolicy", policy =>
     {
