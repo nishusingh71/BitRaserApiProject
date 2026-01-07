@@ -21,7 +21,12 @@ namespace BitRaserApiProject.BackgroundServices
       }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-      {
+        {
+            // ✅ DISABLED: Service is disabled to reduce background processing
+            _logger.LogInformation("🛑 Forgot Password Cleanup Background Service is DISABLED");
+            return;
+            
+            /* ORIGINAL CODE - DISABLED
             _logger.LogInformation("🧹 Forgot Password Cleanup Background Service started");
 
  // Wait 1 minute before first cleanup
@@ -52,6 +57,7 @@ namespace BitRaserApiProject.BackgroundServices
     }
 
             _logger.LogInformation("🛑 Forgot Password Cleanup Background Service stopped");
+            END OF DISABLED CODE */
         }
 
     private async Task CleanupExpiredRequestsAsync(CancellationToken cancellationToken)
