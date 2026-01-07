@@ -59,6 +59,7 @@ namespace BitRaserApiProject.Services.Email
         public string? FromEmail { get; set; }
         public string? FromName { get; set; }
         public string? ReplyToEmail { get; set; }
+        public List<string>? CcEmails { get; set; }
         public Dictionary<string, string>? CustomHeaders { get; set; }
     }
 
