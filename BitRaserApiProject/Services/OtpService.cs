@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 
 namespace BitRaserApiProject.Services
@@ -262,11 +264,11 @@ namespace BitRaserApiProject.Services
                     context.ForgotPasswordRequests.RemoveRange(oldOtps);
                 }
 
-                // Create new OTP record
+                // Create new OTP record with HASHED OTP for security
                 var otpRecord = new BitRaserApiProject.Models.ForgotPasswordRequest
                 {
                     Email = email,
-                    Otp = otp,
+                    Otp = HashOtp(otp), // ✅ SECURITY FIX: Hash OTP before storing
                     ResetToken = Guid.NewGuid().ToString("N"),
                     ExpiresAt = DateTime.UtcNow.AddMinutes(_otpExpiryMinutes),
                     CreatedAt = DateTime.UtcNow,
@@ -277,7 +279,7 @@ namespace BitRaserApiProject.Services
                 context.ForgotPasswordRequests.Add(otpRecord);
                 await context.SaveChangesAsync();
 
-                _logger.LogInformation("💾 OTP stored in database for {Email}", email);
+                _logger.LogInformation("💾 OTP stored in database (hashed) for {Email}", email);
             }
             catch (Exception ex)
             {
@@ -291,10 +293,13 @@ namespace BitRaserApiProject.Services
             {
                 using var scope = _serviceProvider.CreateScope();
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                
+                // ✅ SECURITY: Compare with hashed OTP (with backward compatibility)
+                var hashedOtp = HashOtp(otp);
 
                 var otpRecord = await context.ForgotPasswordRequests
                        .Where(f => f.Email.ToLower() == email &&
-                    f.Otp == otp &&
+                    (f.Otp == hashedOtp || f.Otp == otp) && // Check hashed OR plain for backward compat
                     !f.IsUsed &&
                       f.ExpiresAt > DateTime.UtcNow)
                   .FirstOrDefaultAsync();
@@ -329,10 +334,13 @@ namespace BitRaserApiProject.Services
             {
                 using var scope = _serviceProvider.CreateScope();
                 var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+                
+                // ✅ SECURITY: Compare with hashed OTP (with backward compatibility)
+                var hashedOtp = HashOtp(otp);
 
                 var otpRecord = context.ForgotPasswordRequests
 .Where(f => f.Email.ToLower() == email &&
-      f.Otp == otp &&
+      (f.Otp == hashedOtp || f.Otp == otp) && // Check hashed OR plain for backward compat
               !f.IsUsed &&
  f.ExpiresAt > DateTime.UtcNow)
          .FirstOrDefault();
@@ -447,5 +455,19 @@ namespace BitRaserApiProject.Services
 
             _logger.LogInformation("🧹 Cleaned up {Count} expired OTPs from cache", expiredKeys.Count);
         }
+
+        #region OTP Hashing Helpers
+
+        /// <summary>
+        /// Hash OTP using SHA256 for secure storage
+        /// </summary>
+        private static string HashOtp(string otp)
+        {
+            using var sha256 = SHA256.Create();
+            var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(otp));
+            return Convert.ToBase64String(bytes);
+        }
+
+        #endregion
     }
 }
