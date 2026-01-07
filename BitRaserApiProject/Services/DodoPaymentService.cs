@@ -938,7 +938,7 @@ namespace BitRaserApiProject.Services
                         Subject = userCreated 
                             ? $"Welcome to DSecure - Order #{order.OrderId}" 
                             : $"Order Confirmed - #{order.OrderId}",
-                        HtmlBody = GenerateMinimalOrderEmailHtml(order, customerName, userCreated, tempPassword, loginUrl, licenseKeys),
+                        HtmlBody = GenerateMinimalOrderEmailHtml(order, customerName, userCreated, tempPassword, loginUrl, licenseKeys, invoiceUrl),
                         Type = Email.EmailType.Transactional,
                         OrderId = order.OrderId,
                         Attachments = new List<Email.EmailAttachment>
@@ -1044,9 +1044,9 @@ namespace BitRaserApiProject.Services
 
         /// <summary>
         /// Generate minimal theme HTML email for order confirmation
-        /// Clean, professional, no invoice button - details in Excel attachment
+        /// Clean, professional, includes invoice button - details in Excel attachment
         /// </summary>
-        private string GenerateMinimalOrderEmailHtml(Order order, string customerName, bool isNewUser, string? tempPassword, string loginUrl, List<string>? licenseKeys)
+        private string GenerateMinimalOrderEmailHtml(Order order, string customerName, bool isNewUser, string? tempPassword, string loginUrl, List<string>? licenseKeys, string? invoiceUrl = null)
         {
             var amount = order.AmountCents / 100m;
             var tax = order.TaxAmountCents / 100m;
@@ -1100,6 +1100,11 @@ namespace BitRaserApiProject.Services
 
 {credentialsHtml}
 {licenseHtml}
+
+{(string.IsNullOrEmpty(invoiceUrl) ? "" : $@"
+<tr><td style='padding:15px 0;text-align:center;'>
+<a href='{invoiceUrl}' style='display:inline-block;background:#4CAF50;color:#fff;padding:12px 30px;text-decoration:none;border-radius:6px;font-weight:600;'>📄 View Invoice</a>
+</td></tr>")}
 
 <tr><td style='padding:20px 0 0 0;border-top:1px solid #eee;'>
 <p style='margin:0;font-size:13px;color:#666;'>📎 Complete order details and license keys are in the attached Excel file.</p>
@@ -1187,12 +1192,14 @@ namespace BitRaserApiProject.Services
             </div>";
             }
 
-            // Add invoice link
-            // if (!string.IsNullOrEmpty(invoiceUrl))
-            // {
-            //     html += $@"
-            // <p><a href='{invoiceUrl}' style='color: #1a1a2e;'>📄 Download Invoice (PDF)</a></p>";
-            // }
+            // Add invoice link with View Invoice button
+            if (!string.IsNullOrEmpty(invoiceUrl))
+            {
+                html += $@"
+            <div style='text-align: center; margin: 20px 0;'>
+                <a href='{invoiceUrl}' class='cta-button' style='background: #2196F3;'>📄 View Invoice</a>
+            </div>";
+            }
 
             html += @"
             <p style='margin-top: 30px;'><strong>📎 Attachment:</strong> Complete order details and license keys are in the attached Excel file.</p>

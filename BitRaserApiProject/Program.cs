@@ -420,6 +420,12 @@ builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailProvider, Bit
 builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailOrchestrator, BitRaserApiProject.Services.Email.EmailProviderOrchestrator>();
 builder.Services.AddScoped<BitRaserApiProject.Services.Email.ExcelExportService>();
 
+// ✅ ATTACHMENT RULES SERVICE - Conditional PDF/Excel based on service type
+builder.Services.AddScoped<IAttachmentRuleService, AttachmentRuleService>();
+
+// ✅ RULE-BASED CHATBOT - Deterministic responses, no AI hallucination
+builder.Services.AddScoped<IChatbotRuleEngine, ChatbotRuleEngine>();
+
 // ✅ LICENSE VALIDATION HOOK - Placeholder for future product-based license integration
 builder.Services.AddScoped<BitRaserApiProject.Services.License.ILicenseValidationHook, BitRaserApiProject.Services.License.DefaultLicenseValidationHook>();
 

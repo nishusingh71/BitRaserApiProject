@@ -64,11 +64,12 @@ namespace BitRaserApiProject.Services.Email
                         AccountIdentifier = "default",
                         DailyLimit = dailyLimit,
                         MonthlyLimit = monthlyLimit,
-                        Priority = 2,
-                        IsEnabled = true
+                        // ✅ DISABLED: SendGrid is disabled, Graph API only
+                        Priority = 0,
+                        IsEnabled = false
                     };
                     _context.Set<EmailQuota>().Add(sendGridQuota);
-                    _logger.LogInformation("📧 Created SendGrid quota: Daily={Daily}, Monthly={Monthly}", 
+                    _logger.LogInformation("📧 Created SendGrid quota (DISABLED): Daily={Daily}, Monthly={Monthly}", 
                         dailyLimit, monthlyLimit);
                 }
 
