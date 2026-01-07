@@ -65,7 +65,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 // Using Roles as Groups (as per your database structure)
-                var query = _context.Roles.AsQueryable();
+                var query = _context.Roles.AsNoTracking().AsQueryable();  // ✅ RENDER OPTIMIZATION
 
                 // Apply search filter
                 if (!string.IsNullOrEmpty(search))
@@ -157,8 +157,10 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 var group = await _context.Roles
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .Include(r => r.RolePermissions)
                     .ThenInclude(rp => rp.Permission)
+                    .AsSplitQuery()  // ✅ Prevent cartesian explosion
                     .Where(r => r.RoleId == groupId).FirstOrDefaultAsync();
 
                 if (group == null)
@@ -166,8 +168,8 @@ namespace BitRaserApiProject.Controllers
                     return NotFound(new { message = "Group not found" });
                 }
 
-                var userCount = await _context.UserRoles.CountAsync(ur => ur.RoleId == groupId) +
-                                await _context.SubuserRoles.CountAsync(sr => sr.RoleId == groupId);
+                var userCount = await _context.UserRoles.AsNoTracking().CountAsync(ur => ur.RoleId == groupId) +
+                                await _context.SubuserRoles.AsNoTracking().CountAsync(sr => sr.RoleId == groupId);
                 var licenseCount = CalculateLicensesForGroup(groupId);
 
                 return Ok(new GroupDetailDto
@@ -405,8 +407,8 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 // Check if group has users
-                var userCount = await _context.UserRoles.CountAsync(ur => ur.RoleId == groupId) +
-                                await _context.SubuserRoles.CountAsync(sr => sr.RoleId == groupId);
+                var userCount = await _context.UserRoles.AsNoTracking().CountAsync(ur => ur.RoleId == groupId) +
+                                await _context.SubuserRoles.AsNoTracking().CountAsync(sr => sr.RoleId == groupId);
                 if (userCount > 0)
                 {
                     return BadRequest(new { 
@@ -455,6 +457,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 var permissions = await _context.Permissions
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .OrderBy(p => p.PermissionName)
                     .Select(p => new PermissionOptionDto
                     {
@@ -542,8 +545,10 @@ namespace BitRaserApiProject.Controllers
 
                 // Get main users in this group
                 var mainUsers = await _context.UserRoles
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .Where(ur => ur.RoleId == groupId)
                     .Include(ur => ur.User)
+                    .AsSplitQuery()  // ✅ Prevent cartesian explosion
                     .Select(ur => new GroupMemberItemDto
                     {
                         UserEmail = ur.User!.user_email,
@@ -558,8 +563,10 @@ namespace BitRaserApiProject.Controllers
 
                 // Get subusers in this group
                 var subusers = await _context.SubuserRoles
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .Where(sr => sr.RoleId == groupId)
                     .Include(sr => sr.Subuser)
+                    .AsSplitQuery()  // ✅ Prevent cartesian explosion
                     .Select(sr => new GroupMemberItemDto
                     {
                         UserEmail = sr.Subuser!.subuser_email,
@@ -578,6 +585,7 @@ namespace BitRaserApiProject.Controllers
                 // Efficiently fetch License Types from Machines
                 // We take the "highest" available license for each user if they have multiple
                 var userLicenses = await _context.Machines
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .Where(m => memberEmails.Contains(m.user_email) && m.license_activated)
                     .Select(m => new { m.user_email, m.license_details_json }) 
                     .ToListAsync();
@@ -725,13 +733,14 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { message = "User not authenticated" });
                 }
 
-                var totalGroups = await _context.Roles.CountAsync();
-                var totalUsers = await _context.UserRoles.Select(ur => ur.UserId).Distinct().CountAsync() +
-                                 await _context.SubuserRoles.Select(sr => sr.SubuserId).Distinct().CountAsync();
+                var totalGroups = await _context.Roles.AsNoTracking().CountAsync();
+                var totalUsers = await _context.UserRoles.AsNoTracking().Select(ur => ur.UserId).Distinct().CountAsync() +
+                                 await _context.SubuserRoles.AsNoTracking().Select(sr => sr.SubuserId).Distinct().CountAsync();
                 // Fixed: Use Machines instead of machines
-                var totalLicenses = await _context.Machines.CountAsync(m => m.license_activated);
+                var totalLicenses = await _context.Machines.AsNoTracking().CountAsync(m => m.license_activated);
 
                 var topGroups = await _context.Roles
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .OrderByDescending(r => _context.UserRoles.Count(ur => ur.RoleId == r.RoleId))
                     .Take(5)
                     .Select(r => new GroupStatsItemDto
@@ -746,7 +755,7 @@ namespace BitRaserApiProject.Controllers
                 // Fix: Calculate licenses client-side
                 foreach (var group in topGroups)
                 {
-                    group.LicenseCount = CalculateLicensesForGroup(await _context.Roles.Where(r => r.RoleName == group.GroupName).Select(r => r.RoleId).FirstOrDefaultAsync());
+                    group.LicenseCount = CalculateLicensesForGroup(await _context.Roles.AsNoTracking().Where(r => r.RoleName == group.GroupName).Select(r => r.RoleId).FirstOrDefaultAsync());
                 }
 
                 return Ok(new GroupStatisticsDto
