@@ -146,7 +146,7 @@ namespace BitRaserApiProject.Controllers
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
 
-                IQueryable<audit_reports> query = context.AuditReports;
+                IQueryable<audit_reports> query = context.AuditReports.AsNoTracking();  // ✅ RENDER OPTIMIZATION
 
                 // Apply role-based filtering
                 if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORTS", isCurrentUserSubuser, GetEffectiveParentEmail()))
@@ -160,9 +160,10 @@ namespace BitRaserApiProject.Controllers
                     {
                         // ✅ ENHANCED: User - own reports + subuser reports
                         var subuserEmails = await context.subuser
-                               .Where(s => s.user_email == userEmail)
-                                 .Select(s => s.subuser_email)
-                          .ToListAsync();
+                            .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                            .Where(s => s.user_email == userEmail)
+                            .Select(s => s.subuser_email)
+                            .ToListAsync();
 
                         query = query.Where(r =>
                   r.client_email == userEmail || // Own reports
@@ -281,9 +282,10 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 var reports = await context.AuditReports
-                       .Where(r => r.client_email.ToLower() == decodedEmail) // ✅ Use decoded email
-              .OrderByDescending(r => r.report_datetime)
-                          .ToListAsync();
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                    .Where(r => r.client_email.ToLower() == decodedEmail) // Use decoded email
+                    .OrderByDescending(r => r.report_datetime)
+                    .ToListAsync();
 
                 _logger.LogInformation("Retrieved {Count} reports for {Email} (decoded) from {DbType} database",
                        reports.Count, decodedEmail, await _tenantService.IsPrivateCloudUserAsync() ? "PRIVATE" : "MAIN");
@@ -605,7 +607,7 @@ namespace BitRaserApiProject.Controllers
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
 
-                IQueryable<audit_reports> query = context.AuditReports;
+                IQueryable<audit_reports> query = context.AuditReports.AsNoTracking();  // ✅ RENDER OPTIMIZATION
 
                 // Apply role-based filtering
                 if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_REPORT_STATISTICS", isCurrentUserSubuser))
@@ -668,7 +670,7 @@ namespace BitRaserApiProject.Controllers
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
 
-                IQueryable<audit_reports> query = context.AuditReports;
+                IQueryable<audit_reports> query = context.AuditReports.AsNoTracking();  // ✅ RENDER OPTIMIZATION
 
                 // Apply role-based filtering
                 if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser))
@@ -718,7 +720,7 @@ namespace BitRaserApiProject.Controllers
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
 
-                IQueryable<audit_reports> query = context.AuditReports;
+                IQueryable<audit_reports> query = context.AuditReports.AsNoTracking();  // ✅ RENDER OPTIMIZATION
 
                 // Apply role-based filtering
                 if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser))
@@ -772,7 +774,7 @@ namespace BitRaserApiProject.Controllers
                 var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
                 var isCurrentUserSubuser = await IsCurrentUserSubuserAsync(userEmail!);
 
-                IQueryable<audit_reports> query = context.AuditReports;
+                IQueryable<audit_reports> query = context.AuditReports.AsNoTracking();  // ✅ RENDER OPTIMIZATION
 
                 // Apply role-based filtering
                 if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_REPORTS", isCurrentUserSubuser))
