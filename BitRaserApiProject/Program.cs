@@ -574,6 +574,31 @@ Console.WriteLine($"🚀 Server configured to start on port: {port}");
 
 var app = builder.Build();
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ✅ CRITICAL FIX: Initialize Email Quotas at Startup
+// Without this, hybrid email providers report "not available" and ALL emails fail
+// ═══════════════════════════════════════════════════════════════════════════════
+try
+{
+    using var scope = app.Services.CreateScope();
+    var quotaService = scope.ServiceProvider.GetService<BitRaserApiProject.Services.Email.IEmailQuotaService>();
+    if (quotaService != null)
+    {
+        quotaService.InitializeQuotasAsync().GetAwaiter().GetResult();
+        Console.WriteLine("✅ Email quota service initialized successfully");
+    }
+    else
+    {
+        Console.WriteLine("⚠️ Email quota service not registered - emails may fail");
+    }
+}
+catch (Exception emailInitEx)
+{
+    // Don't crash app, but log critical warning
+    Console.WriteLine($"⚠️ Failed to initialize email quotas: {emailInitEx.Message}");
+    Console.WriteLine("⚠️ Email system may use fallback providers");
+}
+
 // CRITICAL FIX: Apply CORS BEFORE other middleware
 // This must be one of the first middleware in the pipeline
 app.UseCors("AllowVercelFrontend");
