@@ -197,42 +197,46 @@ namespace BitRaserApiProject.Controllers
                     return StatusCode(403, new { message = "Insufficient permissions to view audit report" });
                 }
 
-                var totalLicenses = await _context.Machines.CountAsync();
-                var usedLicenses = await _context.Machines.CountAsync(m => m.license_activated);
+                var totalLicenses = await _context.Machines.AsNoTracking().CountAsync();  // ✅ RENDER OPTIMIZATION
+                var usedLicenses = await _context.Machines.AsNoTracking().CountAsync(m => m.license_activated);  // ✅ RENDER OPTIMIZATION
                 var now = DateTime.UtcNow;
                 var expiringDate = now.AddDays(30);
 
                 var expiringLicenses = await _context.Machines
-    .Where(m => m.license_activated &&
-         m.license_activation_date.HasValue &&
-       m.license_activation_date.Value.AddDays(m.license_days_valid) <= expiringDate &&
-    m.license_activation_date.Value.AddDays(m.license_days_valid) > now)
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                    .Where(m => m.license_activated &&
+                        m.license_activation_date.HasValue &&
+                        m.license_activation_date.Value.AddDays(m.license_days_valid) <= expiringDate &&
+                        m.license_activation_date.Value.AddDays(m.license_days_valid) > now)
                     .CountAsync();
 
                 var expiredLicenses = await _context.Machines
-              .Where(m => m.license_activated &&
-              m.license_activation_date.HasValue &&
-                       m.license_activation_date.Value.AddDays(m.license_days_valid) <= now)
-                        .CountAsync();
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                    .Where(m => m.license_activated &&
+                        m.license_activation_date.HasValue &&
+                        m.license_activation_date.Value.AddDays(m.license_days_valid) <= now)
+                    .CountAsync();
 
                 var licensesByUser = await _context.Machines
-                     .Where(m => m.license_activated)
-             .GroupBy(m => m.user_email)
-                        .Select(g => new { UserEmail = g.Key, Count = g.Count() })
-             .ToDictionaryAsync(x => x.UserEmail, x => x.Count);
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                    .Where(m => m.license_activated)
+                    .GroupBy(m => m.user_email)
+                    .Select(g => new { UserEmail = g.Key, Count = g.Count() })
+                    .ToDictionaryAsync(x => x.UserEmail, x => x.Count);
 
                 var recentActivity = await _context.Machines
-                        .Where(m => m.license_activated && m.license_activation_date.HasValue)
-                             .OrderByDescending(m => m.license_activation_date)
-                             .Take(10)
-                 .Select(m => new LicenseUsageEntry
-                 {
-                     UserEmail = m.user_email,
-                     LicensesAssigned = 1,
-                     AssignedAt = m.license_activation_date.GetValueOrDefault(),
-                     AssignedBy = "System"
-                 })
-                       .ToListAsync();
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                    .Where(m => m.license_activated && m.license_activation_date.HasValue)
+                    .OrderByDescending(m => m.license_activation_date)
+                    .Take(10)
+                    .Select(m => new LicenseUsageEntry
+                    {
+                        UserEmail = m.user_email,
+                        LicensesAssigned = 1,
+                        AssignedAt = m.license_activation_date.GetValueOrDefault(),
+                        AssignedBy = "System"
+                    })
+                    .ToListAsync();
 
                 var report = new LicenseAuditReportDto
                 {
@@ -334,8 +338,8 @@ namespace BitRaserApiProject.Controllers
 
         private async Task<LicenseSettingsDto> GetCurrentLicenseSettings()
         {
-            var totalLicenses = await _context.Machines.CountAsync();
-            var usedLicenses = await _context.Machines.CountAsync(m => m.license_activated);
+            var totalLicenses = await _context.Machines.AsNoTracking().CountAsync();  // ✅ RENDER OPTIMIZATION
+            var usedLicenses = await _context.Machines.AsNoTracking().CountAsync(m => m.license_activated);  // ✅ RENDER OPTIMIZATION
 
             return new LicenseSettingsDto
             {

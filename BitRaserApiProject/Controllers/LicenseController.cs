@@ -1060,7 +1060,8 @@ namespace BitRaserApiProject.Controllers
                 using var context = await _contextFactory.CreateDbContextAsync();
 
                 var licenses = await context.Set<LicenseActivation>()
-                          .OrderByDescending(l => l.CreatedAt)
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                    .OrderByDescending(l => l.CreatedAt)
                   .Select(l => new LicenseDetailsResponse
                   {
                       id = l.Id,
@@ -1102,7 +1103,8 @@ namespace BitRaserApiProject.Controllers
                 using var context = await _contextFactory.CreateDbContextAsync();
 
                 var license = await context.Set<LicenseActivation>()
-           .Where(l => l.LicenseKey == licenseKey).FirstOrDefaultAsync();
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                    .Where(l => l.LicenseKey == licenseKey).FirstOrDefaultAsync();
 
                 if (license == null)
                     return NotFound(new { message = "License not found" });
