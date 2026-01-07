@@ -134,12 +134,12 @@ namespace BitRaserApiProject.Services
                 var serverVersion = new MySqlServerVersion(new Version(8, 0, 21));
                 optionsBuilder.UseMySql(decryptedConn, serverVersion, mysqlOptions =>
                 {
-                    mysqlOptions.CommandTimeout(5);
-                    mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(2), null);
+                    mysqlOptions.CommandTimeout(15); // ✅ FIXED: Increased from 5s for cold connections
+                    mysqlOptions.EnableRetryOnFailure(2, TimeSpan.FromSeconds(3), null);
                 });
                 
                 using var privateContext = new ApplicationDbContext(optionsBuilder.Options);
-                privateContext.Database.SetCommandTimeout(5);
+                privateContext.Database.SetCommandTimeout(15); // ✅ FIXED: Increased from 5s
                 
                 var pcSubuser = await privateContext.subuser
                     .AsNoTracking()

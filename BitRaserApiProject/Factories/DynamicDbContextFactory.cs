@@ -45,7 +45,7 @@ namespace BitRaserApiProject.Factories
                         maxRetryDelay: TimeSpan.FromSeconds(5),
                         errorNumbersToAdd: null
                     );
-                             mySqlOptions.CommandTimeout(120);
+                             mySqlOptions.CommandTimeout(30); // ✅ FIXED: Reduced from 120s for faster failure detection
                          }
                 );
 
@@ -87,7 +87,7 @@ namespace BitRaserApiProject.Factories
          maxRetryDelay: TimeSpan.FromSeconds(5),
         errorNumbersToAdd: null
             );
-                 mySqlOptions.CommandTimeout(120);
+                 mySqlOptions.CommandTimeout(30); // ✅ FIXED: Reduced from 120s for faster failure detection
              }
                    );
 

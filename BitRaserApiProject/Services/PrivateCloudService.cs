@@ -381,8 +381,8 @@ INDEX idx_user_email (`user_email`),
                     var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
                     optionsBuilder.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 21)), 
                         mysqlOptions => {
-                            mysqlOptions.CommandTimeout(3);
-                            mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(1), null);
+                            mysqlOptions.CommandTimeout(15); // ✅ FIXED: Increased from 3s for cold connections
+                            mysqlOptions.EnableRetryOnFailure(2, TimeSpan.FromSeconds(3), null);
                         });
                     
                     using var pcContext = new ApplicationDbContext(optionsBuilder.Options);
@@ -464,8 +464,8 @@ INDEX idx_user_email (`user_email`),
                     var optionsBuilder = new DbContextOptionsBuilder<ApplicationDbContext>();
                     optionsBuilder.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 21)), 
                         mysqlOptions => {
-                            mysqlOptions.CommandTimeout(3);
-                            mysqlOptions.EnableRetryOnFailure(1, TimeSpan.FromSeconds(1), null);
+                            mysqlOptions.CommandTimeout(15); // ✅ FIXED: Increased from 3s for cold connections
+                            mysqlOptions.EnableRetryOnFailure(2, TimeSpan.FromSeconds(3), null);
                         });
                     
                     using var pcContext = new ApplicationDbContext(optionsBuilder.Options);
