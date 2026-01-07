@@ -88,7 +88,7 @@ namespace BitRaserApiProject.Middleware
                 var limit = isPrivateCloudUser ? _privateCloudLimit : _normalUserLimit;
                 var userType = isPrivateCloudUser ? "PrivateCloud" : "Normal";
 
-                if (!CheckUserRateLimit(userEmail, limit, userType, context))
+                if (!await CheckUserRateLimitAsync(userEmail, limit, userType, context))
                 {
                     return;
                 }
@@ -96,7 +96,7 @@ namespace BitRaserApiProject.Middleware
             else
             {
                 // Unauthenticated request - use IP-based rate limit
-                if (!CheckIpRateLimit(clientIp, context))
+                if (!await CheckIpRateLimitAsync(clientIp, context))
                 {
                     return;
                 }
@@ -108,7 +108,7 @@ namespace BitRaserApiProject.Middleware
         /// <summary>
         /// Check rate limit for authenticated users (per minute)
         /// </summary>
-        private bool CheckUserRateLimit(string userEmail, int limit, string userType, HttpContext context)
+        private async Task<bool> CheckUserRateLimitAsync(string userEmail, int limit, string userType, HttpContext context)
         {
             var key = $"user:{userEmail}";
             var now = DateTime.UtcNow;
@@ -135,7 +135,7 @@ namespace BitRaserApiProject.Middleware
                 _logger.LogWarning("⚠️ Rate limit exceeded for {UserType} user {Email}: {Count}/{Limit} requests/min",
           userType, userEmail, entry.Count, limit);
 
-                ReturnRateLimitExceeded(context, limit, entry.WindowStart, _windowDuration, "minute");
+                await ReturnRateLimitExceededAsync(context, limit, entry.WindowStart, _windowDuration, "minute");
                 return false;
             }
 
@@ -145,7 +145,7 @@ namespace BitRaserApiProject.Middleware
         /// <summary>
         /// Check rate limit for unauthenticated requests (IP-based, per minute)
         /// </summary>
-        private bool CheckIpRateLimit(string clientIp, HttpContext context)
+        private async Task<bool> CheckIpRateLimitAsync(string clientIp, HttpContext context)
         {
             var key = $"ip:{clientIp}";
             var now = DateTime.UtcNow;
@@ -170,7 +170,7 @@ namespace BitRaserApiProject.Middleware
                 _logger.LogWarning("⚠️ Rate limit exceeded for IP {IP}: {Count}/{Limit} requests/min",
                clientIp, entry.Count, _unauthenticatedLimit);
 
-                ReturnRateLimitExceeded(context, _unauthenticatedLimit, entry.WindowStart, _windowDuration, "minute");
+                await ReturnRateLimitExceededAsync(context, _unauthenticatedLimit, entry.WindowStart, _windowDuration, "minute");
                 return false;
             }
 
@@ -367,7 +367,7 @@ namespace BitRaserApiProject.Middleware
         /// <summary>
         /// Return 429 Too Many Requests response
         /// </summary>
-        private void ReturnRateLimitExceeded(HttpContext context, int limit, DateTime windowStart, TimeSpan windowDuration, string timeUnit)
+        private async Task ReturnRateLimitExceededAsync(HttpContext context, int limit, DateTime windowStart, TimeSpan windowDuration, string timeUnit)
         {
             var resetTime = windowStart.Add(windowDuration);
             var retryAfter = Math.Max(1, (int)(resetTime - DateTime.UtcNow).TotalSeconds);
@@ -386,7 +386,7 @@ namespace BitRaserApiProject.Middleware
             };
 
             var json = System.Text.Json.JsonSerializer.Serialize(response);
-            context.Response.WriteAsync(json).Wait();
+            await context.Response.WriteAsync(json);
         }
 
         /// <summary>

@@ -67,8 +67,12 @@ namespace BitRaserApiProject.Services
             };
             _otpCache.TryAdd(emailKey, otpData);
 
-            // Also store in database (async, fire-and-forget for speed)
-            _ = Task.Run(async () => await StoreOtpInDatabaseAsync(emailKey, otp));
+            // Also store in database (async, fire-and-forget with error logging for observability)
+            _ = StoreOtpInDatabaseAsync(emailKey, otp).ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                    _logger.LogError(t.Exception, "❌ Background OTP storage failed for {Email}", emailKey);
+            }, TaskContinuationOptions.OnlyOnFaulted);
 
             _logger.LogInformation("📧 OTP generated for {Email}: {Otp} (expires in {Minutes} min)",
                 emailKey, otp, _otpExpiryMinutes);
@@ -125,8 +129,12 @@ namespace BitRaserApiProject.Services
             var emailKey = email.ToLower().Trim();
             _otpCache.TryRemove(emailKey, out _);
 
-            // Also remove from database
-            _ = Task.Run(async () => await RemoveOtpFromDatabaseAsync(emailKey));
+            // Also remove from database (with error logging)
+            _ = RemoveOtpFromDatabaseAsync(emailKey).ContinueWith(t =>
+            {
+                if (t.IsFaulted)
+                    _logger.LogError(t.Exception, "❌ Background OTP removal failed for {Email}", emailKey);
+            }, TaskContinuationOptions.OnlyOnFaulted);
 
             _logger.LogInformation("🗑️ OTP removed for {Email}", emailKey);
         }
