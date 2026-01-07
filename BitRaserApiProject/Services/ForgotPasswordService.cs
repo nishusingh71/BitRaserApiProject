@@ -594,8 +594,10 @@ namespace BitRaserApiProject.Services
                 // ✅ Step 5: Update password in correct database
                 if (user != null)
                 {
-                    user.user_password = dto.NewPassword;  // Plain text (as per your current schema)
-                    user.hash_password = hashedPassword;  // BCrypt hashed
+                    // ✅ CRITICAL FIX: Only store BCrypt hashed password in hash_password
+                    // Login verifies against hash_password using BCrypt.Verify()
+                    // DO NOT store plain text in user_password - causes login failures!
+                    user.hash_password = hashedPassword;  // BCrypt hashed - LOGIN CHECKS THIS
                     user.updated_at = DateTimeHelper.GetUtcNow();
 
                     if (isPrivateCloudUser && privateContext != null)
