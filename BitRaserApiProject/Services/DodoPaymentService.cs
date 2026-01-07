@@ -1106,7 +1106,7 @@ namespace BitRaserApiProject.Services
 </td></tr>
 </td></tr>
 <tr><td style='background:#f8f9fa;padding:20px;text-align:center;font-size:12px;color:#888;'>
-<p style='margin:0;'>DSecure Technologies • support@dsecuretech.com</p>
+<p style='margin:0;'>DSecure Technologies • Support@dsecuretech.com</p>
 </td></tr>
 </table>
 </body>
@@ -1198,7 +1198,7 @@ namespace BitRaserApiProject.Services
             <p style='margin-top: 30px;'><strong>📎 Attachment:</strong> Complete order details and license keys are in the attached Excel file.</p>
         </div>
         <div class='footer'>
-            <p>DSecure Technologies • support@dsecuretech.com</p>
+            <p>DSecure Technologies • Support@dsecuretech.com</p>
             <p>© 2026 DSecure. All rights reserved.</p>
         </div>
     </div>

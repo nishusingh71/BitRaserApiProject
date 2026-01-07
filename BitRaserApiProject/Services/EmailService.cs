@@ -761,7 +761,7 @@ body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Ari
 <p class='message'>If you didn't request this password reset, please ignore this email. Your password will remain unchanged.</p>
 </div>
 <div class='footer'>
-<p><strong>Need Help?</strong> Contact us at support@dsecuretech.com</p>
+<p><strong>Need Help?</strong> Contact us at Support@dsecuretech.com</p>
 <p>© {DateTime.Now.Year} D-Secure Technologies Pvt Ltd. All rights reserved.</p>
 </div>
 </div>
@@ -832,7 +832,7 @@ body {{ font-family: 'Inter', sans-serif; background: #f8fafc; margin: 0; paddin
 <li>Update your password regularly every 3-6 months</li>
 </ul>
 </div>
-<p class='message'>If you didn't make this change, please contact our support team immediately at support@dsecuretech.com</p>
+<p class='message'>If you didn't make this change, please contact our support team immediately at Support@dsecuretech.com</p>
 </div>
 <div class='footer'>
 <p><strong>Need Help?</strong> We're here for you 24/7</p>
@@ -1025,7 +1025,7 @@ body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
 </div>
 
 <div class='footer'>
-<p><strong>Need Help?</strong> Contact us at support@dsecuretech.com</p>
+<p><strong>Need Help?</strong> Contact us at Support@dsecuretech.com</p>
 <p>© {DateTime.Now.Year} D-Secure Technologies Pvt Ltd. All rights reserved.</p>
 </div>
 </div>
@@ -1134,7 +1134,7 @@ body {{ font-family: 'Inter', sans-serif; background: linear-gradient(135deg, #1
 <div style='text-align: center;'>
 <a href='https://dsecuretech.com/login' class='cta-button' style='color: #ffffff;'>Go to Dashboard</a>
 </div>
-<p class='message' style='font-size: 14px; color: #1a1a2e; text-align: center; margin-top: 30px;'>Need help getting started? Contact us at <strong style='color: #059669;'>support@dsecuretech.com</strong></p>
+<p class='message' style='font-size: 14px; color: #1a1a2e; text-align: center; margin-top: 30px;'>Need help getting started? Contact us at <strong style='color: #059669;'>Support@dsecuretech.com</strong></p>
 </div>
 <div class='footer'>
 <p><strong>Thank you for choosing D-Secure Technologies Pvt Ltd!</strong></p>
