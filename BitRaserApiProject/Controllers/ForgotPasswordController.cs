@@ -3,6 +3,7 @@ using System.Security.Claims;
 using BCrypt.Net;
 using BitRaserApiProject.Models;
 using BitRaserApiProject.Services;
+using BitRaserApiProject.Services.Email;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -20,27 +21,30 @@ namespace BitRaserApiProject.Controllers
     public class ForgotPasswordController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
-      private readonly IOtpService _otpService;
-  private readonly IEmailService _emailService;
-   private readonly ILogger<ForgotPasswordController> _logger;
+        private readonly IOtpService _otpService;
+        private readonly IEmailService _emailService;
+        private readonly IEmailOrchestrator? _emailOrchestrator;
+        private readonly ILogger<ForgotPasswordController> _logger;
         private readonly IConfiguration _configuration;
         private readonly ICacheService _cacheService;
 
         public ForgotPasswordController(
             ApplicationDbContext context,
-     IOtpService otpService,
-    IEmailService emailService,
-      ILogger<ForgotPasswordController> logger,
-  IConfiguration configuration,
-  ICacheService cacheService)
+            IOtpService otpService,
+            IEmailService emailService,
+            ILogger<ForgotPasswordController> logger,
+            IConfiguration configuration,
+            ICacheService cacheService,
+            IEmailOrchestrator? emailOrchestrator = null)
         {
-   _context = context;
-  _otpService = otpService;
-  _emailService = emailService;
-      _logger = logger;
+            _context = context;
+            _otpService = otpService;
+            _emailService = emailService;
+            _emailOrchestrator = emailOrchestrator;
+            _logger = logger;
             _configuration = configuration;
-   _cacheService = cacheService;
-   }
+            _cacheService = cacheService;
+        }
 
         /// <summary>
         /// Step 1: Request OTP for password reset
@@ -89,9 +93,9 @@ string userType = user != null ? "User" : "Subuser";
     string otp = _otpService.GenerateOtp(request.Email);
             _logger.LogInformation("📧 OTP generated: {OTP} for {Email}", otp, request.Email);
 
-       // Send OTP email
-   _logger.LogInformation("📧 Attempting to send OTP email...");
-  bool emailSent = await _emailService.SendOtpEmailAsync(request.Email, otp, userName);
+            // Send OTP email via hybrid system (Graph > SendGrid) or fallback
+            _logger.LogInformation("📧 Attempting to send OTP email...");
+            bool emailSent = await SendOtpEmailAsync(request.Email, otp, userName);
 
   if (!emailSent)
       {
@@ -319,10 +323,10 @@ message = "OTP has been sent to your email. Please check your inbox.",
  }
 
                 // Remove OTP after successful password reset
-     _otpService.RemoveOtp(request.Email);
+                _otpService.RemoveOtp(request.Email);
 
-                // Send success email
-       await _emailService.SendPasswordResetSuccessEmailAsync(request.Email, userName);
+                // Send success email via hybrid system
+                await SendPasswordResetSuccessEmailAsync(request.Email, userName);
 
      _logger.LogInformation("Password reset successfully for {Email} ({UserType})", request.Email, userType);
 
@@ -598,8 +602,149 @@ service = "ForgotPasswordController",
    Environment.GetEnvironmentVariable("BREVO_API_KEY") ?? 
     _configuration["Brevo:ApiKey"]
          ) ? "Brevo" : "Gmail SMTP"
-     });
+            });
         }
+
+        #region Hybrid Email Helpers
+
+        /// <summary>
+        /// Send OTP email via hybrid system (MS Graph > SendGrid) with fallback to old EmailService
+        /// </summary>
+        private async Task<bool> SendOtpEmailAsync(string email, string otp, string userName)
+        {
+            // Try hybrid orchestrator first
+            if (_emailOrchestrator != null)
+            {
+                try
+                {
+                    var request = new EmailSendRequest
+                    {
+                        ToEmail = email,
+                        ToName = userName,
+                        Subject = $"Your DSecure Verification Code: {otp}",
+                        HtmlBody = GenerateOtpEmailHtml(otp, userName),
+                        Type = EmailType.OTP
+                    };
+
+                    var result = await _emailOrchestrator.SendEmailAsync(request);
+                    
+                    if (result.Success)
+                    {
+                        _logger.LogInformation("✅ OTP email sent via {Provider} to {Email}", 
+                            result.ProviderUsed, email);
+                        return true;
+                    }
+                    else
+                    {
+                        _logger.LogWarning("⚠️ Hybrid OTP email failed: {Message}, falling back to old service", 
+                            result.Message);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "⚠️ Hybrid OTP email exception, falling back to old service");
+                }
+            }
+
+            // Fallback to old EmailService
+            return await _emailService.SendOtpEmailAsync(email, otp, userName);
+        }
+
+        /// <summary>
+        /// Send password reset success email via hybrid system with fallback
+        /// </summary>
+        private async Task SendPasswordResetSuccessEmailAsync(string email, string userName)
+        {
+            // Try hybrid orchestrator first
+            if (_emailOrchestrator != null)
+            {
+                try
+                {
+                    var request = new EmailSendRequest
+                    {
+                        ToEmail = email,
+                        ToName = userName,
+                        Subject = "Your DSecure Password Has Been Reset",
+                        HtmlBody = GeneratePasswordResetSuccessHtml(userName),
+                        Type = EmailType.Transactional
+                    };
+
+                    var result = await _emailOrchestrator.SendEmailAsync(request);
+                    
+                    if (result.Success)
+                    {
+                        _logger.LogInformation("✅ Password reset success email sent via {Provider} to {Email}", 
+                            result.ProviderUsed, email);
+                        return;
+                    }
+                    else
+                    {
+                        _logger.LogWarning("⚠️ Hybrid password reset email failed: {Message}, falling back", 
+                            result.Message);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "⚠️ Hybrid password reset email exception, falling back");
+                }
+            }
+
+            // Fallback to old EmailService
+            await _emailService.SendPasswordResetSuccessEmailAsync(email, userName);
+        }
+
+        private string GenerateOtpEmailHtml(string otp, string userName)
+        {
+            return $@"
+<!DOCTYPE html><html><head><meta charset='utf-8'></head>
+<body style='font-family: Segoe UI, Arial; padding: 20px; background: #f5f5f5;'>
+<div style='max-width: 500px; margin: 0 auto; background: #fff; border-radius: 10px; overflow: hidden;'>
+<div style='background: linear-gradient(135deg, #1a1a2e, #16213e); color: #fff; padding: 30px; text-align: center;'>
+<h1 style='margin: 0; font-size: 22px;'>🔐 Verification Code</h1>
+</div>
+<div style='padding: 30px; text-align: center;'>
+<p style='font-size: 16px;'>Dear {userName},</p>
+<p>Use this code to verify your identity:</p>
+<div style='background: #f0f7ff; padding: 25px; border-radius: 10px; margin: 25px 0;'>
+<span style='font-size: 36px; font-weight: bold; letter-spacing: 10px; color: #1a1a2e;'>{otp}</span>
+</div>
+<p style='color: #888; font-size: 14px;'>This code expires in <strong>10 minutes</strong>.</p>
+<p style='color: #888; font-size: 12px;'>If you didn't request this code, please ignore this email.</p>
+</div>
+<div style='background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #888;'>
+© {DateTime.UtcNow.Year} DSecure Technologies. All rights reserved.<br>
+<a href='mailto:Support@dsecuretech.com' style='color: #1a1a2e;'>Support@dsecuretech.com</a>
+</div>
+</div>
+</body></html>";
+        }
+
+        private string GeneratePasswordResetSuccessHtml(string userName)
+        {
+            return $@"
+<!DOCTYPE html><html><head><meta charset='utf-8'></head>
+<body style='font-family: Segoe UI, Arial; padding: 20px; background: #f5f5f5;'>
+<div style='max-width: 500px; margin: 0 auto; background: #fff; border-radius: 10px; overflow: hidden;'>
+<div style='background: linear-gradient(135deg, #059669, #047857); color: #fff; padding: 30px; text-align: center;'>
+<h1 style='margin: 0; font-size: 22px;'>✅ Password Reset Successful</h1>
+</div>
+<div style='padding: 30px;'>
+<p style='font-size: 16px;'>Dear {userName},</p>
+<p>Your password has been successfully reset. You can now log in to your dashboard with your new password.</p>
+<div style='background: #e8f5e9; padding: 20px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #4caf50;'>
+<p style='margin: 0;'>🔒 <strong>Security Tip:</strong> Never share your password with anyone.</p>
+</div>
+<p>If you did not make this change, please contact us immediately at:</p>
+<p>📧 <a href='mailto:Support@dsecuretech.com'>Support@dsecuretech.com</a></p>
+</div>
+<div style='background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #888;'>
+© {DateTime.UtcNow.Year} DSecure Technologies. All rights reserved.
+</div>
+</div>
+</body></html>";
+        }
+
+        #endregion
     }
 
   #region Request Models
