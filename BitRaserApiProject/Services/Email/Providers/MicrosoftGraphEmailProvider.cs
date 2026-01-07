@@ -189,6 +189,7 @@ namespace BitRaserApiProject.Services.Email.Providers
         /// <summary>
         /// Fix #2: Validate that the app has Mail.Send permission and admin consent
         /// Makes a lightweight call to check user profile (requires minimal permissions)
+        /// ✅ IMPROVED: Added retry logic for cold start resilience
         /// </summary>
         private async Task ValidatePermissionsAsync()
         {
@@ -198,58 +199,85 @@ namespace BitRaserApiProject.Services.Email.Providers
                 return;
             }
 
-            try
+            const int maxRetries = 3;
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
-                _logger.LogDebug("🔍 MS Graph: Validating permissions for user {UserId}...", _senderUserId[..8] + "***");
+                try
+                {
+                    _logger.LogDebug("🔍 MS Graph: Validating permissions for user {UserId}... (Attempt {Attempt}/{Max})", 
+                        _senderUserId[..8] + "***", attempt, maxRetries);
 
-                // Try to get basic user info - this validates:
-                // 1. Authentication is working
-                // 2. User exists
-                // 3. App has at least User.Read.All permission
-                var user = await _graphClient.Users[_senderUserId].GetAsync(requestConfig =>
-                {
-                    requestConfig.QueryParameters.Select = new[] { "id", "mail", "displayName" };
-                });
+                    // Try to get basic user info - this validates:
+                    // 1. Authentication is working
+                    // 2. User exists
+                    // 3. App has at least User.Read.All permission
+                    var user = await _graphClient.Users[_senderUserId].GetAsync(requestConfig =>
+                    {
+                        requestConfig.QueryParameters.Select = new[] { "id", "mail", "displayName" };
+                    });
 
-                if (user != null)
-                {
-                    _logger.LogInformation("✅ MS Graph: Permissions validated - User: {DisplayName} ({Mail})", 
-                        user.DisplayName ?? "N/A", user.Mail ?? "N/A");
-                    _permissionsValidated = true;
+                    if (user != null)
+                    {
+                        _logger.LogInformation("✅ MS Graph: Permissions validated - User: {DisplayName} ({Mail})", 
+                            user.DisplayName ?? "N/A", user.Mail ?? "N/A");
+                        _permissionsValidated = true;
+                        return; // Success - exit retry loop
+                    }
+                    else
+                    {
+                        _logger.LogWarning("⚠️ MS Graph: User not found for UserId {UserId}", _senderUserId[..8] + "***");
+                    }
                 }
-                else
+                catch (Microsoft.Graph.Models.ODataErrors.ODataError odataError)
                 {
-                    _logger.LogWarning("⚠️ MS Graph: User not found for UserId {UserId}", _senderUserId[..8] + "***");
+                    var errorCode = odataError.Error?.Code ?? "Unknown";
+                    var errorMessage = odataError.Error?.Message ?? odataError.Message;
+                    
+                    if (errorCode == "Authorization_RequestDenied" || odataError.ResponseStatusCode == 403)
+                    {
+                        // Don't retry permission errors - they need Azure Portal fix
+                        _logger.LogError("🔴 MS Graph PERMISSION_ERROR: Mail.Send application permission not granted or admin consent missing. " +
+                            "Go to Azure Portal > App Registrations > API Permissions > Add 'Mail.Send' (Application) > Grant Admin Consent");
+                        return;
+                    }
+                    else if (errorCode == "Request_ResourceNotFound" || odataError.ResponseStatusCode == 404)
+                    {
+                        _logger.LogError("🔴 MS Graph USER_ERROR: User with ID '{UserId}' not found. Verify AZURE_SENDER_USER_ID is correct Object ID or UPN.", 
+                            _senderUserId);
+                        return;
+                    }
+                    else if (odataError.ResponseStatusCode == 401)
+                    {
+                        _logger.LogError("🔴 MS Graph AUTH_ERROR: Authentication failed. Verify AZURE_CLIENT_ID, AZURE_TENANT_ID, and AZURE_CLIENT_SECRET.");
+                        return;
+                    }
+                    else
+                    {
+                        // Potentially transient error - retry
+                        _logger.LogWarning("⚠️ MS Graph: Permission check returned error [{Code}]: {Message} (Attempt {Attempt})", 
+                            errorCode, errorMessage, attempt);
+                        
+                        if (attempt < maxRetries)
+                        {
+                            var delay = attempt * 1000; // 1s, 2s, 3s
+                            _logger.LogDebug("⏳ Retrying in {Delay}ms...", delay);
+                            await Task.Delay(delay);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "⚠️ MS Graph: Permission validation encountered unexpected error (Attempt {Attempt})", attempt);
+                    
+                    if (attempt < maxRetries)
+                    {
+                        var delay = attempt * 1000;
+                        await Task.Delay(delay);
+                    }
                 }
             }
-            catch (Microsoft.Graph.Models.ODataErrors.ODataError odataError)
-            {
-                var errorCode = odataError.Error?.Code ?? "Unknown";
-                var errorMessage = odataError.Error?.Message ?? odataError.Message;
-                
-                if (errorCode == "Authorization_RequestDenied" || odataError.ResponseStatusCode == 403)
-                {
-                    _logger.LogError("🔴 MS Graph PERMISSION_ERROR: Mail.Send application permission not granted or admin consent missing. " +
-                        "Go to Azure Portal > App Registrations > API Permissions > Add 'Mail.Send' (Application) > Grant Admin Consent");
-                }
-                else if (errorCode == "Request_ResourceNotFound" || odataError.ResponseStatusCode == 404)
-                {
-                    _logger.LogError("🔴 MS Graph USER_ERROR: User with ID '{UserId}' not found. Verify AZURE_SENDER_USER_ID is correct Object ID or UPN.", 
-                        _senderUserId);
-                }
-                else if (odataError.ResponseStatusCode == 401)
-                {
-                    _logger.LogError("🔴 MS Graph AUTH_ERROR: Authentication failed. Verify AZURE_CLIENT_ID, AZURE_TENANT_ID, and AZURE_CLIENT_SECRET.");
-                }
-                else
-                {
-                    _logger.LogWarning("⚠️ MS Graph: Permission check returned error [{Code}]: {Message}", errorCode, errorMessage);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "⚠️ MS Graph: Permission validation encountered unexpected error");
-            }
+            
+            _logger.LogWarning("⚠️ MS Graph: Permission validation failed after {MaxRetries} attempts, but provider will continue", maxRetries);
         }
 
         public async Task<bool> IsAvailableAsync()
