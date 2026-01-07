@@ -34,7 +34,25 @@ if (builder.Environment.IsDevelopment())
 else
 {
     builder.Logging.SetMinimumLevel(LogLevel.Information);
+    
+    // ✅ RENDER OPTIMIZATION: Filter noisy namespaces in production
+    builder.Logging.AddFilter("Microsoft.AspNetCore.Server.Kestrel", LogLevel.Warning);
+    builder.Logging.AddFilter("Microsoft.AspNetCore.Server.Kestrel.Connections", LogLevel.Warning);
+    builder.Logging.AddFilter("Microsoft.AspNetCore.Hosting", LogLevel.Warning);
+    builder.Logging.AddFilter("Microsoft.Extensions.Http", LogLevel.Warning);
+    builder.Logging.AddFilter("System.Net.Http.HttpClient", LogLevel.Warning);
+    builder.Logging.AddFilter("Microsoft.EntityFrameworkCore.Database.Command", LogLevel.Warning);
 }
+
+// ✅ RENDER OPTIMIZATION: Kestrel Keep-Alive & Connection Management
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);      // Keep connections alive
+    options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
+    options.Limits.MaxConcurrentConnections = 100;                  // Limit concurrent connections
+    options.Limits.MaxConcurrentUpgradedConnections = 10;           // WebSocket limit
+    options.Limits.MaxRequestBodySize = 50 * 1024 * 1024;           // 50MB max request
+});
 
 // Load environment variables with error handling
 try
@@ -412,6 +430,17 @@ builder.Services.AddHttpClient("DodoApi", client =>
     MaxAutomaticRedirections = 5
 });
 builder.Services.AddScoped<IDodoPaymentService, DodoPaymentService>();
+
+// ✅ RENDER OPTIMIZATION: Default HttpClient with connection pooling
+builder.Services.AddHttpClient("Default")
+    .SetHandlerLifetime(TimeSpan.FromMinutes(5))  // Reuse handlers for 5 minutes
+    .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+    {
+        PooledConnectionLifetime = TimeSpan.FromMinutes(2),    // Refresh DNS every 2 min
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1), // Close idle after 1 min
+        MaxConnectionsPerServer = 10,                           // Limit per-server connections
+        EnableMultipleHttp2Connections = true
+    });
 
 // ✅ HYBRID EMAIL SYSTEM - SendGrid + Microsoft Graph with Quota Management
 builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailQuotaService, BitRaserApiProject.Services.Email.EmailQuotaService>();

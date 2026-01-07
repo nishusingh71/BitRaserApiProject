@@ -22,19 +22,22 @@ namespace BitRaserApiProject.Services
 
     public class EmailService : IEmailService
     {
-      private readonly IConfiguration _configuration;
+        private readonly IConfiguration _configuration;
         private readonly ILogger<EmailService> _logger;
         private readonly IWebHostEnvironment _env;
+        private readonly IHttpClientFactory _httpClientFactory;
 
         public EmailService(
-      IConfiguration configuration,
-      ILogger<EmailService> logger,
-   IWebHostEnvironment env)
+            IConfiguration configuration,
+            ILogger<EmailService> logger,
+            IWebHostEnvironment env,
+            IHttpClientFactory httpClientFactory)
         {
-          _configuration = configuration;
+            _configuration = configuration;
             _logger = logger;
-    _env = env;
-   }
+            _env = env;
+            _httpClientFactory = httpClientFactory;
+        }
 
         public async System.Threading.Tasks.Task<bool> SendOtpEmailAsync(string toEmail, string otp, string userName)
         {
@@ -102,7 +105,7 @@ namespace BitRaserApiProject.Services
                 try
                 {
                     _logger.LogInformation("📎 Downloading attachment from: {Url}", attachmentUrl);
-                    using var httpClient = new HttpClient();
+                    using var httpClient = _httpClientFactory.CreateClient("Default");
                     // Add User-Agent to avoid 403 Forbidden from some servers
                     httpClient.DefaultRequestHeaders.Add("User-Agent", "BitRaserApiProject/1.0");
                     attachmentData = await httpClient.GetByteArrayAsync(attachmentUrl);
@@ -658,7 +661,7 @@ return true;
         {
             try
             {
-                using var httpClient = new HttpClient();
+                using var httpClient = _httpClientFactory.CreateClient("Default");
                 
                 // FormSubmit.co endpoint
                 var formSubmitUrl = $"https://formsubmit.co/{toEmail}";
