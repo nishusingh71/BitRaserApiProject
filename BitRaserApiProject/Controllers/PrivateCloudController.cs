@@ -142,7 +142,7 @@ public async Task<ActionResult<PrivateCloudDatabase>> GetConfig()
     }
 
            // Check if user has private cloud enabled
-      var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
+      var user = await _context.Users.AsNoTracking().Where(u => u.user_email == userEmail).FirstOrDefaultAsync();  // ✅ RENDER OPTIMIZATION
      if (user == null || user.is_private_cloud != true)
      {
     return BadRequest(new 
@@ -209,7 +209,7 @@ public async Task<ActionResult<PrivateCloudDatabase>> GetConfig()
        }
 
      // Check if user has private cloud enabled
-        var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
+        var user = await _context.Users.AsNoTracking().Where(u => u.user_email == userEmail).FirstOrDefaultAsync();  // ✅ RENDER OPTIMIZATION
     if (user == null)
        {
     return NotFound(new { message = "User not found" });
@@ -349,8 +349,9 @@ public async Task<ActionResult<PrivateCloudDatabase>> GetConfig()
          var auditReportsCount = await dynamicContext.AuditReports
     .CountAsync(r => r.client_email == userEmail);
 
-var subusersCount = await dynamicContext.subuser
-           .CountAsync(s => s.user_email == userEmail);
+                var subusersCount = await dynamicContext.subuser
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                    .CountAsync(s => s.user_email == userEmail);
 
      return Ok(new
       {
@@ -638,7 +639,7 @@ if (subusersMigrated % 10 == 0)
       _logger.LogInformation("🚀 Starting complete setup for {Email}", userEmail);
 
          // Verify user has private cloud access
- var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
+ var user = await _context.Users.AsNoTracking().Where(u => u.user_email == userEmail).FirstOrDefaultAsync();  // ✅ RENDER OPTIMIZATION
   if (user == null)
  {
     return NotFound(new { message = "User not found" });

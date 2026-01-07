@@ -811,7 +811,7 @@ namespace BitRaserApiProject.Controllers
                 if (string.IsNullOrEmpty(email))
                     return Unauthorized();
 
-                var isSubuser = await _context.subuser.AnyAsync(s => s.subuser_email == email);
+                var isSubuser = await _context.subuser.AsNoTracking().AnyAsync(s => s.subuser_email == email);  // ✅ RENDER OPTIMIZATION
                 var permissions = await _roleService.GetUserPermissionsAsync(email, isSubuser);
                 var roles = await _roleService.GetUserRolesAsync(email, isSubuser);
 
@@ -835,6 +835,7 @@ namespace BitRaserApiProject.Controllers
                 var roles = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
                 {
                     return await _context.Roles
+                        .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                         .Select(r => new { r.RoleId, r.RoleName, r.Description, r.HierarchyLevel })
                         .OrderBy(r => r.HierarchyLevel)
                         .ToListAsync();
@@ -860,6 +861,7 @@ namespace BitRaserApiProject.Controllers
                 var permissions = await _cacheService.GetOrCreateAsync(cacheKey, async () =>
                 {
                     return await _context.Permissions
+                        .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                         .Select(p => new { p.PermissionId, p.PermissionName, p.Description })
                         .ToListAsync();
                 }, CacheService.CacheTTL.Long);
@@ -884,9 +886,11 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized();
 
                 var subusers = await _context.subuser
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .Where(s => s.user_email == email)
                     .Include(s => s.SubuserRoles)
                     .ThenInclude(sr => sr.Role)
+                    .AsSplitQuery()  // ✅ Prevent cartesian explosion
                     .Select(s => new
                     {
                         s.subuser_id,
