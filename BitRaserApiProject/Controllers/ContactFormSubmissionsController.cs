@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Authorization;
 using BitRaserApiProject.Models;
 using System.Text.Json.Serialization;
 using BitRaserApiProject.Services;
@@ -459,6 +460,211 @@ namespace BitRaserApiProject.Controllers
                 });
             }
         }
+
+        #region FormSubmit.co Webhook
+
+        /// <summary>
+        /// FormSubmit.co Webhook Endpoint
+        /// POST /api/formsubmit/webhook
+        /// Receives form submissions from FormSubmit.co and sends auto-response via Microsoft Graph
+        /// </summary>
+        [AllowAnonymous]
+        [HttpPost("/api/formsubmit/webhook")]
+        [ProducesResponseType(typeof(FormSubmitWebhookResponse), 200)]
+        [ProducesResponseType(typeof(FormSubmitWebhookResponse), 400)]
+        public async Task<IActionResult> FormSubmitWebhook([FromBody] FormSubmitWebhookDto dto)
+        {
+            var requestId = Guid.NewGuid().ToString("N")[..8];
+            
+            try
+            {
+                _logger.LogInformation("📨 FormSubmit Webhook [{RequestId}]: Received from {Email}", 
+                    requestId, SanitizeForLog(dto.Email));
+
+                // ═══════════════════════════════════════════════════════════════
+                // SECURITY: Spam Detection (Honey Pot)
+                // ═══════════════════════════════════════════════════════════════
+                if (!string.IsNullOrEmpty(dto.HoneyPot))
+                {
+                    _logger.LogWarning("🍯 FormSubmit Webhook [{RequestId}]: Honey pot triggered - spam detected", requestId);
+                    // Return success to not alert spammers
+                    return Ok(new FormSubmitWebhookResponse
+                    {
+                        Success = true,
+                        Message = "Form received"
+                    });
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // VALIDATION: Model State
+                // ═══════════════════════════════════════════════════════════════
+                if (!ModelState.IsValid)
+                {
+                    var errors = ModelState.Values
+                        .SelectMany(v => v.Errors)
+                        .Select(e => e.ErrorMessage)
+                        .ToList();
+                    
+                    _logger.LogWarning("⚠️ FormSubmit Webhook [{RequestId}]: Validation failed - {Errors}", 
+                        requestId, string.Join(", ", errors));
+                    
+                    return BadRequest(new FormSubmitWebhookResponse
+                    {
+                        Success = false,
+                        Message = $"Validation failed: {string.Join(", ", errors)}"
+                    });
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // SECURITY: Input Sanitization
+                // ═══════════════════════════════════════════════════════════════
+                var sanitizedName = SanitizeInput(dto.Name);
+                var sanitizedEmail = dto.Email.Trim().ToLowerInvariant();
+                var sanitizedMessage = SanitizeInput(dto.Message);
+
+                // ═══════════════════════════════════════════════════════════════
+                // DUPLICATE DETECTION: Check for recent identical submissions
+                // ═══════════════════════════════════════════════════════════════
+                var duplicateWindow = DateTime.UtcNow.AddMinutes(-5);
+                var isDuplicate = await _context.ContactFormSubmissions
+                    .AsNoTracking()
+                    .AnyAsync(c => 
+                        c.Email == sanitizedEmail && 
+                        c.Message == sanitizedMessage &&
+                        c.SubmittedAt >= duplicateWindow);
+
+                if (isDuplicate)
+                {
+                    _logger.LogWarning("🔄 FormSubmit Webhook [{RequestId}]: Duplicate submission detected for {Email}", 
+                        requestId, SanitizeForLog(sanitizedEmail));
+                    
+                    return Ok(new FormSubmitWebhookResponse
+                    {
+                        Success = true,
+                        Message = "Submission already received"
+                    });
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // DATABASE: Save submission
+                // ═══════════════════════════════════════════════════════════════
+                var submission = new ContactFormSubmission
+                {
+                    Name = sanitizedName,
+                    Email = sanitizedEmail,
+                    Company = SanitizeInput(dto.Company),
+                    Phone = SanitizeInput(dto.Phone),
+                    Message = sanitizedMessage,
+                    Source = "FormSubmit.co Webhook",
+                    SubmittedAt = DateTime.UtcNow,
+                    Status = "pending",
+                    IpAddress = GetClientIpAddress(),
+                    UserAgent = Request.Headers["User-Agent"].ToString(),
+                    CreatedAt = DateTime.UtcNow,
+                    Notes = !string.IsNullOrEmpty(dto.FormSubmitId) 
+                        ? $"FormSubmit ID: {dto.FormSubmitId}" 
+                        : null
+                };
+
+                _context.ContactFormSubmissions.Add(submission);
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ FormSubmit Webhook [{RequestId}]: Saved submission ID: {Id}", 
+                    requestId, submission.Id);
+
+                // ═══════════════════════════════════════════════════════════════
+                // EMAIL: Send auto-response via Microsoft Graph
+                // ═══════════════════════════════════════════════════════════════
+                bool emailSent = false;
+                
+                if (_emailOrchestrator != null)
+                {
+                    try
+                    {
+                        // Send team notification
+                        await SendTeamNotificationAsync(submission);
+                        
+                        // Send user auto-response
+                        await SendUserAutoResponseAsync(submission);
+                        
+                        emailSent = true;
+                        _logger.LogInformation("📧 FormSubmit Webhook [{RequestId}]: Auto-response sent to {Email}", 
+                            requestId, SanitizeForLog(sanitizedEmail));
+                    }
+                    catch (Exception emailEx)
+                    {
+                        // Don't fail the webhook if email fails
+                        _logger.LogWarning(emailEx, 
+                            "⚠️ FormSubmit Webhook [{RequestId}]: Failed to send email - {Error}", 
+                            requestId, emailEx.Message);
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ FormSubmit Webhook [{RequestId}]: Email orchestrator not available", requestId);
+                }
+
+                // ═══════════════════════════════════════════════════════════════
+                // RESPONSE: Return 200 only after successful processing
+                // ═══════════════════════════════════════════════════════════════
+                return Ok(new FormSubmitWebhookResponse
+                {
+                    Success = true,
+                    Message = "Form submission received and processed",
+                    SubmissionId = submission.Id,
+                    EmailSent = emailSent
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ FormSubmit Webhook [{RequestId}]: Error processing - {Error}", 
+                    requestId, ex.Message);
+                
+                return StatusCode(500, new FormSubmitWebhookResponse
+                {
+                    Success = false,
+                    Message = "An error occurred while processing the submission"
+                });
+            }
+        }
+
+        /// <summary>
+        /// Sanitize user input to prevent XSS and injection attacks
+        /// </summary>
+        private static string SanitizeInput(string? input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return string.Empty;
+
+            // Trim whitespace
+            var sanitized = input.Trim();
+            
+            // Remove HTML tags (basic XSS prevention)
+            sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized, "<[^>]*>", "");
+            
+            // Limit length
+            if (sanitized.Length > 5000)
+                sanitized = sanitized[..5000];
+
+            return sanitized;
+        }
+
+        /// <summary>
+        /// Sanitize email for logging (mask domain)
+        /// </summary>
+        private static string SanitizeForLog(string email)
+        {
+            if (string.IsNullOrEmpty(email))
+                return "[empty]";
+
+            var atIndex = email.IndexOf('@');
+            if (atIndex <= 0)
+                return "***";
+
+            return email[..Math.Min(3, atIndex)] + "***@***";
+        }
+
+        #endregion
 
         #region Helper Methods
 
