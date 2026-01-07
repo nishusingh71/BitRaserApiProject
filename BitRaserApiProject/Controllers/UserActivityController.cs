@@ -397,7 +397,7 @@ namespace BitRaserApiProject.Controllers
                 // ✅ Get dynamic context for private cloud support
                 var context = await GetDbContextAsync();
                 
-                var users = await context.Users.ToListAsync();
+                var users = await context.Users.AsNoTracking().ToListAsync();  // ✅ RENDER OPTIMIZATION
 
                 var userStatuses = users.Select(u => new
                 {
@@ -441,7 +441,7 @@ namespace BitRaserApiProject.Controllers
                 // ✅ Get dynamic context for private cloud support
                 var context = await GetDbContextAsync();
                 
-                var subusers = await context.subuser.ToListAsync();
+                var subusers = await context.subuser.AsNoTracking().ToListAsync();  // ✅ RENDER OPTIMIZATION
 
                 var subuserStatuses = subusers.Select(s => new
                 {
@@ -487,8 +487,9 @@ namespace BitRaserApiProject.Controllers
                 var context = await GetDbContextAsync();
                 
                 var subusers = await context.subuser
-                     .Where(s => s.user_email == parentEmail)
-                      .ToListAsync();
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                    .Where(s => s.user_email == parentEmail)
+                    .ToListAsync();
 
                 var subuserStatuses = subusers.Select(s => new
                 {
@@ -535,8 +536,8 @@ namespace BitRaserApiProject.Controllers
                 // ✅ Get dynamic context for private cloud support
                 var context = await GetDbContextAsync();
 
-                // Fetch all users
                 var users = await context.Users
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .Select(u => new
                     {
                         email = u.user_email,
@@ -548,8 +549,8 @@ namespace BitRaserApiProject.Controllers
                     })
                     .ToListAsync();
 
-                // Fetch all subusers
                 var subusers = await context.subuser
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .Select(s => new
                     {
                         email = s.subuser_email,
@@ -651,31 +652,32 @@ namespace BitRaserApiProject.Controllers
                 var context = await GetDbContextAsync();
 
                 // Check if the user exists
-                var userExists = await context.Users.AnyAsync(u => u.user_email == decodedUserEmail);
+                var userExists = await context.Users.AsNoTracking().AnyAsync(u => u.user_email == decodedUserEmail);
                 _logger.LogInformation("🔍 User lookup: {Email} exists in DB? {Exists}", decodedUserEmail, userExists);
                 
                 if (!userExists)
                 {
                     // ✅ List all users in this DB for debugging
-                    var allUserEmails = await context.Users.Select(u => u.user_email).Take(5).ToListAsync();
+                    var allUserEmails = await context.Users.AsNoTracking().Select(u => u.user_email).Take(5).ToListAsync();
                     _logger.LogWarning("⚠️ User {Email} not found. First 5 users in DB: [{Users}]", 
                         decodedUserEmail, string.Join(", ", allUserEmails));
                     return NotFound(new { success = false, message = "User not found" });
                 }
 
                 // ✅ DEBUG: Check total subusers in this DB
-                var totalSubusersInDb = await context.subuser.CountAsync();
+                var totalSubusersInDb = await context.subuser.AsNoTracking().CountAsync();
                 _logger.LogInformation("📊 Total subusers in this DB: {Count}", totalSubusersInDb);
                 
                 // ✅ DEBUG: List all parent emails in subuser table
                 var allParentEmails = await context.subuser
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .Select(s => s.user_email)
                     .Distinct()
                     .ToListAsync();
                 _logger.LogInformation("📊 Parent emails in subuser table: [{Parents}]", string.Join(", ", allParentEmails));
 
-                // Fetch all subusers for this user
                 var subusers = await context.subuser
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .Where(s => s.user_email == decodedUserEmail)
                     .Select(s => new
                     {

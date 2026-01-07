@@ -51,7 +51,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 // Try main user authentication
-                var user = await _context.Users.Where(u => u.user_email == request.Email).FirstOrDefaultAsync();
+                var user = await _context.Users.AsNoTracking().Where(u => u.user_email == request.Email).FirstOrDefaultAsync();
                 
                 if (user != null && !string.IsNullOrEmpty(user.hash_password) && 
                     BCrypt.Net.BCrypt.Verify(request.Password, user.hash_password))
@@ -83,7 +83,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 // Try subuser authentication
-                var subuser = await _context.subuser.Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync();
+                var subuser = await _context.subuser.AsNoTracking().Where(s => s.subuser_email == request.Email).FirstOrDefaultAsync();
                 
                 if (subuser != null && !string.IsNullOrEmpty(subuser.subuser_password) && 
                     BCrypt.Net.BCrypt.Verify(request.Password, subuser.subuser_password))
@@ -220,7 +220,7 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { message = "User not authenticated" });
                 }
 
-                var isSubuser = await _context.subuser.AnyAsync(s => s.subuser_email == userEmail);
+                var isSubuser = await _context.subuser.AsNoTracking().AnyAsync(s => s.subuser_email == userEmail);
 
                 // Check permissions instead of hard-coded roles
                 if (!await _authService.HasPermissionAsync(userEmail, "VIEW_ORGANIZATION_HIERARCHY", isSubuser))
@@ -228,13 +228,14 @@ namespace BitRaserApiProject.Controllers
                     return StatusCode(403, new { message = "Insufficient permissions to view dashboard" });
                 }
 
-                var totalUsers = await _context.Users.CountAsync();
-                var activeUsers = await _context.Users.CountAsync(u => u.updated_at >= DateTime.UtcNow.AddDays(-30));
-                var totalMachines = await _context.Machines.CountAsync();
-                var activeMachines = await _context.Machines.CountAsync(m => m.license_activated);
+                var totalUsers = await _context.Users.AsNoTracking().CountAsync();
+                var activeUsers = await _context.Users.AsNoTracking().CountAsync(u => u.updated_at >= DateTime.UtcNow.AddDays(-30));
+                var totalMachines = await _context.Machines.AsNoTracking().CountAsync();
+                var activeMachines = await _context.Machines.AsNoTracking().CountAsync(m => m.license_activated);
                 
                 // Get recent activities from logs
                 var recentActivities = await _context.logs
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .OrderByDescending(l => l.created_at)
                     .Take(10)
                     .Select(l => new ActivityDto
@@ -279,6 +280,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 var activities = await _context.logs
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .OrderByDescending(l => l.created_at)
                     .Take(50)
                     .Select(l => new ActivityDto
@@ -339,7 +341,7 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { message = "User not authenticated" });
                 }
 
-                var isSubuser = await _context.subuser.AnyAsync(s => s.subuser_email == currentUserEmail);
+                var isSubuser = await _context.subuser.AsNoTracking().AnyAsync(s => s.subuser_email == currentUserEmail);
 
                 // Check permission
                 if (!await _authService.HasPermissionAsync(currentUserEmail, "READ_ALL_USERS", isSubuser))
@@ -347,8 +349,9 @@ namespace BitRaserApiProject.Controllers
                     return StatusCode(403, new { message = "Insufficient permissions to view all users" });
                 }
 
-                var totalCount = await _context.Users.CountAsync();
+                var totalCount = await _context.Users.AsNoTracking().CountAsync();
                 var users = await _context.Users
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .OrderByDescending(u => u.created_at)
                     .Skip((page - 1) * pageSize)
                     .Take(pageSize)
@@ -401,7 +404,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 var roles = await _authService.GetUserRolesAsync(user.user_email, false);
-                var machineCount = await _context.Machines.CountAsync(m => m.user_email == user.user_email);
+                var machineCount = await _context.Machines.AsNoTracking().CountAsync(m => m.user_email == user.user_email);
 
                 return Ok(new AdminUserDto
                 {
@@ -625,7 +628,7 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { message = "User not authenticated" });
                 }
 
-                var isSubuser = await _context.subuser.AnyAsync(s => s.subuser_email == currentUserEmail);
+                var isSubuser = await _context.subuser.AsNoTracking().AnyAsync(s => s.subuser_email == currentUserEmail);
 
                 // Check permission
                 if (!await _authService.HasPermissionAsync(currentUserEmail, "READ_ALL_MACHINES", isSubuser))
@@ -634,6 +637,7 @@ namespace BitRaserApiProject.Controllers
                 }
 
                 var licenses = await _context.Machines
+                    .AsNoTracking()  // ✅ RENDER OPTIMIZATION
                     .Where(m => m.license_activated)
                     .OrderByDescending(m => m.license_activation_date)
                     .Take(100)
@@ -716,7 +720,7 @@ namespace BitRaserApiProject.Controllers
                     return Unauthorized(new { message = "User not authenticated" });
                 }
 
-                var user = await _context.Users.Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
+                var user = await _context.Users.AsNoTracking().Where(u => u.user_email == userEmail).FirstOrDefaultAsync();
                 if (user != null)
                 {
                     return Ok(new DashboardUserDto
@@ -731,7 +735,7 @@ namespace BitRaserApiProject.Controllers
                     });
                 }
 
-                var subuser = await _context.subuser.Where(s => s.subuser_email == userEmail).FirstOrDefaultAsync();
+                var subuser = await _context.subuser.AsNoTracking().Where(s => s.subuser_email == userEmail).FirstOrDefaultAsync();
                 if (subuser != null)
                 {
                     return Ok(new DashboardUserDto
