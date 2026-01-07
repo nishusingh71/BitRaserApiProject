@@ -5,6 +5,7 @@ using System.Security.Claims;
 using BitRaserApiProject.Factories;
 using Microsoft.EntityFrameworkCore;
 using BitRaserApiProject.Services;
+using BitRaserApiProject.Services.Email;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -19,15 +20,172 @@ namespace BitRaserApiProject.Controllers
         private readonly ILogger<EmailDebugController> _logger;
         private readonly DynamicDbContextFactory _contextFactory;
         private readonly ICacheService _cacheService;
+        private readonly IEmailOrchestrator? _emailOrchestrator;
 
         public EmailDebugController(
             ILogger<EmailDebugController> logger,
             DynamicDbContextFactory contextFactory,
-            ICacheService cacheService)
+            ICacheService cacheService,
+            IEmailOrchestrator? emailOrchestrator = null)
         {
             _logger = logger;
             _contextFactory = contextFactory;
             _cacheService = cacheService;
+            _emailOrchestrator = emailOrchestrator;
+        }
+
+        /// <summary>
+        /// 🧪 TEST: Send email via MS Graph API
+        /// POST /api/EmailDebug/test-graph-email
+        /// </summary>
+        [HttpPost("test-graph-email")]
+        [AllowAnonymous]
+        public async Task<IActionResult> TestGraphEmail([FromBody] TestEmailRequest request)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(request.ToEmail))
+                {
+                    return BadRequest(new { success = false, message = "toEmail is required" });
+                }
+
+                if (_emailOrchestrator == null)
+                {
+                    return StatusCode(500, new { 
+                        success = false, 
+                        message = "Email orchestrator not configured",
+                        hint = "Check if IEmailOrchestrator is registered in Program.cs"
+                    });
+                }
+
+                _logger.LogInformation("🧪 Testing MS Graph email to: {Email}", request.ToEmail);
+
+                var emailRequest = new EmailSendRequest
+                {
+                    ToEmail = request.ToEmail,
+                    ToName = request.ToName ?? request.ToEmail,
+                    Subject = request.Subject ?? $"🧪 Test Email from DSecure - {DateTime.UtcNow:HH:mm:ss}",
+                    HtmlBody = request.HtmlBody ?? GenerateTestEmailHtml(request.ToEmail),
+                    Type = EmailType.Transactional
+                };
+
+                var result = await _emailOrchestrator.SendEmailAsync(emailRequest);
+
+                if (result.Success)
+                {
+                    _logger.LogInformation("✅ Test email sent successfully via {Provider}", result.ProviderUsed);
+                    return Ok(new
+                    {
+                        success = true,
+                        message = "Test email sent successfully!",
+                        provider = result.ProviderUsed,
+                        durationMs = result.DurationMs,
+                        toEmail = request.ToEmail,
+                        sentAt = DateTime.UtcNow.ToString("o")
+                    });
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ Test email failed: {Message}", result.Message);
+                    return StatusCode(500, new
+                    {
+                        success = false,
+                        message = result.Message,
+                        provider = result.ProviderUsed,
+                        hint = "Check Render logs for detailed error"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Exception in test email endpoint");
+                return StatusCode(500, new
+                {
+                    success = false,
+                    message = ex.Message,
+                    exceptionType = ex.GetType().Name
+                });
+            }
+        }
+
+        /// <summary>
+        /// 🔍 GET: Check MS Graph provider status
+        /// GET /api/EmailDebug/graph-status
+        /// </summary>
+        [HttpGet("graph-status")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetGraphStatus()
+        {
+            try
+            {
+                if (_emailOrchestrator == null)
+                {
+                    return Ok(new { 
+                        success = false, 
+                        message = "Email orchestrator not configured",
+                        providers = new List<object>()
+                    });
+                }
+
+                var providers = await _emailOrchestrator.GetAvailableProvidersAsync(EmailType.Transactional);
+                
+                var status = providers.Select(p => new
+                {
+                    name = p.ProviderName,
+                    priority = p.Priority,
+                    isAvailable = true
+                }).ToList();
+
+                return Ok(new
+                {
+                    success = true,
+                    totalProviders = status.Count,
+                    providers = status,
+                    primaryProvider = status.OrderBy(p => p.priority).FirstOrDefault()?.name ?? "none",
+                    checkedAt = DateTime.UtcNow.ToString("o")
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error getting graph status");
+                return StatusCode(500, new { success = false, error = ex.Message });
+            }
+        }
+
+        private string GenerateTestEmailHtml(string toEmail)
+        {
+            return $@"
+<!DOCTYPE html>
+<html>
+<head><meta charset='utf-8'></head>
+<body style='font-family: Segoe UI, Arial, sans-serif; padding: 20px; background: #f5f5f5;'>
+<div style='max-width: 500px; margin: 0 auto; background: #fff; border-radius: 10px; overflow: hidden;'>
+<div style='background: #1a1a2e; color: #fff; padding: 25px; text-align: center;'>
+<h1 style='margin: 0; font-size: 20px;'>🧪 Test Email</h1>
+</div>
+<div style='padding: 25px;'>
+<p>Hi there,</p>
+<p>This is a <strong>test email</strong> sent via <strong>Microsoft Graph API</strong>.</p>
+<p style='background: #f0f9ff; padding: 15px; border-radius: 8px;'>
+<strong>📧 Recipient:</strong> {toEmail}<br>
+<strong>📅 Sent at:</strong> {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC
+</p>
+<p>If you received this email, MS Graph is working correctly! 🎉</p>
+</div>
+<div style='background: #f8f9fa; padding: 15px; text-align: center; font-size: 12px; color: #888;'>
+DSecure Technologies • Test Email
+</div>
+</div>
+</body>
+</html>";
+        }
+
+        public class TestEmailRequest
+        {
+            public string ToEmail { get; set; } = string.Empty;
+            public string? ToName { get; set; }
+            public string? Subject { get; set; }
+            public string? HtmlBody { get; set; }
         }
 
         /// <summary>
