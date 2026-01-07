@@ -60,7 +60,7 @@ namespace BitRaserApiProject.Controllers
 
                 _logger.LogInformation("🔍 Fetching logs for user: {Email}", userEmail);
 
-                IQueryable<logs> query = _context.logs;
+                IQueryable<logs> query = _context.logs.AsNoTracking();  // ✅ RENDER OPTIMIZATION
 
                 // Apply role-based filtering
                 if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_LOGS", isCurrentUserSubuser))
@@ -80,9 +80,10 @@ namespace BitRaserApiProject.Controllers
                     {
                         // ✅ ENHANCED: User - own logs + subuser logs
                         var subuserEmails = await _context.subuser
-                             .Where(s => s.user_email == userEmail)
-                           .Select(s => s.subuser_email)
-                         .ToListAsync();
+                            .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                            .Where(s => s.user_email == userEmail)
+                            .Select(s => s.subuser_email)
+                            .ToListAsync();
 
                         query = query.Where(l =>
                          l.user_email == userEmail ||  // Own logs
@@ -202,9 +203,10 @@ namespace BitRaserApiProject.Controllers
             }
 
             var logEntries = await _context.logs
-              .Where(l => l.user_email.ToLower() == decodedEmail) // ✅ Use decoded email
-        .OrderByDescending(l => l.created_at)
-                   .ToListAsync();
+                .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                .Where(l => l.user_email.ToLower() == decodedEmail) // ✅ Use decoded email
+                .OrderByDescending(l => l.created_at)
+                .ToListAsync();
 
             _logger.LogInformation("✅ Found {Count} logs for user: {Email}", logEntries.Count, decodedEmail); // ✅ ADDED
 
@@ -378,7 +380,7 @@ namespace BitRaserApiProject.Controllers
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
 
-            IQueryable<logs> query = _context.logs;
+            IQueryable<logs> query = _context.logs.AsNoTracking();  // ✅ RENDER OPTIMIZATION
 
             // Apply role-based filtering for statistics
             if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_LOG_STATISTICS", isCurrentUserSubuser))
@@ -456,7 +458,7 @@ namespace BitRaserApiProject.Controllers
 
             try
             {
-                IQueryable<logs> query = _context.logs;
+                IQueryable<logs> query = _context.logs.AsNoTracking();  // ✅ RENDER OPTIMIZATION
 
                 // Apply role-based filtering
                 if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_LOGS", isCurrentUserSubuser))
@@ -555,7 +557,7 @@ namespace BitRaserApiProject.Controllers
             var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(userEmail!);
 
-            IQueryable<logs> query = _context.logs;
+            IQueryable<logs> query = _context.logs.AsNoTracking();  // ✅ RENDER OPTIMIZATION
 
             // Apply role-based filtering
             if (!await _authService.HasPermissionAsync(userEmail!, "EXPORT_ALL_LOGS", isCurrentUserSubuser))

@@ -66,7 +66,7 @@ namespace BitRaserApiProject.Controllers
                 // Cleanup expired sessions first
                 await CleanupExpiredSessionsAsync(_context);
 
-                IQueryable<Sessions> query = _context.Sessions;
+                IQueryable<Sessions> query = _context.Sessions.AsNoTracking();  // ✅ RENDER OPTIMIZATION
 
                 // Apply role-based filtering
                 if (!await _authService.HasPermissionAsync(userEmail!, "READ_ALL_SESSIONS", isCurrentUserSubuser))
@@ -80,9 +80,10 @@ namespace BitRaserApiProject.Controllers
                     {
                         // ✅ ENHANCED: User - own sessions + subuser sessions
                         var subuserEmails = await _context.subuser
-                              .Where(s => s.user_email == userEmail)
-                         .Select(s => s.subuser_email)
-                         .ToListAsync();
+                            .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                            .Where(s => s.user_email == userEmail)
+                            .Select(s => s.subuser_email)
+                            .ToListAsync();
 
                         query = query.Where(s =>
                        s.user_email == userEmail ||  // Own sessions
@@ -240,9 +241,10 @@ namespace BitRaserApiProject.Controllers
             await CleanupExpiredSessionsForUserAsync(decodedEmail, _context);
 
             var sessions = await _context.Sessions
-    .Where(s => s.user_email.ToLower() == decodedEmail) // ✅ Use decoded email
-     .OrderByDescending(s => s.login_time)
-            .ToListAsync();
+                .AsNoTracking()  // ✅ RENDER OPTIMIZATION
+                .Where(s => s.user_email.ToLower() == decodedEmail) // ✅ Use decoded email
+                .OrderByDescending(s => s.login_time)
+                .ToListAsync();
 
             _logger.LogInformation("✅ Found {Count} sessions for user: {Email}", sessions.Count, decodedEmail);
 
@@ -463,7 +465,7 @@ namespace BitRaserApiProject.Controllers
             // Cleanup expired sessions first
             await CleanupExpiredSessionsAsync(_context);
 
-            IQueryable<Sessions> query = _context.Sessions;
+            IQueryable<Sessions> query = _context.Sessions.AsNoTracking();  // ✅ RENDER OPTIMIZATION
 
             // Apply role-based filtering
             if (!await _authService.HasPermissionAsync(currentUserEmail!, "READ_ALL_SESSION_STATISTICS", isCurrentUserSubuser))
