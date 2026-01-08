@@ -7,6 +7,9 @@ using BitRaserApiProject.Factories;
 using System.Security.Cryptography;
 using System.Text;
 using BitRaserApiProject.Services;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
 
 namespace BitRaserApiProject.Controllers
 {
@@ -1439,7 +1442,7 @@ namespace BitRaserApiProject.Controllers
                     sheet.Cell($"C{row}").Value = license.Edition;
                     sheet.Cell($"D{row}").Value = license.UserEmail ?? "";
                     sheet.Cell($"E{row}").Value = license.ExpiryDate?.ToString("yyyy-MM-dd") ?? "";
-                    sheet.Cell($"F{row}").Value = license.RemainingDays ?? 0;
+                    sheet.Cell($"F{row}").Value = license.RemainingDays;
                     sheet.Cell($"G{row}").Value = license.CreatedAt.ToString("yyyy-MM-dd HH:mm");
                     sheet.Cell($"H{row}").Value = license.Hwid ?? "";
                     row++;
@@ -1487,13 +1490,13 @@ namespace BitRaserApiProject.Controllers
                     .Take(20)
                     .ToListAsync();
 
-                QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+                QuestPDF.Settings.License = LicenseType.Community;
                 
-                var document = QuestPDF.Fluent.Document.Create(container =>
+                var document = Document.Create(container =>
                 {
                     container.Page(page =>
                     {
-                        page.Size(QuestPDF.Helpers.PageSizes.A4);
+                        page.Size(PageSizes.A4);
                         page.Margin(40);
 
                         page.Header().Height(60).Background("#1a1a2e").AlignCenter().AlignMiddle()

@@ -645,19 +645,18 @@ namespace BitRaserApiProject.Controllers
                 return StatusCode(403, new { error = "You don't have permission to erase this machine" });
 
             // Create erasure session record
-            var erasureSession = new Session
+            var erasureSession = new Sessions
             {
                 user_email = currentUserEmail,
-                machine_id = machine.id,
-                status = "pending_erasure",
-                expiry_time = DateTime.UtcNow.AddHours(24),
-                created_at = DateTime.UtcNow
+                session_status = "pending_erasure",
+                device_info = $"Erasure for: {macAddress}",
+                ip_address = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                login_time = DateTime.UtcNow
             };
 
             _context.Sessions.Add(erasureSession);
 
-            // Update machine status
-            machine.status = "erasure_scheduled";
+            // Update machine timestamp (machines model doesn't have status field)
             machine.updated_at = DateTime.UtcNow;
 
             await _context.SaveChangesAsync();
@@ -673,7 +672,7 @@ namespace BitRaserApiProject.Controllers
             {
                 success = true,
                 message = "Erasure initiated successfully",
-                sessionId = erasureSession.id,
+                sessionId = erasureSession.session_id,
                 macAddress = macAddress,
                 erasureMethod = request.ErasureMethod ?? "DoD 5220.22-M",
                 verifyAfter = request.VerifyAfter,
