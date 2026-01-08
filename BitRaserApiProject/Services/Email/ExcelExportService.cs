@@ -38,8 +38,14 @@ namespace BitRaserApiProject.Services.Email
                 // License Keys Sheet (if applicable)
                 if (licenseKeys != null && licenseKeys.Count > 0)
                 {
+                    _logger.LogInformation("📊 Adding License Keys sheet with {Count} keys to Excel", licenseKeys.Count);
                     var licenseSheet = workbook.AddWorksheet("License Keys");
                     CreateLicenseKeysSheet(licenseSheet, order, licenseKeys);
+                    _logger.LogInformation("✅ License Keys sheet added successfully");
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ No license keys to add to Excel for Order #{OrderId}", order.OrderId);
                 }
 
                 // Save to memory stream

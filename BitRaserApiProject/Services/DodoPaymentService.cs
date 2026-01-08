@@ -1974,7 +1974,7 @@ namespace BitRaserApiProject.Services
                 {
                     Url = url,
                     Events = events,
-                    Description = "BitRaser API Webhook"
+                    Description = "D-Secure API Webhook"
                 };
 
                 var jsonOptions = new JsonSerializerOptions
@@ -2166,8 +2166,9 @@ namespace BitRaserApiProject.Services
 
         /// <summary>
         /// Generate multiple license keys based on quantity
+        /// Format: XXXX-XXXX-XXXX-XXXX (fully random, no prefix)
         /// </summary>
-        private List<string> GenerateLicenseKeys(int count, string prefix = "BITR")
+        private List<string> GenerateLicenseKeys(int count)
         {
             var keys = new List<string>();
             const string chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -2183,13 +2184,16 @@ namespace BitRaserApiProject.Services
                 int attempts = 0;
                 do
                 {
-                    key = $"{prefix}-{GenerateSegment()}-{GenerateSegment()}-{GenerateSegment()}";
+                    // Format: XXXX-XXXX-XXXX-XXXX (4 segments, no prefix)
+                    key = $"{GenerateSegment()}-{GenerateSegment()}-{GenerateSegment()}-{GenerateSegment()}";
                     attempts++;
                 } while (keys.Contains(key) && attempts < 10); // Ensure uniqueness
 
                 keys.Add(key);
+                _logger.LogInformation("🔑 Generated license key: {Key}", key);
             }
 
+            _logger.LogInformation("✅ Generated {Count} license keys", keys.Count);
             return keys;
         }
     }
