@@ -933,8 +933,8 @@ namespace BitRaserApiProject.Services
                     // File products: Excel with license keys + invoice button
                     // ═══════════════════════════════════════════════════════════════
                     var productName = order.ProductName ?? "";
-                    var isDriveProduct = productName.StartsWith("Drive", StringComparison.OrdinalIgnoreCase);
-                    var isFileProduct = productName.StartsWith("File", StringComparison.OrdinalIgnoreCase);
+                    var isDriveProduct = productName.StartsWith("D-Secure Drive", StringComparison.OrdinalIgnoreCase);
+                    var isFileProduct = productName.StartsWith("D-Secure File", StringComparison.OrdinalIgnoreCase);
                     
                     _logger.LogInformation("📦 Product: {ProductName}, IsDrive: {IsDrive}, IsFile: {IsFile}", 
                         productName, isDriveProduct, isFileProduct);
