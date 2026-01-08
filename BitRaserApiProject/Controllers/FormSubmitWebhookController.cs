@@ -241,23 +241,32 @@ Submission ID: #{s.Id} • Source: {s.Source}
             return $@"
 <!DOCTYPE html><html><head><meta charset='utf-8'></head>
 <body style='font-family: Segoe UI, Arial; padding: 20px; background: #f5f5f5;'>
-<div style='max-width: 600px; margin: 0 auto; background: #fff; border-radius: 10px; overflow: hidden;'>
-<div style='background: linear-gradient(135deg, #1a1a2e, #16213e); color: #fff; padding: 30px; text-align: center;'>
-<h1 style='margin: 0; font-size: 24px;'>Thank You for Contacting Us!</h1>
+<div style='max-width: 600px; margin: 0 auto; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.1);'>
+<div style='background: linear-gradient(135deg, #1a1a2e, #16213e); color: #fff; padding: 35px; text-align: center;'>
+<h1 style='margin: 0; font-size: 26px;'>Thank You for Contacting Us!</h1>
+<p style='margin: 10px 0 0 0; opacity: 0.9;'>We've received your inquiry</p>
 </div>
-<div style='padding: 30px;'>
-<p style='font-size: 16px;'>Dear {userName},</p>
-<p>Thank you for reaching out to DSecure Technologies. We have received your message and appreciate you taking the time to contact us.</p>
-<div style='background: #e8f5e9; padding: 20px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #4caf50;'>
-<p style='margin: 0; font-weight: 500;'>⏰ Our team will get back to you within 24 hours.</p>
+<div style='padding: 35px;'>
+<p style='font-size: 16px; margin: 0 0 20px 0;'>Dear {userName},</p>
+<p style='color: #444; line-height: 1.6;'>Thank you for reaching out to DSecure Technologies. We have successfully received your message and our team is already reviewing your inquiry.</p>
+
+<div style='background: linear-gradient(135deg, #e8f5e9, #c8e6c9); padding: 25px; border-radius: 10px; margin: 25px 0; border-left: 5px solid #4caf50;'>
+<p style='margin: 0; font-weight: 600; font-size: 17px; color: #2e7d32;'>⏰ Our support team will respond within 12 hours</p>
+<p style='margin: 8px 0 0 0; color: #388e3c; font-size: 14px;'>We prioritize all inquiries and aim to resolve them promptly.</p>
 </div>
-<p>In the meantime, if you have any urgent queries, feel free to reach us at:</p>
-<p>📧 <a href='mailto:Support@dsecuretech.com'>Support@dsecuretech.com</a></p>
-<p style='margin-top: 25px;'>Best regards,<br><strong>DSecure Technologies Team</strong></p>
+
+<p style='color: #555;'>In the meantime, if you have any urgent queries, feel free to contact us directly:</p>
+
+<div style='background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;'>
+<p style='margin: 0 0 10px 0;'>📧 <strong>Email:</strong> <a href='mailto:Support@dsecuretech.com' style='color: #1a1a2e;'>Support@dsecuretech.com</a></p>
+<p style='margin: 0;'>🌐 <strong>Website:</strong> <a href='https://dsecuretech.com' style='color: #1a1a2e;'>www.dsecuretech.com</a></p>
 </div>
-<div style='background: #f8f9fa; padding: 20px; text-align: center; font-size: 12px; color: #888;'>
-© 2024 DSecure Technologies. All rights reserved.<br>
-<a href='https://dsecuretech.com' style='color: #1a1a2e;'>www.dsecuretech.com</a>
+
+<p style='margin-top: 30px; color: #444;'>Best regards,<br><strong style='color: #1a1a2e;'>DSecure Technologies Support Team</strong></p>
+</div>
+<div style='background: #1a1a2e; padding: 25px; text-align: center; font-size: 12px; color: #aaa;'>
+<p style='margin: 0;'>© 2024 DSecure Technologies. All rights reserved.</p>
+<p style='margin: 8px 0 0 0;'><a href='https://dsecuretech.com' style='color: #4CAF50;'>www.dsecuretech.com</a></p>
 </div>
 </div>
 </body></html>";
