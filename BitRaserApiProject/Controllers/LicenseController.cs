@@ -1341,6 +1341,225 @@ namespace BitRaserApiProject.Controllers
         }
 
         /// <summary>
+        /// Transfer licenses between users/groups
+        /// POST /api/License/transfer
+        /// </summary>
+        [Authorize(Roles = "SuperAdmin,Admin")]
+        [HttpPost("transfer")]
+        public async Task<IActionResult> TransferLicenses([FromBody] LicenseTransferRequest request)
+        {
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
+
+                // Validate source entity
+                var sourceLicenses = await context.Set<LicenseActivation>()
+                    .Where(l => l.UserEmail == request.FromEntityId && l.Status == "ACTIVE")
+                    .Take(request.LicenseCount)
+                    .ToListAsync();
+
+                if (sourceLicenses.Count < request.LicenseCount)
+                    return BadRequest(new { error = $"Source only has {sourceLicenses.Count} active licenses, requested {request.LicenseCount}" });
+
+                // Transfer licenses
+                foreach (var license in sourceLicenses)
+                {
+                    license.UserEmail = request.ToEntityId;
+                    license.Notes = $"Transferred from {request.FromEntityId}: {request.Reason ?? "No reason provided"}";
+                    license.ServerRevision++;
+                }
+
+                await context.SaveChangesAsync();
+
+                _logger.LogInformation("🔄 Transferred {Count} licenses from {From} to {To}. Reason: {Reason}",
+                    sourceLicenses.Count, request.FromEntityId, request.ToEntityId, request.Reason);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = $"Transferred {sourceLicenses.Count} licenses successfully",
+                    from = request.FromEntityId,
+                    to = request.ToEntityId,
+                    count = sourceLicenses.Count,
+                    transferredAt = DateTime.UtcNow
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error transferring licenses");
+                return StatusCode(500, new { message = "Error transferring licenses", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Export licenses to Excel
+        /// GET /api/License/export/excel
+        /// </summary>
+        [Authorize(Roles = "SuperAdmin,Admin")]
+        [HttpGet("export/excel")]
+        public async Task<IActionResult> ExportLicensesToExcel([FromQuery] string? status = null, [FromQuery] string? edition = null)
+        {
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
+
+                var query = context.Set<LicenseActivation>().AsNoTracking();
+
+                if (!string.IsNullOrEmpty(status))
+                    query = query.Where(l => l.Status == status.ToUpper());
+
+                if (!string.IsNullOrEmpty(edition))
+                    query = query.Where(l => l.Edition == edition.ToUpper());
+
+                var licenses = await query.OrderByDescending(l => l.CreatedAt).ToListAsync();
+
+                using var workbook = new ClosedXML.Excel.XLWorkbook();
+                var sheet = workbook.Worksheets.Add("Licenses");
+
+                // Header
+                sheet.Cell("A1").Value = "License Key";
+                sheet.Cell("B1").Value = "Status";
+                sheet.Cell("C1").Value = "Edition";
+                sheet.Cell("D1").Value = "User Email";
+                sheet.Cell("E1").Value = "Expiry Date";
+                sheet.Cell("F1").Value = "Remaining Days";
+                sheet.Cell("G1").Value = "Created At";
+                sheet.Cell("H1").Value = "Hardware ID";
+
+                var headerRange = sheet.Range("A1:H1");
+                headerRange.Style.Font.Bold = true;
+                headerRange.Style.Fill.BackgroundColor = ClosedXML.Excel.XLColor.LightGray;
+
+                // Data
+                int row = 2;
+                foreach (var license in licenses)
+                {
+                    sheet.Cell($"A{row}").Value = license.LicenseKey;
+                    sheet.Cell($"B{row}").Value = license.Status;
+                    sheet.Cell($"C{row}").Value = license.Edition;
+                    sheet.Cell($"D{row}").Value = license.UserEmail ?? "";
+                    sheet.Cell($"E{row}").Value = license.ExpiryDate?.ToString("yyyy-MM-dd") ?? "";
+                    sheet.Cell($"F{row}").Value = license.RemainingDays ?? 0;
+                    sheet.Cell($"G{row}").Value = license.CreatedAt.ToString("yyyy-MM-dd HH:mm");
+                    sheet.Cell($"H{row}").Value = license.Hwid ?? "";
+                    row++;
+                }
+
+                sheet.Columns().AdjustToContents();
+
+                using var stream = new MemoryStream();
+                workbook.SaveAs(stream);
+
+                _logger.LogInformation("📊 Exported {Count} licenses to Excel", licenses.Count);
+
+                return File(
+                    stream.ToArray(),
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    $"licenses_export_{DateTime.UtcNow:yyyyMMdd_HHmmss}.xlsx"
+                );
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error exporting licenses to Excel");
+                return StatusCode(500, new { message = "Error exporting licenses", error = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Export licenses summary to PDF
+        /// GET /api/License/export/pdf
+        /// </summary>
+        [Authorize(Roles = "SuperAdmin,Admin")]
+        [HttpGet("export/pdf")]
+        public async Task<IActionResult> ExportLicensesToPdf()
+        {
+            try
+            {
+                using var context = await _contextFactory.CreateDbContextAsync();
+
+                var total = await context.Set<LicenseActivation>().CountAsync();
+                var active = await context.Set<LicenseActivation>().CountAsync(l => l.Status == "ACTIVE");
+                var expired = await context.Set<LicenseActivation>().CountAsync(l => l.Status == "EXPIRED");
+                var revoked = await context.Set<LicenseActivation>().CountAsync(l => l.Status == "REVOKED");
+
+                var recentLicenses = await context.Set<LicenseActivation>()
+                    .OrderByDescending(l => l.CreatedAt)
+                    .Take(20)
+                    .ToListAsync();
+
+                QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+                
+                var document = QuestPDF.Fluent.Document.Create(container =>
+                {
+                    container.Page(page =>
+                    {
+                        page.Size(QuestPDF.Helpers.PageSizes.A4);
+                        page.Margin(40);
+
+                        page.Header().Height(60).Background("#1a1a2e").AlignCenter().AlignMiddle()
+                            .Text("License Summary Report").FontSize(20).FontColor("#ffffff").Bold();
+
+                        page.Content().PaddingVertical(20).Column(col =>
+                        {
+                            col.Spacing(15);
+
+                            // Statistics
+                            col.Item().Text("License Statistics").FontSize(16).Bold();
+                            col.Item().Text($"Total Licenses: {total}");
+                            col.Item().Text($"Active: {active}");
+                            col.Item().Text($"Expired: {expired}");
+                            col.Item().Text($"Revoked: {revoked}");
+
+                            col.Item().PaddingTop(20).Text("Recent Licenses (Last 20)").FontSize(16).Bold();
+
+                            // Table
+                            col.Item().Table(table =>
+                            {
+                                table.ColumnsDefinition(columns =>
+                                {
+                                    columns.RelativeColumn(3);
+                                    columns.RelativeColumn(1);
+                                    columns.RelativeColumn(1);
+                                    columns.RelativeColumn(2);
+                                });
+
+                                table.Header(header =>
+                                {
+                                    header.Cell().Background("#e0e0e0").Padding(5).Text("License Key").Bold();
+                                    header.Cell().Background("#e0e0e0").Padding(5).Text("Status").Bold();
+                                    header.Cell().Background("#e0e0e0").Padding(5).Text("Edition").Bold();
+                                    header.Cell().Background("#e0e0e0").Padding(5).Text("Created").Bold();
+                                });
+
+                                foreach (var license in recentLicenses)
+                                {
+                                    table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).Text(license.LicenseKey ?? "");
+                                    table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).Text(license.Status ?? "");
+                                    table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).Text(license.Edition ?? "");
+                                    table.Cell().BorderBottom(1).BorderColor("#cccccc").Padding(5).Text(license.CreatedAt.ToString("yyyy-MM-dd"));
+                                }
+                            });
+                        });
+
+                        page.Footer().AlignCenter()
+                            .Text($"Generated on {DateTime.UtcNow:yyyy-MM-dd HH:mm} UTC | D-Secure Technologies");
+                    });
+                });
+
+                var pdfBytes = document.GeneratePdf();
+
+                _logger.LogInformation("📄 Exported license summary to PDF ({Total} total licenses)", total);
+
+                return File(pdfBytes, "application/pdf", $"license_summary_{DateTime.UtcNow:yyyyMMdd_HHmmss}.pdf");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error exporting licenses to PDF");
+                return StatusCode(500, new { message = "Error exporting licenses to PDF", error = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Bulk generate licenses (Admin only)
         /// POST /api/License/admin/bulk-generate
         /// </summary>
@@ -1599,5 +1818,41 @@ string action,
         }
 
         #endregion
+    }
+
+    /// <summary>
+    /// Request model for transferring licenses between users/groups
+    /// </summary>
+    public class LicenseTransferRequest
+    {
+        /// <summary>
+        /// Source entity type (user, group)
+        /// </summary>
+        public string FromEntityType { get; set; } = "user";
+
+        /// <summary>
+        /// Source entity identifier (email or group id)
+        /// </summary>
+        public string FromEntityId { get; set; } = "";
+
+        /// <summary>
+        /// Target entity type (user, group)
+        /// </summary>
+        public string ToEntityType { get; set; } = "user";
+
+        /// <summary>
+        /// Target entity identifier (email or group id)
+        /// </summary>
+        public string ToEntityId { get; set; } = "";
+
+        /// <summary>
+        /// Number of licenses to transfer
+        /// </summary>
+        public int LicenseCount { get; set; } = 1;
+
+        /// <summary>
+        /// Reason for the transfer
+        /// </summary>
+        public string? Reason { get; set; }
     }
 }

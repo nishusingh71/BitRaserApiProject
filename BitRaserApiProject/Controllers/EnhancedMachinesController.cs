@@ -606,13 +606,79 @@ namespace BitRaserApiProject.Controllers
             _cacheService.RemoveByPrefix($"{CacheService.CacheKeys.Machine}:{machine.user_email}");
             _cacheService.RemoveByPrefix(CacheService.CacheKeys.MachineList);
 
-            return Ok(new
-            {
+            return Ok(new {
                 message = "Machine deleted successfully",
                 macAddress = macAddress,
                 userEmail = machine.user_email,
                 subuserEmail = machine.subuser_email,
                 deletedAt = DateTime.UtcNow
+            });
+        }
+
+        /// <summary>
+        /// Initiate data erasure on a machine
+        /// POST /api/EnhancedMachines/{macAddress}/erase
+        /// </summary>
+        [HttpPost("by-mac/{macAddress}/erase")]
+        public async Task<IActionResult> InitiateErasure(string macAddress, [FromBody] ErasureRequest request)
+        {
+            using var _context = await _contextFactory.CreateDbContextAsync();
+
+            var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(currentUserEmail))
+                return Unauthorized(new { error = "User not authenticated" });
+
+            var machine = await _context.Machines
+                .Where(m => m.mac_address == macAddress)
+                .FirstOrDefaultAsync();
+
+            if (machine == null)
+                return NotFound(new { error = $"Machine with MAC address {macAddress} not found" });
+
+            // Check permissions
+            var isCurrentUserSubuser = await _userDataService.SubuserExistsAsync(currentUserEmail);
+            bool canErase = machine.user_email == currentUserEmail ||
+                           machine.subuser_email == currentUserEmail ||
+                           await _authService.HasPermissionAsync(currentUserEmail, "ERASE_MACHINES", isCurrentUserSubuser);
+
+            if (!canErase)
+                return StatusCode(403, new { error = "You don't have permission to erase this machine" });
+
+            // Create erasure session record
+            var erasureSession = new Session
+            {
+                user_email = currentUserEmail,
+                machine_id = machine.id,
+                status = "pending_erasure",
+                expiry_time = DateTime.UtcNow.AddHours(24),
+                created_at = DateTime.UtcNow
+            };
+
+            _context.Sessions.Add(erasureSession);
+
+            // Update machine status
+            machine.status = "erasure_scheduled";
+            machine.updated_at = DateTime.UtcNow;
+
+            await _context.SaveChangesAsync();
+
+            // Clear cache
+            _cacheService.Remove($"{CacheService.CacheKeys.Machine}:{macAddress}");
+            _cacheService.RemoveByPrefix(CacheService.CacheKeys.MachineList);
+
+            _logger.LogInformation("🗑️ Erasure initiated for machine {Mac} by {User}, Method: {Method}",
+                macAddress, currentUserEmail, request.ErasureMethod);
+
+            return Ok(new
+            {
+                success = true,
+                message = "Erasure initiated successfully",
+                sessionId = erasureSession.id,
+                macAddress = macAddress,
+                erasureMethod = request.ErasureMethod ?? "DoD 5220.22-M",
+                verifyAfter = request.VerifyAfter,
+                scheduledAt = DateTime.UtcNow,
+                status = "pending_erasure"
             });
         }
 
@@ -962,6 +1028,27 @@ namespace BitRaserApiProject.Controllers
         /// List of MAC addresses to transfer
         /// </summary>
         public List<string> MacAddresses { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Erasure request model for initiating data erasure
+    /// </summary>
+    public class ErasureRequest
+    {
+        /// <summary>
+        /// Erasure method to use (e.g., "DoD 5220.22-M", "NIST 800-88", "Gutmann")
+        /// </summary>
+        public string? ErasureMethod { get; set; } = "DoD 5220.22-M";
+        
+        /// <summary>
+        /// Whether to verify erasure after completion
+        /// </summary>
+        public bool VerifyAfter { get; set; } = true;
+        
+        /// <summary>
+        /// Optional notes for the erasure operation
+        /// </summary>
+        public string? Notes { get; set; }
     }
 
     #endregion
