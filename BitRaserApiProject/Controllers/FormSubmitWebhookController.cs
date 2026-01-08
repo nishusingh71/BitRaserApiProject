@@ -48,7 +48,8 @@ namespace BitRaserApiProject.Controllers
             try
             {
                 // ═══════════════════════════════════════════════════════════════
-                // PARSE REQUEST: Handle both JSON and Form data
+                // PARSE REQUEST: Handle JSON, Form, and any other content type
+                // FormSubmit can send various formats, so we try multiple parsers
                 // ═══════════════════════════════════════════════════════════════
                 FormSubmitPayload? payload = null;
                 var contentType = Request.ContentType?.ToLowerInvariant() ?? "";
@@ -56,44 +57,76 @@ namespace BitRaserApiProject.Controllers
                 _logger.LogInformation("📧 FormSubmit Webhook [{RequestId}]: ContentType={ContentType}", 
                     requestId, contentType);
 
-                if (contentType.Contains("application/json"))
+                // Try parsing based on content type, with fallbacks
+                try
                 {
-                    // JSON body
-                    payload = await Request.ReadFromJsonAsync<FormSubmitPayload>();
-                }
-                else if (contentType.Contains("multipart/form-data") || contentType.Contains("x-www-form-urlencoded"))
-                {
-                    // Form data
-                    var form = await Request.ReadFormAsync();
-                    payload = new FormSubmitPayload
+                    if (contentType.Contains("application/json"))
                     {
-                        Name = form["name"].ToString(),
-                        Email = form["email"].ToString(),
-                        Message = form["message"].ToString(),
-                        Company = form["company"].ToString(),
-                        Phone = form["phone"].ToString(),
-                        Country = form["country"].ToString(),
-                        BusinessType = form["businessType"].ToString(),
-                        SolutionType = form["solutionType"].ToString(),
-                        ComplianceRequirements = form["complianceRequirements"].ToString(),
-                        UsageType = form["usageType"].ToString(),
-                        Timestamp = form["timestamp"].ToString(),
-                        Source = form["source"].ToString()
-                    };
-                }
-                else
-                {
-                    // Try JSON as default
-                    try
-                    {
+                        // JSON body
                         payload = await Request.ReadFromJsonAsync<FormSubmitPayload>();
                     }
-                    catch
+                    else if (contentType.Contains("multipart/form-data") || 
+                             contentType.Contains("x-www-form-urlencoded") ||
+                             contentType.Contains("form"))
                     {
-                        _logger.LogWarning("⚠️ FormSubmit Webhook [{RequestId}]: Unknown content type {ContentType}", 
-                            requestId, contentType);
-                        return BadRequest(new { success = false, message = "Unsupported content type" });
+                        // Form data
+                        var form = await Request.ReadFormAsync();
+                        payload = new FormSubmitPayload
+                        {
+                            Name = form["name"].ToString(),
+                            Email = form["email"].ToString(),
+                            Message = form["message"].ToString(),
+                            Company = form["company"].ToString(),
+                            Phone = form["phone"].ToString(),
+                            Country = form["country"].ToString(),
+                            BusinessType = form["businessType"].ToString(),
+                            SolutionType = form["solutionType"].ToString(),
+                            ComplianceRequirements = form["complianceRequirements"].ToString(),
+                            UsageType = form["usageType"].ToString(),
+                            Timestamp = form["timestamp"].ToString(),
+                            Source = form["source"].ToString()
+                        };
                     }
+                    else
+                    {
+                        // Unknown content type - try Form first, then JSON
+                        try
+                        {
+                            var form = await Request.ReadFormAsync();
+                            if (form.Keys.Count > 0)
+                            {
+                                payload = new FormSubmitPayload
+                                {
+                                    Name = form["name"].ToString(),
+                                    Email = form["email"].ToString(),
+                                    Message = form["message"].ToString(),
+                                    Company = form["company"].ToString(),
+                                    Phone = form["phone"].ToString(),
+                                    Country = form["country"].ToString(),
+                                    BusinessType = form["businessType"].ToString(),
+                                    SolutionType = form["solutionType"].ToString(),
+                                    ComplianceRequirements = form["complianceRequirements"].ToString(),
+                                    UsageType = form["usageType"].ToString(),
+                                    Timestamp = form["timestamp"].ToString(),
+                                    Source = form["source"].ToString()
+                                };
+                                _logger.LogInformation("📧 FormSubmit Webhook [{RequestId}]: Parsed as Form data (unknown content type)", requestId);
+                            }
+                        }
+                        catch
+                        {
+                            // Form parsing failed, try JSON
+                            Request.Body.Position = 0; // Reset stream position
+                            payload = await Request.ReadFromJsonAsync<FormSubmitPayload>();
+                            _logger.LogInformation("📧 FormSubmit Webhook [{RequestId}]: Parsed as JSON (unknown content type)", requestId);
+                        }
+                    }
+                }
+                catch (Exception parseEx)
+                {
+                    _logger.LogWarning(parseEx, "⚠️ FormSubmit Webhook [{RequestId}]: Parse failed for ContentType={ContentType}", 
+                        requestId, contentType);
+                    return BadRequest(new { success = false, message = $"Failed to parse request body: {parseEx.Message}" });
                 }
 
                 if (payload == null)
