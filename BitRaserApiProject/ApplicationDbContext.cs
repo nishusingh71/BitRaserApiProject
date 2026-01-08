@@ -68,6 +68,9 @@ namespace BitRaserApiProject
         // ✅ Email System (Hybrid Email with Quota Management)
         public DbSet<EmailQuota> EmailQuotas { get; set; }
         public DbSet<EmailLog> EmailLogs { get; set; }
+        
+        // ✅ Email Sent Tracking (Open tracking, delivery status)
+        public DbSet<EmailSentLog> EmailSentLogs { get; set; }
 
         public static string HashLicenseKey(string licenseKey)
         {

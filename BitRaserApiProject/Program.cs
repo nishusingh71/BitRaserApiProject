@@ -457,6 +457,9 @@ builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailProvider, Bit
 builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailOrchestrator, BitRaserApiProject.Services.Email.EmailProviderOrchestrator>();
 builder.Services.AddScoped<BitRaserApiProject.Services.Email.ExcelExportService>();
 
+// ✅ EMAIL TRACKING - Open tracking, delivery status, analytics
+builder.Services.AddScoped<BitRaserApiProject.Services.Email.IEmailTrackingService, BitRaserApiProject.Services.Email.EmailTrackingService>();
+
 // ✅ ATTACHMENT RULES SERVICE - Conditional PDF/Excel based on service type
 builder.Services.AddScoped<IAttachmentRuleService, AttachmentRuleService>();
 
