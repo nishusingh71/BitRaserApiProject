@@ -916,7 +916,7 @@ namespace BitRaserApiProject.Services
             }
 
             // ✅ SEND ORDER EMAIL VIA HYBRID SYSTEM (MS Graph → SendGrid fallback)
-            // Uses orchestrator with Excel attachment, replaces old email logic
+            // Uses orchestrator with conditional logic based on product name
             if (_emailOrchestrator != null && _excelExportService != null)
             {
                 try
@@ -927,10 +927,19 @@ namespace BitRaserApiProject.Services
                     
                     _logger.LogInformation("📧 Sending order email via hybrid system to: {Email}", customerEmail);
                     
-                    // Generate Excel with order details and license keys
-                    var excelBytes = _excelExportService.GenerateOrderDetailsExcel(order, licenseKeys);
+                    // ═══════════════════════════════════════════════════════════════
+                    // PRODUCT-BASED EMAIL LOGIC
+                    // Drive products: No Excel, no license keys - only invoice
+                    // File products: Excel with license keys + invoice button
+                    // ═══════════════════════════════════════════════════════════════
+                    var productName = order.ProductName ?? "";
+                    var isDriveProduct = productName.StartsWith("Drive", StringComparison.OrdinalIgnoreCase);
+                    var isFileProduct = productName.StartsWith("File", StringComparison.OrdinalIgnoreCase);
                     
-                    // Build email request with minimal theme
+                    _logger.LogInformation("📦 Product: {ProductName}, IsDrive: {IsDrive}, IsFile: {IsFile}", 
+                        productName, isDriveProduct, isFileProduct);
+                    
+                    // Build email request based on product type
                     var emailRequest = new Email.EmailSendRequest
                     {
                         ToEmail = customerEmail,
@@ -938,18 +947,51 @@ namespace BitRaserApiProject.Services
                         Subject = userCreated 
                             ? $"Welcome to DSecure - Order #{order.OrderId}" 
                             : $"Order Confirmed - #{order.OrderId}",
-                        HtmlBody = GenerateMinimalOrderEmailHtml(order, customerName, userCreated, tempPassword, loginUrl, licenseKeys, invoiceUrl),
+                        HtmlBody = GenerateMinimalOrderEmailHtml(
+                            order, 
+                            customerName, 
+                            userCreated, 
+                            tempPassword, 
+                            loginUrl, 
+                            isDriveProduct ? null : licenseKeys,  // No license keys for Drive products
+                            invoiceUrl,
+                            isDriveProduct  // Flag to hide license key message
+                        ),
                         Type = Email.EmailType.Transactional,
-                        OrderId = order.OrderId,
-                        Attachments = new List<Email.EmailAttachment>
+                        OrderId = order.OrderId
+                    };
+                    
+                    // Only attach Excel for File products (not for Drive products)
+                    if (isFileProduct && licenseKeys != null && licenseKeys.Count > 0)
+                    {
+                        var excelBytes = _excelExportService.GenerateOrderDetailsExcel(order, licenseKeys);
+                        emailRequest.Attachments = new List<Email.EmailAttachment>
                         {
                             new Email.EmailAttachment(
                                 $"DSecure_Order_{order.OrderId}.xlsx",
                                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 excelBytes
                             )
-                        }
-                    };
+                        };
+                        _logger.LogInformation("📎 Excel attached for File product order #{OrderId}", order.OrderId);
+                    }
+                    else if (isDriveProduct)
+                    {
+                        _logger.LogInformation("📄 No Excel for Drive product order #{OrderId} - invoice only", order.OrderId);
+                    }
+                    else
+                    {
+                        // Default: attach Excel for other products
+                        var excelBytes = _excelExportService.GenerateOrderDetailsExcel(order, licenseKeys);
+                        emailRequest.Attachments = new List<Email.EmailAttachment>
+                        {
+                            new Email.EmailAttachment(
+                                $"DSecure_Order_{order.OrderId}.xlsx",
+                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                excelBytes
+                            )
+                        };
+                    }
                     
                     var result = await _emailOrchestrator.SendEmailAsync(emailRequest);
                     
@@ -1044,9 +1086,11 @@ namespace BitRaserApiProject.Services
 
         /// <summary>
         /// Generate minimal theme HTML email for order confirmation
-        /// Clean, professional, includes invoice button - details in Excel attachment
+        /// Clean, professional, includes invoice button
+        /// For Drive products: no Excel reference, no license keys
+        /// For File products: Excel with license keys + invoice button
         /// </summary>
-        private string GenerateMinimalOrderEmailHtml(Order order, string customerName, bool isNewUser, string? tempPassword, string loginUrl, List<string>? licenseKeys, string? invoiceUrl = null)
+        private string GenerateMinimalOrderEmailHtml(Order order, string customerName, bool isNewUser, string? tempPassword, string loginUrl, List<string>? licenseKeys, string? invoiceUrl = null, bool isDriveProduct = false)
         {
             var amount = order.AmountCents / 100m;
             var tax = order.TaxAmountCents / 100m;
@@ -1068,12 +1112,23 @@ namespace BitRaserApiProject.Services
 </td></tr>";
             }
 
+            // License key message - only show for non-Drive products
             var licenseHtml = "";
-            if (licenseKeys != null && licenseKeys.Count > 0)
+            if (!isDriveProduct && licenseKeys != null && licenseKeys.Count > 0)
             {
                 licenseHtml = $@"
 <tr><td style='padding:15px 0;'>
 <p style='margin:0;color:#666;'>📋 <strong>{licenseKeys.Count} License Key(s)</strong> included in attached Excel file.</p>
+</td></tr>";
+            }
+
+            // Excel attachment message - only show for non-Drive products
+            var excelMessageHtml = "";
+            if (!isDriveProduct)
+            {
+                excelMessageHtml = @"
+<tr><td style='padding:20px 0 0 0;border-top:1px solid #eee;'>
+<p style='margin:0;font-size:13px;color:#666;'>📎 Complete order details and license keys are in the attached Excel file.</p>
 </td></tr>";
             }
 
@@ -1106,9 +1161,7 @@ namespace BitRaserApiProject.Services
 <a href='{invoiceUrl}' style='display:inline-block;background:#4CAF50;color:#fff;padding:12px 30px;text-decoration:none;border-radius:6px;font-weight:600;'>📄 View Invoice</a>
 </td></tr>")}
 
-<tr><td style='padding:20px 0 0 0;border-top:1px solid #eee;'>
-<p style='margin:0;font-size:13px;color:#666;'>📎 Complete order details and license keys are in the attached Excel file.</p>
-</td></tr>
+{excelMessageHtml}
 </td></tr>
 <tr><td style='background:#f8f9fa;padding:20px;text-align:center;font-size:12px;color:#888;'>
 <p style='margin:0;'>DSecure Technologies • Support@dsecuretech.com</p>
