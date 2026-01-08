@@ -37,17 +37,71 @@ namespace BitRaserApiProject.Controllers
         /// FormSubmit.co webhook endpoint - receives form submissions
         /// POST /api/formsubmit/webhook
         /// 
-        /// Note: FormSubmit can send form-urlencoded, JSON, or multipart data
-        /// We accept all content types to be flexible
+        /// Accepts: application/json, multipart/form-data, x-www-form-urlencoded
         /// </summary>
         [HttpPost("webhook")]
         [AllowAnonymous] // FormSubmit doesn't send auth tokens
-        public async Task<IActionResult> HandleWebhook([FromForm] FormSubmitPayload payload)
+        public async Task<IActionResult> HandleWebhook()
         {
             var requestId = Guid.NewGuid().ToString("N")[..8];
 
             try
             {
+                // ═══════════════════════════════════════════════════════════════
+                // PARSE REQUEST: Handle both JSON and Form data
+                // ═══════════════════════════════════════════════════════════════
+                FormSubmitPayload? payload = null;
+                var contentType = Request.ContentType?.ToLowerInvariant() ?? "";
+
+                _logger.LogInformation("📧 FormSubmit Webhook [{RequestId}]: ContentType={ContentType}", 
+                    requestId, contentType);
+
+                if (contentType.Contains("application/json"))
+                {
+                    // JSON body
+                    payload = await Request.ReadFromJsonAsync<FormSubmitPayload>();
+                }
+                else if (contentType.Contains("multipart/form-data") || contentType.Contains("x-www-form-urlencoded"))
+                {
+                    // Form data
+                    var form = await Request.ReadFormAsync();
+                    payload = new FormSubmitPayload
+                    {
+                        Name = form["name"].ToString(),
+                        Email = form["email"].ToString(),
+                        Message = form["message"].ToString(),
+                        Company = form["company"].ToString(),
+                        Phone = form["phone"].ToString(),
+                        Country = form["country"].ToString(),
+                        BusinessType = form["businessType"].ToString(),
+                        SolutionType = form["solutionType"].ToString(),
+                        ComplianceRequirements = form["complianceRequirements"].ToString(),
+                        UsageType = form["usageType"].ToString(),
+                        Timestamp = form["timestamp"].ToString(),
+                        Source = form["source"].ToString()
+                    };
+                }
+                else
+                {
+                    // Try JSON as default
+                    try
+                    {
+                        payload = await Request.ReadFromJsonAsync<FormSubmitPayload>();
+                    }
+                    catch
+                    {
+                        _logger.LogWarning("⚠️ FormSubmit Webhook [{RequestId}]: Unknown content type {ContentType}", 
+                            requestId, contentType);
+                        return BadRequest(new { success = false, message = "Unsupported content type" });
+                    }
+                }
+
+                if (payload == null)
+                {
+                    _logger.LogWarning("⚠️ FormSubmit Webhook [{RequestId}]: Payload is null", requestId);
+                    return BadRequest(new { success = false, message = "Invalid request body" });
+                }
+
                 _logger.LogInformation("📧 FormSubmit Webhook [{RequestId}]: Received from {Email}", 
                     requestId, SanitizeForLog(payload.Email));
 
@@ -56,7 +110,8 @@ namespace BitRaserApiProject.Controllers
                 // ═══════════════════════════════════════════════════════════════
                 if (string.IsNullOrWhiteSpace(payload.Email) || string.IsNullOrWhiteSpace(payload.Name))
                 {
-                    _logger.LogWarning("⚠️ FormSubmit Webhook [{RequestId}]: Missing required fields", requestId);
+                    _logger.LogWarning("⚠️ FormSubmit Webhook [{RequestId}]: Missing required fields - Name={Name}, Email={Email}", 
+                        requestId, payload.Name ?? "null", payload.Email ?? "null");
                     return BadRequest(new { success = false, message = "Name and email are required" });
                 }
 
