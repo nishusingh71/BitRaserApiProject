@@ -290,7 +290,7 @@ namespace BitRaserApiProject.Services.Email
                 col.Item().Background(Colors.Grey.Lighten4).Padding(15).Column(infoCol =>
                 {
                     infoCol.Item().Text($"Order #{order.OrderId}").Bold().FontSize(16);
-                    infoCol.Item().Text($"Date: {order.OrderDate:MMMM dd, yyyy}").FontSize(10);
+                    infoCol.Item().Text($"Date: {order.CreatedAt:MMMM dd, yyyy}").FontSize(10);
                     infoCol.Item().Text($"Status: {order.Status}").FontSize(10);
                 });
 
@@ -305,7 +305,7 @@ namespace BitRaserApiProject.Services.Email
                     });
 
                     table.Cell().Text("Name:").Bold();
-                    table.Cell().Text(order.CustomerName ?? "N/A");
+                    table.Cell().Text($"{order.FirstName} {order.LastName}".Trim() is { Length: > 0 } name ? name : "N/A");
 
                     table.Cell().Text("Email:").Bold();
                     table.Cell().Text(order.UserEmail ?? "N/A");
