@@ -1,6 +1,9 @@
 using BitRaserApiProject.Models;
 using ClosedXML.Excel;
 using Microsoft.Extensions.Logging;
+using QuestPDF.Fluent;
+using QuestPDF.Helpers;
+using QuestPDF.Infrastructure;
 
 namespace BitRaserApiProject.Services.Email
 {
@@ -213,6 +216,160 @@ namespace BitRaserApiProject.Services.Email
             sheet.Cell($"B{row}").Value = value;
             sheet.Cell($"A{row}").Style.Font.Bold = true;
             row++;
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════
+        // PDF GENERATION FOR DRIVE PRODUCTS (No License Keys)
+        // ═══════════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Generate PDF file with order details for Drive Eraser products
+        /// No license keys - clean order summary only
+        /// </summary>
+        public byte[] GenerateOrderDetailsPdf(Order order)
+        {
+            try
+            {
+                _logger.LogInformation("📄 Generating PDF for Drive Order #{OrderId}", order.OrderId);
+
+                var amount = order.AmountCents / 100m;
+                var tax = order.TaxAmountCents / 100m;
+                var total = amount + tax;
+                var currency = order.Currency ?? "USD";
+
+                var pdfDoc = Document.Create(container =>
+                {
+                    container.Page(page =>
+                    {
+                        page.Size(PageSizes.A4);
+                        page.Margin(40);
+                        page.DefaultTextStyle(x => x.FontSize(11));
+
+                        page.Header().Element(HeaderContainer);
+                        page.Content().Element(c => ContentContainer(c, order, amount, tax, total, currency));
+                        page.Footer().Element(FooterContainer);
+                    });
+                });
+
+                var bytes = pdfDoc.GeneratePdf();
+                _logger.LogInformation("✅ PDF generated: {Size} bytes for Order #{OrderId}", bytes.Length, order.OrderId);
+
+                return bytes;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Failed to generate PDF for Order #{OrderId}", order.OrderId);
+                throw;
+            }
+        }
+
+        private void HeaderContainer(IContainer container)
+        {
+            container.Row(row =>
+            {
+                row.RelativeItem().Column(col =>
+                {
+                    col.Item().Text("DSecure Technologies")
+                        .Bold().FontSize(20).FontColor(Colors.Blue.Darken3);
+                    col.Item().Text("Enterprise Data Erasure Solutions")
+                        .FontSize(10).FontColor(Colors.Grey.Darken1);
+                });
+
+                row.ConstantItem(120).AlignRight().Text("ORDER CONFIRMATION")
+                    .Bold().FontSize(14).FontColor(Colors.Blue.Darken2);
+            });
+        }
+
+        private void ContentContainer(IContainer container, Order order, decimal amount, decimal tax, decimal total, string currency)
+        {
+            container.PaddingVertical(20).Column(col =>
+            {
+                col.Spacing(15);
+
+                // Order Info Box
+                col.Item().Background(Colors.Grey.Lighten4).Padding(15).Column(infoCol =>
+                {
+                    infoCol.Item().Text($"Order #{order.OrderId}").Bold().FontSize(16);
+                    infoCol.Item().Text($"Date: {order.OrderDate:MMMM dd, yyyy}").FontSize(10);
+                    infoCol.Item().Text($"Status: {order.Status}").FontSize(10);
+                });
+
+                // Customer Details
+                col.Item().Text("Customer Details").Bold().FontSize(13);
+                col.Item().Table(table =>
+                {
+                    table.ColumnsDefinition(columns =>
+                    {
+                        columns.ConstantColumn(120);
+                        columns.RelativeColumn();
+                    });
+
+                    table.Cell().Text("Name:").Bold();
+                    table.Cell().Text(order.CustomerName ?? "N/A");
+
+                    table.Cell().Text("Email:").Bold();
+                    table.Cell().Text(order.UserEmail ?? "N/A");
+                });
+
+                // Product Details
+                col.Item().PaddingTop(10).Text("Product Details").Bold().FontSize(13);
+                col.Item().Table(table =>
+                {
+                    table.ColumnsDefinition(columns =>
+                    {
+                        columns.ConstantColumn(120);
+                        columns.RelativeColumn();
+                    });
+
+                    table.Cell().Text("Product:").Bold();
+                    table.Cell().Text(order.ProductName ?? "D-Secure Drive Eraser");
+
+                    table.Cell().Text("Quantity:").Bold();
+                    table.Cell().Text($"{order.LicenseCount} License(s)");
+
+                    table.Cell().Text("Duration:").Bold();
+                    table.Cell().Text($"{order.LicenseYears} Year(s)");
+                });
+
+                // Payment Summary
+                col.Item().PaddingTop(10).Background(Colors.Blue.Lighten5).Padding(15).Column(payCol =>
+                {
+                    payCol.Item().Text("Payment Summary").Bold().FontSize(13);
+                    payCol.Item().PaddingTop(10).Row(r =>
+                    {
+                        r.RelativeItem().Text("Subtotal:");
+                        r.ConstantItem(100).AlignRight().Text($"{currency} {amount:N2}");
+                    });
+                    
+                    if (tax > 0)
+                    {
+                        payCol.Item().Row(r =>
+                        {
+                            r.RelativeItem().Text("Tax:");
+                            r.ConstantItem(100).AlignRight().Text($"{currency} {tax:N2}");
+                        });
+                    }
+                    
+                    payCol.Item().PaddingTop(5).Row(r =>
+                    {
+                        r.RelativeItem().Text("Total:").Bold().FontSize(14);
+                        r.ConstantItem(100).AlignRight().Text($"{currency} {total:N2}").Bold().FontSize(14);
+                    });
+                });
+
+                // Thank You Message
+                col.Item().PaddingTop(20).AlignCenter().Text("Thank you for your purchase!").FontSize(12).Italic();
+            });
+        }
+
+        private void FooterContainer(IContainer container)
+        {
+            container.AlignCenter().Text(text =>
+            {
+                text.Span("DSecure Technologies • ").FontSize(9).FontColor(Colors.Grey.Darken1);
+                text.Span("support@dsecuretech.com").FontSize(9).FontColor(Colors.Blue.Darken2);
+                text.Span(" • www.dsecuretech.com").FontSize(9).FontColor(Colors.Grey.Darken1);
+            });
         }
     }
 }

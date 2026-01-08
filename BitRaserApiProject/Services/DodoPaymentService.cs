@@ -961,34 +961,75 @@ namespace BitRaserApiProject.Services
                         OrderId = order.OrderId
                     };
                     
-                    // Only attach Excel for File products (not for Drive products)
-                    if (isFileProduct && licenseKeys != null && licenseKeys.Count > 0)
+                    // ═══════════════════════════════════════════════════════════════
+                    // PRODUCT-BASED ATTACHMENT ROUTING (Senior Architect Upgrade)
+                    // ═══════════════════════════════════════════════════════════════
+                    // Drive Eraser → PDF only (no license keys)
+                    // File Eraser  → Excel only (with license keys)
+                    // Unknown      → Abort email, log warning
+                    // ═══════════════════════════════════════════════════════════════
+                    
+                    if (isDriveProduct)
                     {
-                        var excelBytes = _excelExportService.GenerateOrderDetailsExcel(order, licenseKeys);
+                        // DRIVE PRODUCTS: PDF attachment only, no license keys
+                        var pdfBytes = _excelExportService.GenerateOrderDetailsPdf(order);
                         emailRequest.Attachments = new List<Email.EmailAttachment>
                         {
                             new Email.EmailAttachment(
-                                $"DSecure_Order_{order.OrderId}.xlsx",
-                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                excelBytes
+                                $"DSecure_Order_{order.OrderId}.pdf",
+                                "application/pdf",
+                                pdfBytes
                             )
                         };
-                        _logger.LogInformation("📎 Excel attached for File product order #{OrderId}", order.OrderId);
+                        _logger.LogInformation("📄 PDF attached for Drive product order #{OrderId} - No license keys", order.OrderId);
                     }
-                    else if (isDriveProduct)
+                    else if (isFileProduct)
                     {
-                        _logger.LogInformation("📄 No Excel for Drive product order #{OrderId} - invoice only", order.OrderId);
+                        // FILE PRODUCTS: Excel attachment with license keys
+                        if (licenseKeys != null && licenseKeys.Count > 0)
+                        {
+                            var excelBytes = _excelExportService.GenerateOrderDetailsExcel(order, licenseKeys);
+                            emailRequest.Attachments = new List<Email.EmailAttachment>
+                            {
+                                new Email.EmailAttachment(
+                                    $"DSecure_Order_{order.OrderId}.xlsx",
+                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    excelBytes
+                                )
+                            };
+                            _logger.LogInformation("📊 Excel attached for File product order #{OrderId} with {Count} license keys", 
+                                order.OrderId, licenseKeys.Count);
+                        }
+                        else
+                        {
+                            _logger.LogWarning("⚠️ File product order #{OrderId} has no license keys - attaching empty Excel", order.OrderId);
+                            var excelBytes = _excelExportService.GenerateOrderDetailsExcel(order, null);
+                            emailRequest.Attachments = new List<Email.EmailAttachment>
+                            {
+                                new Email.EmailAttachment(
+                                    $"DSecure_Order_{order.OrderId}.xlsx",
+                                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    excelBytes
+                                )
+                            };
+                        }
                     }
                     else
                     {
-                        // Default: attach Excel for other products
-                        var excelBytes = _excelExportService.GenerateOrderDetailsExcel(order, licenseKeys);
+                        // UNKNOWN PRODUCT: Log warning and abort email attachment
+                        // Email will still be sent but without attachment
+                        _logger.LogWarning("⚠️ Unknown product type: {ProductName} for order #{OrderId} - No attachment generated. " +
+                            "Valid products: D-Secure Drive*, D-Secure File*", 
+                            productName, order.OrderId);
+                        
+                        // For unknown products, default to PDF (safer, no license keys)
+                        var pdfBytes = _excelExportService.GenerateOrderDetailsPdf(order);
                         emailRequest.Attachments = new List<Email.EmailAttachment>
                         {
                             new Email.EmailAttachment(
-                                $"DSecure_Order_{order.OrderId}.xlsx",
-                                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                excelBytes
+                                $"DSecure_Order_{order.OrderId}.pdf",
+                                "application/pdf",
+                                pdfBytes
                             )
                         };
                     }
