@@ -426,21 +426,45 @@ Submission ID: #{s.Id} • Source: {s.Source}
 
     /// <summary>
     /// DTO for FormSubmit.co payload (supports both JSON and Form data)
+    /// JSON property names are lowercase to match JavaScript/FormSubmit naming
     /// </summary>
     public class FormSubmitPayload
     {
-        // Core form fields
+        // Core form fields (with lowercase JSON property names)
+        [System.Text.Json.Serialization.JsonPropertyName("name")]
         public string Name { get; set; } = "";
+        
+        [System.Text.Json.Serialization.JsonPropertyName("email")]
         public string Email { get; set; } = "";
+        
+        [System.Text.Json.Serialization.JsonPropertyName("message")]
         public string Message { get; set; } = "";
+        
+        [System.Text.Json.Serialization.JsonPropertyName("company")]
         public string? Company { get; set; }
+        
+        [System.Text.Json.Serialization.JsonPropertyName("phone")]
         public string? Phone { get; set; }
+        
+        [System.Text.Json.Serialization.JsonPropertyName("country")]
         public string? Country { get; set; }
+        
+        [System.Text.Json.Serialization.JsonPropertyName("businessType")]
         public string? BusinessType { get; set; }
+        
+        [System.Text.Json.Serialization.JsonPropertyName("solutionType")]
         public string? SolutionType { get; set; }
+        
+        [System.Text.Json.Serialization.JsonPropertyName("complianceRequirements")]
         public string? ComplianceRequirements { get; set; }
+        
+        [System.Text.Json.Serialization.JsonPropertyName("usageType")]
         public string? UsageType { get; set; }
+        
+        [System.Text.Json.Serialization.JsonPropertyName("timestamp")]
         public string? Timestamp { get; set; }
+        
+        [System.Text.Json.Serialization.JsonPropertyName("source")]
         public string? Source { get; set; }
 
         // ═══════════════════════════════════════════════════════════════
