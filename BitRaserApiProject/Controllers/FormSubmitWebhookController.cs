@@ -139,20 +139,30 @@ namespace BitRaserApiProject.Controllers
                     requestId, SanitizeForLog(payload.Email));
 
                 // ═══════════════════════════════════════════════════════════════
-                // VALIDATION: Basic checks
+                // VALIDATION: Basic checks with CustomerEmail fallback
                 // ═══════════════════════════════════════════════════════════════
-                if (string.IsNullOrWhiteSpace(payload.Email) || string.IsNullOrWhiteSpace(payload.Name))
+                
+                // Use Email field, fallback to CustomerEmail if empty
+                var userEmail = !string.IsNullOrWhiteSpace(payload.Email) 
+                    ? payload.Email 
+                    : payload.CustomerEmail;
+                
+                if (string.IsNullOrWhiteSpace(userEmail) || string.IsNullOrWhiteSpace(payload.Name))
                 {
-                    _logger.LogWarning("⚠️ FormSubmit Webhook [{RequestId}]: Missing required fields - Name={Name}, Email={Email}", 
-                        requestId, payload.Name ?? "null", payload.Email ?? "null");
+                    _logger.LogWarning("⚠️ FormSubmit Webhook [{RequestId}]: Missing required fields - Name={Name}, Email={Email}, CustomerEmail={CustomerEmail}", 
+                        requestId, payload.Name ?? "null", payload.Email ?? "null", payload.CustomerEmail ?? "null");
                     return BadRequest(new { success = false, message = "Name and email are required" });
                 }
+                
+                // Check if sendAutoReply flag is set
+                var shouldSendAutoReply = string.Equals(payload.SendAutoReply, "true", StringComparison.OrdinalIgnoreCase);
+                _logger.LogInformation("📧 FormSubmit Webhook [{RequestId}]: SendAutoReply={Flag}", requestId, shouldSendAutoReply);
 
                 // ═══════════════════════════════════════════════════════════════
                 // SECURITY: Input Sanitization
                 // ═══════════════════════════════════════════════════════════════
                 var sanitizedName = SanitizeInput(payload.Name);
-                var sanitizedEmail = payload.Email.Trim().ToLowerInvariant();
+                var sanitizedEmail = userEmail.Trim().ToLowerInvariant();
                 var sanitizedMessage = SanitizeInput(payload.Message);
 
                 // ═══════════════════════════════════════════════════════════════
@@ -205,16 +215,26 @@ namespace BitRaserApiProject.Controllers
                 // EMAIL: Send auto-response via Microsoft Graph
                 // ═══════════════════════════════════════════════════════════════
                 bool emailSent = false;
+                bool autoReplySent = false;
 
                 if (_emailOrchestrator != null)
                 {
                     try
                     {
-                        // Send team notification
+                        // Always send team notification
                         await SendTeamNotificationAsync(submission);
 
-                        // Send user auto-response
-                        await SendUserAutoResponseAsync(submission);
+                        // Send user auto-response ONLY if sendAutoReply flag is "true"
+                        if (shouldSendAutoReply)
+                        {
+                            await SendUserAutoResponseAsync(submission);
+                            autoReplySent = true;
+                            _logger.LogInformation("📧 FormSubmit Webhook [{RequestId}]: Auto-reply sent to user", requestId);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("📧 FormSubmit Webhook [{RequestId}]: Auto-reply skipped (flag not set)", requestId);
+                        }
 
                         emailSent = true;
                         _logger.LogInformation("📧 FormSubmit Webhook [{RequestId}]: Emails sent", requestId);
@@ -229,7 +249,8 @@ namespace BitRaserApiProject.Controllers
                     success = true, 
                     message = "Webhook received",
                     submissionId = submission.Id,
-                    emailSent
+                    emailSent,
+                    autoReplySent
                 });
             }
             catch (Exception ex)
@@ -404,10 +425,11 @@ Submission ID: #{s.Id} • Source: {s.Source}
     }
 
     /// <summary>
-    /// DTO for FormSubmit.co form-urlencoded payload
+    /// DTO for FormSubmit.co payload (supports both JSON and Form data)
     /// </summary>
     public class FormSubmitPayload
     {
+        // Core form fields
         public string Name { get; set; } = "";
         public string Email { get; set; } = "";
         public string Message { get; set; } = "";
@@ -420,5 +442,32 @@ Submission ID: #{s.Id} • Source: {s.Source}
         public string? UsageType { get; set; }
         public string? Timestamp { get; set; }
         public string? Source { get; set; }
+
+        // ═══════════════════════════════════════════════════════════════
+        // NEW: Explicit fields sent from frontend for auto-reply control
+        // ═══════════════════════════════════════════════════════════════
+        
+        /// <summary>
+        /// Flag to indicate if auto-reply should be sent (from frontend)
+        /// Value: "true" or "false"
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("sendAutoReply")]
+        public string? SendAutoReply { get; set; }
+
+        /// <summary>
+        /// Fallback customer email if 'Email' field is missing
+        /// </summary>
+        [System.Text.Json.Serialization.JsonPropertyName("customer_email")]
+        public string? CustomerEmail { get; set; }
+
+        // FormSubmit metadata fields (we capture but don't rely on)
+        [System.Text.Json.Serialization.JsonPropertyName("_replyto")]
+        public string? ReplyTo { get; set; }
+        
+        [System.Text.Json.Serialization.JsonPropertyName("_subject")]
+        public string? Subject { get; set; }
+        
+        [System.Text.Json.Serialization.JsonPropertyName("_webhookContentType")]
+        public string? WebhookContentType { get; set; }
     }
 }
