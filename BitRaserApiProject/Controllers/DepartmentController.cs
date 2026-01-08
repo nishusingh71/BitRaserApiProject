@@ -72,8 +72,8 @@ namespace BitRaserApiProject.Controllers
                         GroupId = d.GroupId,
                         CreatedAt = d.CreatedAt,
                         UpdatedAt = d.UpdatedAt,
-                        MemberCount = context.Set<Subuser>()
-                            .Count(s => s.department == d.Name)
+                        MemberCount = context.Set<subuser>()
+                            .Count(s => s.Department == d.Name)
                     })
                     .ToListAsync();
 
@@ -119,8 +119,8 @@ namespace BitRaserApiProject.Controllers
                         GroupId = d.GroupId,
                         CreatedAt = d.CreatedAt,
                         UpdatedAt = d.UpdatedAt,
-                        MemberCount = context.Set<Subuser>()
-                            .Count(s => s.department == d.Name)
+                        MemberCount = context.Set<subuser>()
+                            .Count(s => s.Department == d.Name)
                     })
                     .FirstOrDefaultAsync();
 
@@ -159,8 +159,8 @@ namespace BitRaserApiProject.Controllers
                         GroupId = d.GroupId,
                         CreatedAt = d.CreatedAt,
                         UpdatedAt = d.UpdatedAt,
-                        MemberCount = context.Set<Subuser>()
-                            .Count(s => s.department == d.Name)
+                        MemberCount = context.Set<subuser>()
+                            .Count(s => s.Department == d.Name)
                     })
                     .ToListAsync();
 
@@ -354,8 +354,8 @@ namespace BitRaserApiProject.Controllers
                     return NotFound(new { success = false, message = $"Department with ID {id} not found" });
 
                 // Check if department has members
-                var memberCount = await context.Set<Subuser>()
-                    .CountAsync(s => s.department == department.Name);
+                var memberCount = await context.Set<subuser>()
+                    .CountAsync(s => s.Department == department.Name);
 
                 if (memberCount > 0)
                     return BadRequest(new { 
@@ -395,16 +395,16 @@ namespace BitRaserApiProject.Controllers
                 if (department == null)
                     return NotFound(new { success = false, message = $"Department with ID {id} not found" });
 
-                var members = await context.Set<Subuser>()
+                var members = await context.Set<subuser>()
                     .AsNoTracking()
-                    .Where(s => s.department == department.Name)
+                    .Where(s => s.Department == department.Name)
                     .Select(s => new
                     {
                         email = s.subuser_email,
-                        name = s.subuser_name,
+                        name = s.Name,
                         status = s.status,
-                        role = s.role,
-                        createdAt = s.created_at
+                        role = s.Role,
+                        createdAt = s.CreatedAt
                     })
                     .ToListAsync();
 
@@ -450,8 +450,8 @@ namespace BitRaserApiProject.Controllers
                 var departmentStats = new List<object>();
                 foreach (var dept in departments.Take(10))
                 {
-                    var memberCount = await context.Set<Subuser>()
-                        .CountAsync(s => s.department == dept.Name);
+                    var memberCount = await context.Set<subuser>()
+                        .CountAsync(s => s.Department == dept.Name);
                     
                     departmentStats.Add(new
                     {
