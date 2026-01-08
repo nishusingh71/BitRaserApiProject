@@ -37,11 +37,11 @@ namespace BitRaserApiProject.Controllers
         /// FormSubmit.co webhook endpoint - receives form submissions
         /// POST /api/formsubmit/webhook
         /// 
-        /// Note: FormSubmit sends form-urlencoded data, not JSON
+        /// Note: FormSubmit can send form-urlencoded, JSON, or multipart data
+        /// We accept all content types to be flexible
         /// </summary>
         [HttpPost("webhook")]
         [AllowAnonymous] // FormSubmit doesn't send auth tokens
-        [Consumes("application/x-www-form-urlencoded")]
         public async Task<IActionResult> HandleWebhook([FromForm] FormSubmitPayload payload)
         {
             var requestId = Guid.NewGuid().ToString("N")[..8];
