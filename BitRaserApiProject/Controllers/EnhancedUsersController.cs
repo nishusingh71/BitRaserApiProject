@@ -21,17 +21,20 @@ namespace BitRaserApiProject.Controllers
         private readonly IRoleBasedAuthService _authService;
         private readonly IUserDataService _userDataService;
         private readonly ICacheService _cacheService;
+        private readonly ILogger<EnhancedUsersController> _logger;
 
         public EnhancedUsersController(
             ApplicationDbContext context,
             IRoleBasedAuthService authService,
             IUserDataService userDataService,
-            ICacheService cacheService)
+            ICacheService cacheService,
+            ILogger<EnhancedUsersController> logger)
         {
             _context = context;
             _authService = authService;
             _userDataService = userDataService;
             _cacheService = cacheService;
+            _logger = logger;
         }
 
         /// <summary>
@@ -959,6 +962,323 @@ namespace BitRaserApiProject.Controllers
         }
 
         #endregion
+
+        #region User Transfer Endpoints
+
+        /// <summary>
+        /// GET: Get user dependencies before deletion/transfer
+        /// Shows all related data: subusers, machines, licenses, reports
+        /// </summary>
+        [HttpGet("{userEmail}/dependencies")]
+        [Authorize(Roles = "SuperAdmin,Admin")]
+        public async Task<IActionResult> GetUserDependencies(string userEmail)
+        {
+            try
+            {
+                var decodedEmail = DecodeEmail(userEmail);
+                
+                var user = await _context.Users
+                    .FirstOrDefaultAsync(u => u.user_email == decodedEmail);
+                
+                if (user == null)
+                    return NotFound(new { success = false, message = "User not found" });
+
+                // Count all dependencies
+                var subusersCount = await _context.Set<subuser>()
+                    .CountAsync(s => s.user_email == decodedEmail);
+                var machinesCount = await _context.Machines
+                    .CountAsync(m => m.user_email == decodedEmail);
+                var reportsCount = await _context.AuditReports
+                    .CountAsync(r => r.client_email == decodedEmail);
+                var sessionsCount = await _context.Sessions
+                    .CountAsync(s => s.user_email == decodedEmail);
+
+                return Ok(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        userEmail = decodedEmail,
+                        dependencies = new
+                        {
+                            subusers = subusersCount,
+                            machines = machinesCount,
+                            reports = reportsCount,
+                            sessions = sessionsCount,
+                            total = subusersCount + machinesCount + reportsCount + sessionsCount
+                        },
+                        canDelete = subusersCount == 0 && machinesCount == 0,
+                        requiresTransfer = subusersCount > 0 || machinesCount > 0
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error getting dependencies for {Email}", userEmail);
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// GET: Get current transfer status for a user
+        /// </summary>
+        [HttpGet("{userEmail}/transfer-status")]
+        [Authorize(Roles = "SuperAdmin,Admin")]
+        public async Task<IActionResult> GetTransferStatus(string userEmail)
+        {
+            try
+            {
+                var decodedEmail = DecodeEmail(userEmail);
+                
+                // Check if there's any pending transfer for this user
+                var pendingTransfer = await _context.Sessions
+                    .Where(s => s.user_email == decodedEmail && s.session_status == "transfer_pending")
+                    .OrderByDescending(s => s.login_time)
+                    .FirstOrDefaultAsync();
+
+                if (pendingTransfer != null)
+                {
+                    return Ok(new
+                    {
+                        success = true,
+                        data = new
+                        {
+                            status = "pending",
+                            transferId = pendingTransfer.session_id,
+                            startedAt = pendingTransfer.login_time,
+                            message = "Transfer in progress"
+                        }
+                    });
+                }
+
+                return Ok(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        status = "none",
+                        message = "No pending transfers"
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error getting transfer status for {Email}", userEmail);
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// POST: Transfer user access (roles, permissions) to another user
+        /// </summary>
+        [HttpPost("{userEmail}/transfer-access")]
+        [Authorize(Roles = "SuperAdmin,Admin")]
+        public async Task<IActionResult> TransferAccess(string userEmail, [FromBody] TransferAccessRequest request)
+        {
+            try
+            {
+                var sourceEmail = DecodeEmail(userEmail);
+                
+                var sourceUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == sourceEmail);
+                var targetUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.TargetUserEmail);
+
+                if (sourceUser == null)
+                    return NotFound(new { success = false, message = "Source user not found" });
+                if (targetUser == null)
+                    return NotFound(new { success = false, message = "Target user not found" });
+
+                // Transfer subusers to new parent
+                var subusers = await _context.Set<subuser>()
+                    .Where(s => s.user_email == sourceEmail)
+                    .ToListAsync();
+
+                foreach (var sub in subusers)
+                {
+                    sub.user_email = request.TargetUserEmail;
+                }
+
+                // Log the transfer
+                var transferSession = new Sessions
+                {
+                    user_email = sourceEmail,
+                    session_status = "access_transferred",
+                    device_info = $"Access transferred to: {request.TargetUserEmail}",
+                    ip_address = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    login_time = DateTime.UtcNow
+                };
+                _context.Sessions.Add(transferSession);
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Access transferred from {Source} to {Target}: {Count} subusers",
+                    sourceEmail, request.TargetUserEmail, subusers.Count);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Access transferred successfully",
+                    data = new
+                    {
+                        subusersTransferred = subusers.Count,
+                        fromUser = sourceEmail,
+                        toUser = request.TargetUserEmail
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error transferring access for {Email}", userEmail);
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// POST: Transfer user data (machines, reports) to another user
+        /// </summary>
+        [HttpPost("{userEmail}/transfer-data")]
+        [Authorize(Roles = "SuperAdmin,Admin")]
+        public async Task<IActionResult> TransferData(string userEmail, [FromBody] TransferDataRequest request)
+        {
+            try
+            {
+                var sourceEmail = DecodeEmail(userEmail);
+                
+                var sourceUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == sourceEmail);
+                var targetUser = await _context.Users.FirstOrDefaultAsync(u => u.user_email == request.TargetUserEmail);
+
+                if (sourceUser == null)
+                    return NotFound(new { success = false, message = "Source user not found" });
+                if (targetUser == null)
+                    return NotFound(new { success = false, message = "Target user not found" });
+
+                int machinesTransferred = 0;
+                int reportsTransferred = 0;
+
+                // Transfer machines if requested
+                if (request.TransferMachines)
+                {
+                    var machines = await _context.Machines
+                        .Where(m => m.user_email == sourceEmail)
+                        .ToListAsync();
+
+                    foreach (var machine in machines)
+                    {
+                        machine.user_email = request.TargetUserEmail;
+                    }
+                    machinesTransferred = machines.Count;
+                }
+
+                // Transfer reports if requested
+                if (request.TransferReports)
+                {
+                    var reports = await _context.AuditReports
+                        .Where(r => r.client_email == sourceEmail)
+                        .ToListAsync();
+
+                    foreach (var report in reports)
+                    {
+                        report.client_email = request.TargetUserEmail;
+                    }
+                    reportsTransferred = reports.Count;
+                }
+
+                // Log the transfer
+                var transferSession = new Sessions
+                {
+                    user_email = sourceEmail,
+                    session_status = "data_transferred",
+                    device_info = $"Data transferred to: {request.TargetUserEmail}",
+                    ip_address = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                    login_time = DateTime.UtcNow
+                };
+                _context.Sessions.Add(transferSession);
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Data transferred from {Source} to {Target}: {Machines} machines, {Reports} reports",
+                    sourceEmail, request.TargetUserEmail, machinesTransferred, reportsTransferred);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Data transferred successfully",
+                    data = new
+                    {
+                        machinesTransferred,
+                        reportsTransferred,
+                        fromUser = sourceEmail,
+                        toUser = request.TargetUserEmail
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error transferring data for {Email}", userEmail);
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// PUT: Update user status (active/inactive/suspended)
+        /// </summary>
+        [HttpPut("{userEmail}/status")]
+        [Authorize(Roles = "SuperAdmin,Admin")]
+        public async Task<IActionResult> UpdateUserStatus(string userEmail, [FromBody] UpdateStatusRequest request)
+        {
+            try
+            {
+                var decodedEmail = DecodeEmail(userEmail);
+                
+                var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == decodedEmail);
+                if (user == null)
+                    return NotFound(new { success = false, message = "User not found" });
+
+                var validStatuses = new[] { "active", "inactive", "suspended" };
+                if (!validStatuses.Contains(request.Status?.ToLower()))
+                    return BadRequest(new { success = false, message = "Invalid status. Use: active, inactive, suspended" });
+
+                var oldStatus = user.status;
+                user.status = request.Status.ToLower();
+                user.updated_at = DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ User status updated: {Email} from {Old} to {New}",
+                    decodedEmail, oldStatus, user.status);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "User status updated successfully",
+                    data = new
+                    {
+                        userEmail = decodedEmail,
+                        previousStatus = oldStatus,
+                        currentStatus = user.status
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error updating status for {Email}", userEmail);
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        private static string DecodeEmail(string base64Email)
+        {
+            try
+            {
+                var bytes = Convert.FromBase64String(base64Email);
+                return System.Text.Encoding.UTF8.GetString(bytes);
+            }
+            catch
+            {
+                return base64Email; // Return as-is if not valid base64
+            }
+        }
+
+        #endregion
     }
 
     #region Request Models
@@ -1274,6 +1594,51 @@ namespace BitRaserApiProject.Controllers
         /// <example>Manager</example>
         [System.ComponentModel.DataAnnotations.Required]
         public string RoleName { get; set; } = null!;
+    }
+
+    /// <summary>
+    /// Transfer access request - transfers subusers to another user
+    /// </summary>
+    public class TransferAccessRequest
+    {
+        /// <summary>Email of the user to transfer access to</summary>
+        [System.ComponentModel.DataAnnotations.Required]
+        public string TargetUserEmail { get; set; } = null!;
+        
+        /// <summary>Optional reason for transfer</summary>
+        public string? Reason { get; set; }
+    }
+
+    /// <summary>
+    /// Transfer data request - transfers machines and reports to another user
+    /// </summary>
+    public class TransferDataRequest
+    {
+        /// <summary>Email of the user to transfer data to</summary>
+        [System.ComponentModel.DataAnnotations.Required]
+        public string TargetUserEmail { get; set; } = null!;
+        
+        /// <summary>Whether to transfer machines</summary>
+        public bool TransferMachines { get; set; } = true;
+        
+        /// <summary>Whether to transfer reports</summary>
+        public bool TransferReports { get; set; } = true;
+        
+        /// <summary>Optional reason for transfer</summary>
+        public string? Reason { get; set; }
+    }
+
+    /// <summary>
+    /// Update user status request
+    /// </summary>
+    public class UpdateStatusRequest
+    {
+        /// <summary>New status: active, inactive, suspended</summary>
+        [System.ComponentModel.DataAnnotations.Required]
+        public string Status { get; set; } = null!;
+        
+        /// <summary>Optional reason for status change</summary>
+        public string? Reason { get; set; }
     }
 
     #endregion
