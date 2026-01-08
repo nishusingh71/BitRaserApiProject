@@ -72,6 +72,9 @@ namespace BitRaserApiProject
         // ✅ Email Sent Tracking (Open tracking, delivery status)
         public DbSet<EmailSentLog> EmailSentLogs { get; set; }
 
+        // ✅ Departments (Organizational structure)
+        public DbSet<Controllers.Department> Departments { get; set; }
+
         public static string HashLicenseKey(string licenseKey)
         {
             using var sha256 = SHA256.Create();
