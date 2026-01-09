@@ -58,6 +58,74 @@ namespace BitRaserApiProject.Controllers
         #region Public Endpoints (Client-facing)
 
         /// <summary>
+        /// Get license summary statistics
+        /// GET /api/License/summary
+        /// Returns: total, active, expired, expiringSoon (within 30 days)
+        /// </summary>
+        [HttpGet("summary")]
+        [Authorize]
+        public async Task<IActionResult> GetLicenseSummary()
+        {
+            try
+            {
+                await using var context = await _contextFactory.CreateDbContextAsync();
+
+                var total = await context.LicenseActivations.CountAsync();
+                var active = await context.LicenseActivations.CountAsync(l => l.Status == "ACTIVE");
+                var expired = await context.LicenseActivations.CountAsync(l => l.Status == "EXPIRED");
+                var revoked = await context.LicenseActivations.CountAsync(l => l.Status == "REVOKED");
+                
+                // For expiring soon, we need to calculate in memory since ExpiryDate is [NotMapped]
+                var thirtyDaysFromNow = DateTime.UtcNow.AddDays(30);
+                var expiringSoon = await context.LicenseActivations
+                    .Where(l => l.Status == "ACTIVE")
+                    .CountAsync(l => l.CreatedAt.AddDays(l.ExpiryDays) <= thirtyDaysFromNow);
+
+                // Also get machine-based license stats
+                var totalMachines = await context.Machines.CountAsync();
+                var activatedMachines = await context.Machines.CountAsync(m => m.license_activated);
+                var inactiveMachines = totalMachines - activatedMachines;
+
+                _logger.LogInformation("📊 License summary: Total={Total}, Active={Active}, Expired={Expired}", 
+                    total, active, expired);
+
+                return Ok(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        // License Activations stats
+                        licenseActivations = new
+                        {
+                            total,
+                            active,
+                            expired,
+                            revoked,
+                            expiringSoon,
+                            available = total - active - expired - revoked
+                        },
+                        // Machine-based license stats
+                        machines = new
+                        {
+                            total = totalMachines,
+                            activated = activatedMachines,
+                            inactive = inactiveMachines,
+                            utilizationRate = totalMachines > 0 
+                                ? Math.Round((double)activatedMachines / totalMachines * 100, 2) 
+                                : 0
+                        },
+                        generatedAt = DateTime.UtcNow
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error getting license summary");
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
         /// Activate a license with hardware ID binding
         /// POST /api/License/activate
         /// </summary>

@@ -522,5 +522,154 @@ SettingKey = key,
      }
 
         #endregion
+
+        #region Billing Endpoints
+
+        /// <summary>
+        /// GET /api/SystemSettings/billing - Get billing information and subscription details
+        /// </summary>
+        [HttpGet("billing")]
+        public async Task<IActionResult> GetBillingSettings()
+        {
+            try
+            {
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    return Unauthorized(new { success = false, message = "User not authenticated" });
+                }
+
+                var isSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+
+                // Check permissions - only admins can view billing
+                if (!await _authService.HasPermissionAsync(userEmail, "SYSTEM_ADMIN", isSubuser) &&
+                    !await _authService.HasPermissionAsync(userEmail, "BILLING_VIEW", isSubuser))
+                {
+                    return StatusCode(403, new { success = false, message = "Insufficient permissions to view billing" });
+                }
+
+                // Get license/subscription info
+                var licenseSettings = await GetLicenseSettings();
+                
+                // Get usage counts
+                var totalUsers = await _context.Users.CountAsync();
+                var totalMachines = await _context.Machines.CountAsync();
+                var activeLicenses = await _context.Machines.CountAsync(m => m.license_activated);
+                var totalReports = await _context.AuditReports.CountAsync();
+
+                // Get recent orders for payment history
+                var recentOrders = await _context.Orders
+                    .OrderByDescending(o => o.CreatedAt)
+                    .Take(5)
+                    .Select(o => new
+                    {
+                        orderId = o.OrderId,
+                        amountCents = o.AmountCents,
+                        currency = o.Currency,
+                        status = o.Status,
+                        createdAt = o.CreatedAt
+                    })
+                    .ToListAsync();
+
+                return Ok(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        // Subscription Details
+                        subscription = new
+                        {
+                            plan = licenseSettings.LicenseType ?? "Enterprise",
+                            status = "active",
+                            renewalDate = licenseSettings.LicenseExpiryDate,
+                            autoRenew = licenseSettings.AutoRenew,
+                            daysUntilRenewal = licenseSettings.LicenseExpiryDate.HasValue
+                                ? (int)(licenseSettings.LicenseExpiryDate.Value - DateTime.UtcNow).TotalDays
+                                : 0
+                        },
+                        // Usage Summary
+                        usage = new
+                        {
+                            users = new { current = totalUsers, limit = 1000 },
+                            machines = new { current = totalMachines, limit = 5000 },
+                            licenses = new { used = activeLicenses, total = licenseSettings.TotalLicenses },
+                            reports = new { generated = totalReports, limit = 10000 },
+                            storageUsedGb = 0,
+                            storageLimit = 100
+                        },
+                        // Billing Contact
+                        billingContact = new
+                        {
+                            email = await GetSettingValue("Billing", "ContactEmail", userEmail),
+                            companyName = await GetSettingValue("Billing", "CompanyName", ""),
+                            address = await GetSettingValue("Billing", "Address", "")
+                        },
+                        // Payment History
+                        recentPayments = recentOrders,
+                        generatedAt = DateTime.UtcNow
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error getting billing settings");
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// POST /api/SystemSettings/billing/renew - Request subscription renewal
+        /// </summary>
+        [HttpPost("billing/renew")]
+        public async Task<IActionResult> RequestRenewal([FromBody] RenewalRequest? request)
+        {
+            try
+            {
+                var userEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(userEmail))
+                {
+                    return Unauthorized(new { success = false, message = "User not authenticated" });
+                }
+
+                var isSubuser = await _userDataService.SubuserExistsAsync(userEmail);
+
+                if (!await _authService.HasPermissionAsync(userEmail, "SYSTEM_ADMIN", isSubuser))
+                {
+                    return StatusCode(403, new { success = false, message = "Insufficient permissions" });
+                }
+
+                // Log renewal request
+                _logger.LogInformation("🔄 Subscription renewal requested by {Email}, Plan: {Plan}", 
+                    userEmail, request?.PlanType ?? "Current");
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Renewal request submitted. You will be redirected to payment.",
+                    data = new
+                    {
+                        requestId = Guid.NewGuid().ToString("N"),
+                        planType = request?.PlanType ?? "Enterprise",
+                        requestedAt = DateTime.UtcNow
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error requesting renewal");
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        #endregion
+    }
+
+    /// <summary>
+    /// Renewal request DTO for billing/renew endpoint
+    /// </summary>
+    public class RenewalRequest
+    {
+        public string? PlanType { get; set; }
+        public int? Months { get; set; } = 12;
     }
 }
