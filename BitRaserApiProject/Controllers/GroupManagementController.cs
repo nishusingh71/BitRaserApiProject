@@ -817,5 +817,545 @@ namespace BitRaserApiProject.Controllers
         }
 
         #endregion
+
+        #region Group Admin Resource Management
+
+        /// <summary>
+        /// GET /api/GroupManagement/{groupId}/resources
+        /// Get all group members' resources overview (licenses, machines, reports)
+        /// Only accessible by Group Admin
+        /// </summary>
+        [HttpGet("{groupId}/resources")]
+        public async Task<IActionResult> GetGroupResources(int groupId)
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (string.IsNullOrEmpty(currentUserEmail))
+                    return Unauthorized(new { success = false, message = "User not authenticated" });
+
+                // Check if user is group admin
+                if (!await IsGroupAdminAsync(groupId, currentUserEmail))
+                    return StatusCode(403, new { success = false, message = "Only Group Admin can view group resources" });
+
+                var group = await _context.Groups
+                    .Include(g => g.GroupMembers)
+                    .FirstOrDefaultAsync(g => g.group_id == groupId);
+
+                if (group == null)
+                    return NotFound(new { success = false, message = "Group not found" });
+
+                // Get all member emails
+                var memberEmails = group.GroupMembers?.Select(m => m.UserEmail).Where(e => e != null).ToList() ?? new List<string?>();
+
+                // Get resource counts for each member
+                var memberResources = new List<object>();
+                foreach (var email in memberEmails.Where(e => !string.IsNullOrEmpty(e)))
+                {
+                    var licenseCount = await _context.Machines
+                        .CountAsync(m => m.user_email == email && m.license_activated);
+                    var machineCount = await _context.Machines
+                        .CountAsync(m => m.user_email == email);
+                    var reportCount = await _context.AuditReports
+                        .CountAsync(r => r.client_email == email);
+                    var subuserCount = await _context.Set<subuser>()
+                        .CountAsync(s => s.user_email == email);
+
+                    var member = group.GroupMembers?.FirstOrDefault(m => m.UserEmail == email);
+                    memberResources.Add(new
+                    {
+                        email,
+                        name = member?.UserName ?? email,
+                        role = member?.Role ?? "member",
+                        department = member?.Department,
+                        licenses = licenseCount,
+                        machines = machineCount,
+                        reports = reportCount,
+                        subusers = subuserCount
+                    });
+                }
+
+                var totalLicenses = group.license_allocation;
+                var usedLicenses = memberResources.Sum(m => (int)((dynamic)m).licenses);
+
+                return Ok(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        groupId = group.group_id,
+                        groupName = group.name,
+                        totalLicenses,
+                        usedLicenses,
+                        availableLicenses = totalLicenses - usedLicenses,
+                        memberCount = memberEmails.Count,
+                        members = memberResources
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error getting group resources for group {GroupId}", groupId);
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// GET /api/GroupManagement/{groupId}/members/{email}/resources
+        /// Get specific member's detailed resources
+        /// </summary>
+        [HttpGet("{groupId}/members/{email}/resources")]
+        public async Task<IActionResult> GetMemberResources(int groupId, string email)
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!await IsGroupAdminAsync(groupId, currentUserEmail!))
+                    return StatusCode(403, new { success = false, message = "Only Group Admin can view member resources" });
+
+                var decodedEmail = DecodeEmail(email);
+
+                // Get member's machines
+                var machines = await _context.Machines
+                    .Where(m => m.user_email == decodedEmail)
+                    .Select(m => new
+                    {
+                        id = m.fingerprint_hash,
+                        macAddress = m.mac_address,
+                        hostname = m.os_version,
+                        licenseActivated = m.license_activated,
+                        createdAt = m.created_at
+                    })
+                    .ToListAsync();
+
+                // Get member's reports count
+                var reportCount = await _context.AuditReports
+                    .CountAsync(r => r.client_email == decodedEmail);
+
+                // Get member's subusers
+                var subusers = await _context.Set<subuser>()
+                    .Where(s => s.user_email == decodedEmail)
+                    .Select(s => new
+                    {
+                        email = s.subuser_email,
+                        name = s.Name,
+                        role = s.Role,
+                        status = s.status
+                    })
+                    .ToListAsync();
+
+                return Ok(new
+                {
+                    success = true,
+                    data = new
+                    {
+                        email = decodedEmail,
+                        machines,
+                        machineCount = machines.Count,
+                        activeLicenses = machines.Count(m => m.licenseActivated),
+                        reportCount,
+                        subusers,
+                        subuserCount = subusers.Count
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error getting member resources for {Email}", email);
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// POST /api/GroupManagement/{groupId}/transfer-license
+        /// Transfer licenses from one group member to another
+        /// </summary>
+        [HttpPost("{groupId}/transfer-license")]
+        public async Task<IActionResult> TransferLicense(int groupId, [FromBody] TransferLicenseRequestDto request)
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!await IsGroupAdminAsync(groupId, currentUserEmail!))
+                    return StatusCode(403, new { success = false, message = "Only Group Admin can transfer licenses" });
+
+                // Verify both users are in the group
+                var group = await _context.Groups
+                    .Include(g => g.GroupMembers)
+                    .FirstOrDefaultAsync(g => g.group_id == groupId);
+
+                if (group == null)
+                    return NotFound(new { success = false, message = "Group not found" });
+
+                var memberEmails = group.GroupMembers?.Select(m => m.UserEmail?.ToLower()).ToList() ?? new List<string?>();
+                if (!memberEmails.Contains(request.FromEmail?.ToLower()) || !memberEmails.Contains(request.ToEmail?.ToLower()))
+                    return BadRequest(new { success = false, message = "Both users must be group members" });
+
+                // Get machines to transfer
+                var machinesToTransfer = await _context.Machines
+                    .Where(m => m.user_email == request.FromEmail && m.license_activated)
+                    .Take(request.LicenseCount)
+                    .ToListAsync();
+
+                if (machinesToTransfer.Count < request.LicenseCount)
+                    return BadRequest(new { success = false, message = $"Source user only has {machinesToTransfer.Count} active licenses" });
+
+                // Transfer ownership
+                foreach (var machine in machinesToTransfer)
+                {
+                    machine.user_email = request.ToEmail;
+                    machine.updated_at = DateTime.UtcNow;
+                }
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Transferred {Count} licenses from {From} to {To} in group {GroupId}",
+                    request.LicenseCount, request.FromEmail, request.ToEmail, groupId);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = $"Transferred {request.LicenseCount} licenses successfully",
+                    data = new
+                    {
+                        transferred = machinesToTransfer.Count,
+                        fromEmail = request.FromEmail,
+                        toEmail = request.ToEmail
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error transferring licenses in group {GroupId}", groupId);
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// POST /api/GroupManagement/{groupId}/distribute-resources
+        /// Distribute a leaving user's resources to other group members
+        /// </summary>
+        [HttpPost("{groupId}/distribute-resources")]
+        public async Task<IActionResult> DistributeResources(int groupId, [FromBody] DistributeResourcesRequestDto request)
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!await IsGroupAdminAsync(groupId, currentUserEmail!))
+                    return StatusCode(403, new { success = false, message = "Only Group Admin can distribute resources" });
+
+                var group = await _context.Groups
+                    .Include(g => g.GroupMembers)
+                    .FirstOrDefaultAsync(g => g.group_id == groupId);
+
+                if (group == null)
+                    return NotFound(new { success = false, message = "Group not found" });
+
+                var results = new List<object>();
+
+                foreach (var distribution in request.Distribution)
+                {
+                    // Transfer machines
+                    if (distribution.MachineIds?.Any() == true)
+                    {
+                        var machines = await _context.Machines
+                            .Where(m => distribution.MachineIds.Contains(m.fingerprint_hash) && 
+                                        m.user_email == request.LeavingUserEmail)
+                            .ToListAsync();
+
+                        foreach (var machine in machines)
+                        {
+                            machine.user_email = distribution.ToEmail;
+                            machine.updated_at = DateTime.UtcNow;
+                        }
+
+                        results.Add(new { toEmail = distribution.ToEmail, machines = machines.Count });
+                    }
+
+                    // Transfer reports
+                    if (distribution.TransferReports)
+                    {
+                        var reports = await _context.AuditReports
+                            .Where(r => r.client_email == request.LeavingUserEmail)
+                            .ToListAsync();
+
+                        foreach (var report in reports)
+                        {
+                            report.client_email = distribution.ToEmail;
+                        }
+                    }
+                }
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Distributed resources from {LeavingUser} in group {GroupId}",
+                    request.LeavingUserEmail, groupId);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Resources distributed successfully",
+                    data = new
+                    {
+                        leavingUser = request.LeavingUserEmail,
+                        distributions = results
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error distributing resources in group {GroupId}", groupId);
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// POST /api/GroupManagement/{groupId}/members/{email}/permissions
+        /// Update member's permissions (toggle-based)
+        /// </summary>
+        [HttpPost("{groupId}/members/{email}/permissions")]
+        public async Task<IActionResult> UpdateMemberPermissions(int groupId, string email, [FromBody] UpdateMemberPermissionsRequestDto request)
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!await IsGroupAdminAsync(groupId, currentUserEmail!))
+                    return StatusCode(403, new { success = false, message = "Only Group Admin can update permissions" });
+
+                var decodedEmail = DecodeEmail(email);
+
+                // Check if member is a subuser
+                var subuser = await _context.Set<subuser>()
+                    .FirstOrDefaultAsync(s => s.subuser_email == decodedEmail);
+
+                if (subuser == null)
+                {
+                    // Check if main user exists
+                    var user = await _context.Users.FirstOrDefaultAsync(u => u.user_email == decodedEmail);
+                    if (user == null)
+                        return NotFound(new { success = false, message = "User not found" });
+                }
+
+                // Get or create role for this user (via subuser's ID)
+                SubuserRole? existingRole = null;
+                if (subuser != null)
+                {
+                    existingRole = await _context.SubuserRoles
+                        .FirstOrDefaultAsync(sr => sr.SubuserId == subuser.subuser_id);
+                }
+
+                foreach (var perm in request.Permissions)
+                {
+                    var permission = await _context.Permissions
+                        .FirstOrDefaultAsync(p => p.PermissionName == perm.Key);
+
+                    if (permission == null) continue;
+
+                    if (perm.Value)
+                    {
+                        // Grant permission - find or create role permission
+                        if (existingRole != null)
+                        {
+                            var rolePermExists = await _context.RolePermissions
+                                .AnyAsync(rp => rp.RoleId == existingRole.RoleId && rp.PermissionId == permission.PermissionId);
+
+                            if (!rolePermExists)
+                            {
+                                _context.RolePermissions.Add(new RolePermission
+                                {
+                                    RoleId = existingRole.RoleId,
+                                    PermissionId = permission.PermissionId
+                                });
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Revoke permission
+                        if (existingRole != null)
+                        {
+                            var rolePermToRemove = await _context.RolePermissions
+                                .FirstOrDefaultAsync(rp => rp.RoleId == existingRole.RoleId && rp.PermissionId == permission.PermissionId);
+
+                            if (rolePermToRemove != null)
+                            {
+                                _context.RolePermissions.Remove(rolePermToRemove);
+                            }
+                        }
+                    }
+                }
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Updated permissions for {Email} in group {GroupId}", decodedEmail, groupId);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Permissions updated successfully",
+                    data = new
+                    {
+                        email = decodedEmail,
+                        updatedPermissions = request.Permissions
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error updating permissions for {Email}", email);
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// DELETE /api/GroupManagement/{groupId}/members/{email}/remove-with-transfer
+        /// Remove member from group and transfer all their resources to another member
+        /// </summary>
+        [HttpDelete("{groupId}/members/{email}/remove-with-transfer")]
+        public async Task<IActionResult> RemoveMemberWithTransfer(int groupId, string email, [FromQuery] string transferTo)
+        {
+            try
+            {
+                var currentUserEmail = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+                if (!await IsGroupAdminAsync(groupId, currentUserEmail!))
+                    return StatusCode(403, new { success = false, message = "Only Group Admin can remove members" });
+
+                var decodedEmail = DecodeEmail(email);
+                var decodedTransferTo = DecodeEmail(transferTo);
+
+                var group = await _context.Groups
+                    .Include(g => g.GroupMembers)
+                    .FirstOrDefaultAsync(g => g.group_id == groupId);
+
+                if (group == null)
+                    return NotFound(new { success = false, message = "Group not found" });
+
+                // Verify target user is in group
+                var targetMember = group.GroupMembers?.FirstOrDefault(m => m.UserEmail?.ToLower() == decodedTransferTo.ToLower());
+                if (targetMember == null)
+                    return BadRequest(new { success = false, message = "Transfer target must be a group member" });
+
+                // Transfer all machines
+                var machines = await _context.Machines
+                    .Where(m => m.user_email == decodedEmail)
+                    .ToListAsync();
+
+                foreach (var machine in machines)
+                {
+                    machine.user_email = decodedTransferTo;
+                    machine.updated_at = DateTime.UtcNow;
+                }
+
+                // Transfer all reports
+                var reports = await _context.AuditReports
+                    .Where(r => r.client_email == decodedEmail)
+                    .ToListAsync();
+
+                foreach (var report in reports)
+                {
+                    report.client_email = decodedTransferTo;
+                }
+
+                // Remove member from group
+                var memberToRemove = group.GroupMembers?.FirstOrDefault(m => m.UserEmail?.ToLower() == decodedEmail.ToLower());
+                if (memberToRemove != null)
+                {
+                    _context.GroupMembers.Remove(memberToRemove);
+                }
+
+                await _context.SaveChangesAsync();
+
+                _logger.LogInformation("✅ Removed {Email} from group {GroupId}, transferred {Machines} machines and {Reports} reports to {TransferTo}",
+                    decodedEmail, groupId, machines.Count, reports.Count, decodedTransferTo);
+
+                return Ok(new
+                {
+                    success = true,
+                    message = "Member removed and resources transferred",
+                    data = new
+                    {
+                        removedMember = decodedEmail,
+                        transferredTo = decodedTransferTo,
+                        machinesTransferred = machines.Count,
+                        reportsTransferred = reports.Count
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "❌ Error removing member {Email} from group {GroupId}", email, groupId);
+                return StatusCode(500, new { success = false, message = ex.Message });
+            }
+        }
+
+        /// <summary>
+        /// Check if current user is admin of the specified group
+        /// </summary>
+        private async Task<bool> IsGroupAdminAsync(int groupId, string userEmail)
+        {
+            // SuperAdmin can do anything
+            var isSubuser = await _context.Set<subuser>().AnyAsync(s => s.subuser_email == userEmail);
+            if (await _authService.HasPermissionAsync(userEmail, "MANAGE_ALL_GROUPS", isSubuser))
+                return true;
+
+            // Check if user is group admin
+            var group = await _context.Groups
+                .Include(g => g.GroupMembers)
+                .FirstOrDefaultAsync(g => g.group_id == groupId);
+
+            if (group == null) return false;
+
+            // Check admin_user_id
+            if (group.admin_user_id == userEmail)
+                return true;
+
+            // Check GroupMember role
+            var member = group.GroupMembers?.FirstOrDefault(m => m.UserEmail?.ToLower() == userEmail.ToLower());
+            return member?.Role?.ToLower() == "admin";
+        }
+
+        private static string DecodeEmail(string base64Email)
+        {
+            try
+            {
+                var bytes = Convert.FromBase64String(base64Email);
+                return System.Text.Encoding.UTF8.GetString(bytes);
+            }
+            catch
+            {
+                return base64Email;
+            }
+        }
+
+        #endregion
     }
+
+    #region Group Admin DTOs
+
+    public class TransferLicenseRequestDto
+    {
+        public string FromEmail { get; set; } = string.Empty;
+        public string ToEmail { get; set; } = string.Empty;
+        public int LicenseCount { get; set; }
+    }
+
+    public class DistributeResourcesRequestDto
+    {
+        public string LeavingUserEmail { get; set; } = string.Empty;
+        public List<ResourceDistributionDto> Distribution { get; set; } = new();
+    }
+
+    public class ResourceDistributionDto
+    {
+        public string ToEmail { get; set; } = string.Empty;
+        public List<string>? MachineIds { get; set; }
+        public bool TransferReports { get; set; } = false;
+    }
+
+    public class UpdateMemberPermissionsRequestDto
+    {
+        public Dictionary<string, bool> Permissions { get; set; } = new();
+    }
+
+    #endregion
 }
